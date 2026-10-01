@@ -20,6 +20,7 @@ Uso:
   autopilot.py decisions                  decisões pendentes
   autopilot.py answer NOME ID OPÇÃO       responde uma decisão pelo terminal
   autopilot.py test-notify                manda uma notificação de teste
+  autopilot.py --config claude.toml run   a instância do Claude (ver README)
 """
 
 import argparse
@@ -39,6 +40,8 @@ from pathlib import Path
 
 BASE = Path(__file__).resolve().parent
 CONFIG = BASE / "projects.toml"
+# O tópico do ntfy é segredo: fica aqui, fora do git, e vale para as duas instâncias.
+SECRETS = BASE / "secrets.toml"
 STATE = BASE / "state.json"
 LOG = BASE / "autopilot.log"
 RUNS = BASE / "runs"
@@ -57,9 +60,28 @@ def log(msg):
         f.write(line + "\n")
 
 
+def configure(config_path=None):
+    """Aponta CONFIG, STATE, LOG e RUNS para a instância do arquivo de configuração.
+
+    Sem [instance] name valem os nomes de sempre; com name = "claude", state-claude.json,
+    autopilot-claude.log e runs-claude/.
+    """
+    global CONFIG, STATE, LOG, RUNS
+    CONFIG = Path(config_path).expanduser().resolve() if config_path else BASE / "projects.toml"
+    name = (load_config().get("instance") or {}).get("name")
+    suffix = f"-{name}" if name else ""
+    STATE = BASE / f"state{suffix}.json"
+    LOG = BASE / f"autopilot{suffix}.log"
+    RUNS = BASE / f"runs{suffix}"
+
+
 def load_config():
     with CONFIG.open("rb") as f:
-        return tomllib.load(f)
+        cfg = tomllib.load(f)
+    if SECRETS.exists():
+        with SECRETS.open("rb") as f:
+            cfg.setdefault("notify", {}).update(tomllib.load(f).get("notify") or {})
+    return cfg
 
 
 def load_state(cfg):
@@ -818,6 +840,7 @@ def cmd_reset(args):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument("--config", help="configuração da instância (padrão: projects.toml)")
     sub = parser.add_subparsers(dest="cmd", required=True)
     sub.add_parser("run").set_defaults(func=cmd_run)
     sub.add_parser("status").set_defaults(func=cmd_status)
@@ -832,6 +855,7 @@ def main():
     answer.set_defaults(func=cmd_answer)
     sub.add_parser("test-notify").set_defaults(func=cmd_test_notify)
     args = parser.parse_args()
+    configure(args.config)
     try:
         args.func(args)
     except Exception:
