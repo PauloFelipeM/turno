@@ -38,6 +38,8 @@ import urllib.parse
 import urllib.request
 from pathlib import Path
 
+import coord
+
 BASE = Path(__file__).resolve().parent
 CONFIG = BASE / "projects.toml"
 # O tópico do ntfy é segredo: fica aqui, fora do git, e vale para as duas instâncias.
@@ -345,14 +347,19 @@ def typed_reply(cfg, projects, text):
     owner_answer(cfg, project, path, d, option)
 
 
-def poll_replies(cfg, state):
-    """Lê as respostas: os botões (tópico -reply, formato projeto/decisão/opção) e as digitadas no app."""
+def poll_replies(cfg, notify):
+    """Lê as respostas: os botões (tópico -reply, formato projeto/decisão/opção) e as digitadas no app.
+
+    `notify` é o estado compartilhado do ntfy (since, since_typed), o mesmo para as duas instâncias.
+    """
     if not (cfg.get("notify") or {}).get("topic"):
         return
-    meta = state["_notify"]
+    now = str(int(time.time()))
+    notify.setdefault("since", now)
+    notify.setdefault("since_typed", now)
     projects = {p["name"]: p for p in cfg["project"]}
-    for msg in fetch_messages(cfg, reply_topic(cfg), meta["since"], "respostas") or []:
-        meta["since"] = msg["id"]
+    for msg in fetch_messages(cfg, reply_topic(cfg), notify["since"], "respostas") or []:
+        notify["since"] = msg["id"]
         m = re.fullmatch(r"([\w-]+)/([\w-]+)/([\w-]+)", (msg.get("message") or "").strip())
         if not m or m.group(1) not in projects:
             continue
@@ -363,21 +370,20 @@ def poll_replies(cfg, state):
         if not d or "answer" in d or not valid_decision(d, path) or m.group(3) not in {o["id"] for o in d["options"]}:
             continue
         owner_answer(cfg, project, path, d, m.group(3))
-    for msg in fetch_messages(cfg, cfg["notify"]["topic"], meta["since_typed"], "respostas digitadas") or []:
-        meta["since_typed"] = msg["id"]
+    for msg in fetch_messages(cfg, cfg["notify"]["topic"], notify["since_typed"], "respostas digitadas") or []:
+        notify["since_typed"] = msg["id"]
         # Tudo o que o agendador publica tem título; mensagem sem título é alguém digitando no app.
         if msg.get("title"):
             continue
         typed_reply(cfg, projects, (msg.get("message") or "").strip())
 
 
-def process_decisions(cfg, state):
-    """Notifica decisões novas, lê respostas, aplica o padrão vencido o prazo e libera projetos."""
+def dispatch_decisions(cfg, notify):
+    """Lê respostas, envia as decisões novas e aplica o padrão vencido o prazo."""
     hours = (cfg.get("notify") or {}).get("decision_timeout_hours", 4)
-    poll_replies(cfg, state)
+    poll_replies(cfg, notify)
     now = time.time()
     for p in cfg["project"]:
-        pending = 0
         for path in decision_files(p):
             d = read_json(path)
             if d is None or "answer" in d:
@@ -387,8 +393,7 @@ def process_decisions(cfg, state):
                 d.update(answer=None, answered_by="invalid-format", answered_at=time.strftime("%FT%T%z"))
                 write_json(path, d)
                 log(f"{p['name']}: decisão com formato inválido em {path}")
-                continue
-            if not d.get("notified_at"):
+            elif not d.get("notified_at"):
                 d.update(notified_at=now, deadline=now + hours * 3600)
                 write_json(path, d)
                 lines = [f"{o['id'].upper()}) {o['label']}" for o in d["options"]]
@@ -400,14 +405,27 @@ def process_decisions(cfg, state):
                                      f"Sem resposta em {hours} h: {option_label(d, d['default'])}"])
                 ntfy(cfg, f"{p['name']}: decisão", message.strip(), priority=4, tags=["question"], actions=actions)
                 log(f"{p['name']}: decisão {d['id']} enviada; prazo {hours} h")
-                pending += 1
             elif now > d.get("deadline", 0):
                 label = answer_decision(p, path, d, d["default"], "timeout")
                 ntfy(cfg, f"{p['name']}: sem resposta", f"{d['question']}\n→ {label} (padrão)", tags=["hourglass"])
-            else:
-                pending += 1
+
+
+def process_decisions(cfg, state):
+    """Fala com o ntfy (uma instância por vez) e libera os projetos cujas decisões foram resolvidas."""
+    lock = coord.try_lock("decisions")
+    if lock:
+        try:
+            # Na primeira vez, a posição de leitura vem do state.json desta instância.
+            legacy = {k: state["_notify"][k] for k in ("since", "since_typed") if k in state["_notify"]}
+            notify = coord.load_notify(legacy)
+            dispatch_decisions(cfg, notify)
+            coord.save_notify(notify)
+        finally:
+            coord.unlock(lock)
+    for p in cfg["project"]:
         s = state[p["name"]]
-        if s["status"] == "waiting" and pending == 0:
+        pending = any(d and "answer" not in d for d in map(read_json, decision_files(p)))
+        if s["status"] == "waiting" and not pending:
             s["status"] = "active"
             log(f"{p['name']}: decisões resolvidas; projeto liberado")
 
