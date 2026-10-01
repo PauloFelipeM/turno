@@ -1,0 +1,45 @@
+# Agendador do autopilot do Codex. A ordem dos [[project]] é a prioridade.
+#
+# weekly_cap: até quantos % da janela semanal de uso o projeto ainda pode COMEÇAR uma unidade
+# nova. Projetos de prioridade menor param antes e deixam a cota restante para os de cima.
+# docker_group: projetos no mesmo grupo nunca ficam com o stack no ar ao mesmo tempo
+# (my-app e side-project disputam as portas 8000, 3306 e 5173).
+
+[defaults]
+orchestrator_model = "gpt-6-sol"
+orchestrator_effort = "medium"
+max_subagents = 2
+# Só começa uma unidade se a janela tiver folga de safety_factor x o custo médio aprendido.
+safety_factor = 1.5
+# Teto da janela de 5 h, em %, para qualquer projeto.
+primary_cap = 100
+# Custo inicial estimado por unidade (pontos percentuais), até o agendador aprender o real.
+initial_cost_primary = 8.0
+initial_cost_secondary = 1.5
+# Projeto que terminou em "blocked" só é tentado de novo depois deste intervalo.
+blocked_cooldown_hours = 6
+
+[notify]
+# Push gratuito via ntfy.sh. Assine este tópico no app ntfy do celular. Quem souber o nome lê e
+# publica nele, por isso ele é aleatório: não compartilhe. Respostas chegam em <topic>-reply.
+server = "https://ntfy.sh"
+topic = "troque-por-um-nome-aleatorio"
+# Quanto tempo um projeto espera sua resposta antes de aplicar a opção padrão.
+decision_timeout_hours = 4
+
+[[project]]
+name = "my-app"
+path = "/home/me/projects/my-app"
+weekly_cap = 95
+docker_group = "web"
+
+[[project]]
+name = "my-api"
+path = "/home/me/projects/my-api"
+weekly_cap = 85
+
+[[project]]
+name = "side-project"
+path = "/home/me/projects/side-project"
+weekly_cap = 60
+docker_group = "web"

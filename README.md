@@ -6,6 +6,13 @@ decisões de produto que importam.
 
 ## Iniciar
 
+Na primeira vez, crie a configuração a partir do exemplo e troque o `topic` do ntfy por um nome
+aleatório só seu (o `projects.toml` fica fora do git porque guarda esse segredo):
+
+```bash
+cp ~/.turno/projects.example.toml ~/.turno/projects.toml
+```
+
 1. Confira o estado:
    ```bash
    python3 ~/.turno/autopilot.py status
