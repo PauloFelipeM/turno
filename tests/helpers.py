@@ -31,3 +31,43 @@ def git_repo(path):
     run("add", ".")
     run("-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", "init")
     return path
+
+
+class FakeEngine:
+    """Motor de teste: roda `cmd` e não lê cota de verdade."""
+
+    label = "Fake"
+    needs_limits = False
+
+    def __init__(self, cmd, name="claude", limits=None):
+        self.cmd, self.name, self._limits = cmd, name, limits if limits is not None else {}
+        self.limits_calls = 0
+
+    def describe(self):
+        return "fake"
+
+    def limits(self, state, max_age=1800):
+        self.limits_calls += 1
+        return self._limits
+
+    def resumable(self, s):
+        return bool(s["session"])
+
+    def begin(self, s, resume):
+        if not resume:
+            s["session"] = "fake-session"
+
+    def command(self, state, project, s, resume, stem):
+        return list(self.cmd), None
+
+    def after_run(self, state, s, out, resume):
+        pass
+
+    def classify(self, out, err, code):
+        return ("ok" if code == 0 else "error"), None, False
+
+    def unit_cost(self, state, s):
+        return None
+
+    def close_unit(self, s):
+        pass

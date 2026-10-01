@@ -28,7 +28,6 @@ import datetime
 import json
 import os
 import re
-import shutil
 import signal
 import subprocess
 import sys
@@ -39,6 +38,7 @@ import urllib.request
 from pathlib import Path
 
 import coord
+import engines
 
 BASE = Path(__file__).resolve().parent
 CONFIG = BASE / "projects.toml"
@@ -48,7 +48,6 @@ STATE = BASE / "state.json"
 LOG = BASE / "autopilot.log"
 RUNS = BASE / "runs"
 PROMPTS = BASE / "prompts"
-SESSIONS = Path.home() / ".codex" / "sessions"
 UNIT_FILE = Path(".superpowers") / "autopilot" / "last-unit.json"
 DECISIONS = Path(".superpowers") / "autopilot" / "decisions"
 KEEP_RUNS = 80
@@ -60,6 +59,10 @@ def log(msg):
     print(line, flush=True)
     with LOG.open("a") as f:
         f.write(line + "\n")
+
+
+engines.log = log
+from engines import window  # noqa: E402  (usada na escolha do projeto e no status)
 
 
 def configure(config_path=None):
@@ -110,100 +113,6 @@ def save_state(state):
     tmp = STATE.with_suffix(".tmp")
     tmp.write_text(json.dumps(state, indent=2))
     tmp.replace(STATE)
-
-
-def find_codex():
-    if os.environ.get("CODEX_BIN"):
-        return os.environ["CODEX_BIN"]
-    found = shutil.which("codex")
-    if found:
-        return found
-    # A extensão do VS Code traz o binário; usa a versão mais nova instalada.
-    exts = Path.home() / ".vscode-server" / "extensions"
-    bins = sorted(exts.glob("openai.chatgpt-*/bin/linux-x86_64/codex"),
-                  key=lambda p: [int(x) for x in re.findall(r"\d+", p.parts[-4])])
-    if bins:
-        return str(bins[-1])
-    sys.exit("codex não encontrado; defina CODEX_BIN")
-
-
-# --- cota -------------------------------------------------------------------------------------
-
-
-def find_rate_limits(node):
-    """Procura a chave `rate_limits` em qualquer nível de um evento do log da sessão."""
-    if isinstance(node, dict):
-        if isinstance(node.get("rate_limits"), dict):
-            return node["rate_limits"]
-        node = list(node.values())
-    if isinstance(node, list):
-        for child in node:
-            found = find_rate_limits(child)
-            if found:
-                return found
-    return None
-
-
-def has_windows(limits):
-    # O log também traz snapshots de outros limites (ex.: "premium") com as janelas vazias;
-    # tomá-los como o uso atual faria a cota parecer 0% e esconderia o horário do reset.
-    return isinstance(limits.get("primary"), dict) or isinstance(limits.get("secondary"), dict)
-
-
-def snapshots(path):
-    """Todos os `rate_limits` com janelas de um log de sessão, em ordem."""
-    out = []
-    try:
-        with open(path, errors="replace") as f:
-            for line in f:
-                if '"rate_limits"' in line:
-                    try:
-                        found = find_rate_limits(json.loads(line))
-                    except ValueError:
-                        continue
-                    if found and has_windows(found):
-                        out.append(found)
-    except OSError:
-        pass
-    return out
-
-
-def window(limits, key):
-    """(uso em %, resets_at) de uma janela; janela já resetada conta como 0%."""
-    w = (limits or {}).get(key) or {}
-    used, resets = float(w.get("used_percent") or 0), int(w.get("resets_at") or 0)
-    if resets and resets <= time.time():
-        return 0.0, 0
-    return used, resets
-
-
-def current_limits():
-    """O snapshot mais recente entre as sessões mais novas (inclui uso interativo seu)."""
-    files = sorted(SESSIONS.rglob("rollout-*.jsonl"), key=lambda p: p.stat().st_mtime, reverse=True)
-    for path in files[:10]:
-        snaps = snapshots(path)
-        if snaps:
-            return snaps[-1]
-    return {}
-
-
-def session_files(thread):
-    return list(SESSIONS.rglob(f"rollout-*{thread}*.jsonl")) if thread else []
-
-
-def unit_cost(thread):
-    """Custo da unidade em pontos percentuais, do primeiro ao último snapshot da sessão."""
-    snaps = [s for f in session_files(thread) for s in snapshots(f)]
-    if len(snaps) < 2:
-        return None
-    cost = {}
-    for key in ("primary", "secondary"):
-        a, b = (snaps[0].get(key) or {}), (snaps[-1].get(key) or {})
-        # Reset no meio da unidade invalida a medida daquela janela.
-        if a.get("resets_at") != b.get("resets_at"):
-            return None
-        cost[key] = max(0.0, float(b.get("used_percent") or 0) - float(a.get("used_percent") or 0))
-    return cost
 
 
 # --- notificações e decisões (ntfy) -----------------------------------------------------------
@@ -517,86 +426,47 @@ def prepare_docker(cfg, project):
     return "ok"
 
 
-def failure_text(out, err):
-    """Eventos de falha do JSONL mais o stderr, e se houve algum evento de falha."""
-    failures = []
-    try:
-        with open(out, errors="replace") as f:
-            for line in f:
-                try:
-                    ev = json.loads(line)
-                except ValueError:
-                    continue
-                if ev.get("type") in ("error", "turn.failed"):
-                    failures.append(json.dumps(ev, ensure_ascii=False))
-    except OSError:
-        pass
-    try:
-        stderr = Path(err).read_text(errors="replace")
-    except OSError:
-        stderr = ""
-    return "\n".join(failures) + "\n" + stderr, bool(failures)
+CUT = "cut"  # "código de saída" de uma unidade cortada no fim da janela
+CURRENT = None  # processo da unidade em andamento, para o Ctrl+C encerrar o grupo dele
 
 
-def retry_at(text):
-    """Horário do "try again at ..." da mensagem de limite, como timestamp; None se não houver."""
-    m = re.search(r"try again at (.*?\d{1,2}:\d{2}\s*[AP]M)", text, re.I)
-    if not m:
-        return None
-    when = re.sub(r"(\d)(st|nd|rd|th)\b", r"\1", m.group(1)).strip()
-    now = datetime.datetime.now()
+def stop_group(proc):
+    """SIGTERM no grupo do processo; SIGKILL se ele não sair em 30 s."""
+    if proc.poll() is not None:
+        return
     try:
-        # Só a hora ("1:33 AM"): a próxima vez que ela chegar.
-        t = datetime.datetime.strptime(when.upper(), "%I:%M %p").time()
-        at = datetime.datetime.combine(now.date(), t)
-        if at <= now:
-            at += datetime.timedelta(days=1)
-        return at.timestamp()
-    except ValueError:
+        os.killpg(proc.pid, signal.SIGTERM)
+        proc.wait(timeout=30)
+    except subprocess.TimeoutExpired:
+        os.killpg(proc.pid, signal.SIGKILL)
+        proc.wait()
+    except ProcessLookupError:
         pass
-    for fmt in ("%b %d, %Y %I:%M %p", "%B %d, %Y %I:%M %p", "%b %d %Y %I:%M %p", "%B %d %Y %I:%M %p"):
+
+
+def wait_until(proc, deadline):
+    """Espera o processo; passado `deadline` (timestamp), encerra o grupo dele e devolve CUT."""
+    while True:
+        left = None if deadline is None else deadline - time.time()
+        if left is not None and left <= 0:
+            stop_group(proc)
+            return CUT
         try:
-            return datetime.datetime.strptime(when, fmt).timestamp()
-        except ValueError:
+            return proc.wait(timeout=None if left is None else min(left, 60))
+        except subprocess.TimeoutExpired:
             continue
-    return None
 
 
-def classify(out, err, code):
-    """'usage_limit', 'error' ou 'ok' a partir do JSONL, do stderr e do exit code."""
-    text, failed = failure_text(out, err)
-    if re.search(r"usage limit|usage_limit|rate.?limit", text, re.I):
-        return "usage_limit", bool(re.search(r"usage limit|usage_limit", text, re.I))
-    return ("error" if failed or code != 0 else "ok"), False
-
-
-def thread_id(out):
-    with open(out, errors="replace") as f:
-        for line in f:
-            try:
-                ev = json.loads(line)
-            except ValueError:
-                continue
-            if ev.get("type") == "thread.started":
-                return ev.get("thread_id")
-    return None
-
-
-def run_unit(cfg, project, s):
-    d = cfg["defaults"]
-    # Procurado a cada unidade: a extensão do VS Code troca de pasta quando se atualiza.
-    codex = find_codex()
+def run_unit(cfg, engine, state, project, deadline=None):
+    global CURRENT
+    s = state[project["name"]]
     path = project["path"]
-    resume = bool(s["session"])
+    resume = engine.resumable(s)
     # replace, não format: os prompts têm exemplos de JSON com chaves.
     prompt = (PROMPTS / ("resume.md" if resume else "unit.md")).read_text().replace("{project}", project["name"])
-    flags = ["--json", "-m", d["orchestrator_model"],
-             "-c", f'model_reasoning_effort="{d["orchestrator_effort"]}"',
-             "-c", f"agents.max_concurrent_threads_per_session={d['max_subagents']}",
-             "--enable", "multi_agent",
-             # Docker, rede e instalação de dependências exigem sair do sandbox.
-             "--dangerously-bypass-approvals-and-sandbox"]
-    cmd = [codex, "exec", "resume", *flags, s["session"], "-"] if resume else [codex, "exec", *flags, "-"]
+    notes = PROMPTS / f"engine-{engine.name}.md"
+    if notes.exists():
+        prompt += "\n\n" + notes.read_text()
     unit_file = Path(path) / UNIT_FILE
     if not resume:
         unit_file.unlink(missing_ok=True)
@@ -604,30 +474,37 @@ def run_unit(cfg, project, s):
     RUNS.mkdir(exist_ok=True)
     stem = RUNS / f"{time.strftime('%Y%m%d-%H%M%S')}-{project['name']}"
     out, err = f"{stem}.jsonl", f"{stem}.err"
+    engine.begin(s, resume)
+    cmd, env = engine.command(state, project, s, resume, stem)
     log(f"{project['name']}: {'retomando sessão ' + s['session'] if resume else 'unidade nova'}")
     s["interrupted"] = True  # só volta a False quando a unidade termina de fato
+    save_state(state)  # se o loop morrer agora, a unidade continua marcada como aberta
     with open(out, "w") as fo, open(err, "w") as fe:
-        code = subprocess.run(cmd, cwd=path, input=prompt, text=True, stdout=fo, stderr=fe).returncode
-    if not resume:
-        s["session"] = thread_id(out)
-    for old in sorted(RUNS.iterdir(), key=lambda p: p.stat().st_mtime, reverse=True)[KEEP_RUNS * 2:]:
+        # Grupo próprio: o corte e o Ctrl+C encerram também os processos que a CLI abriu.
+        CURRENT = subprocess.Popen(cmd, cwd=path, stdin=subprocess.PIPE, stdout=fo, stderr=fe, text=True,
+                                   env=env, start_new_session=True)
+        try:
+            CURRENT.stdin.write(prompt)
+            CURRENT.stdin.close()
+        except BrokenPipeError:
+            pass
+        code = wait_until(CURRENT, deadline)
+        CURRENT = None
+    engine.after_run(state, s, out, resume)
+    for old in sorted(RUNS.iterdir(), key=lambda p: p.stat().st_mtime, reverse=True)[KEEP_RUNS * 3:]:
         old.unlink(missing_ok=True)
     return out, err, code, unit_file
 
 
-def after_unit(cfg, project, s, out, err, code, unit_file):
+def after_unit(cfg, engine, state, project, out, err, code, unit_file):
     """Atualiza o estado do projeto e devolve quantos segundos dormir antes da próxima unidade."""
     d = cfg["defaults"]
-    status, hard_limit = classify(out, err, code)
+    s = state[project["name"]]
+    status, reset, hard = engine.classify(out, err, code)
 
     if status == "usage_limit":
         s["errors"] = 0
-        limits = current_limits()
-        resets = [r for used, r in (window(limits, "primary"), window(limits, "secondary")) if used >= 90 and r]
-        if not resets and (at := retry_at(failure_text(out, err)[0])):
-            # Sem snapshot com o reset: vale o horário que a própria mensagem de erro informa.
-            resets = [at]
-        wait = (max(resets) - time.time() + 120) if resets else (1800 if hard_limit else 300)
+        wait = (reset - time.time() + 120) if reset else (1800 if hard else 300)
         wait = max(wait, 300)
         log(f"{project['name']}: limite de uso; a unidade continua depois do reset "
             f"({time.strftime('%F %T', time.localtime(time.time() + wait))})")
@@ -660,10 +537,11 @@ def after_unit(cfg, project, s, out, err, code, unit_file):
         return 5
 
     # Mede a sessão inteira só quando a unidade fecha, para não contar duas vezes uma retomada.
-    cost = unit_cost(s["session"])
+    cost = engine.unit_cost(state, s)
     if cost:
         for key in ("primary", "secondary"):
             s["cost"][key] = round((1 - EMA_ALPHA) * s["cost"][key] + EMA_ALPHA * cost[key], 3)
+    engine.close_unit(s)
     s.update(session=None, interrupted=False, early_ends=0)
     unit_status = result.get("status", "worked")
     summary = result.get("summary", "")
@@ -682,7 +560,7 @@ def after_unit(cfg, project, s, out, err, code, unit_file):
     return 5
 
 
-def pick(cfg, state, limits):
+def pick(cfg, engine, state, limits):
     """Escolhe o próximo projeto. Devolve (projeto, None) ou (None, segundos até valer checar)."""
     d = cfg["defaults"]
     sec_used, sec_reset = window(limits, "secondary")
@@ -721,69 +599,75 @@ def pick(cfg, state, limits):
     return None, (min(waits) if waits else 3600)
 
 
+def run_once(cfg, engine, state, win=None):
+    """Uma volta do loop. Devolve quantos segundos dormir, ou None quando não há mais trabalho."""
+    d = cfg["defaults"]
+    process_decisions(cfg, state)
+    limits = engine.limits(state)
+    project, wait = pick(cfg, engine, state, limits)
+    save_state(state)
+    if project is None:
+        if all(state[p["name"]]["status"] == "idle" for p in cfg["project"]):
+            log("todos os projetos idle; fim")
+            ntfy(cfg, f"{engine.label}: fim", "Todos os projetos terminaram o backlog.", tags=["checkered_flag"])
+            return None
+        log(f"nada elegível agora; próxima checagem em {int(wait // 60)} min")
+        return max(wait, 60)
+
+    s = state[project["name"]]
+    pri_used, pri_reset = window(limits, "primary")
+    if pri_used + d["safety_factor"] * s["cost"]["primary"] > d["primary_cap"] and not s["interrupted"]:
+        wait = (pri_reset - time.time() + 120) if pri_reset else 1800
+        log(f"janela de 5 h em {pri_used:.0f}%; esperando o reset ({int(wait // 60)} min)")
+        return max(wait, 60)
+
+    docker = prepare_docker(cfg, project)
+    if docker == "busy":
+        return 600
+    if docker != "ok":
+        # Sem os containers a unidade só gastaria cota; avisa uma vez e tenta de novo em 10 min.
+        if not state["_notify"].get("docker_alerted"):
+            ntfy(cfg, f"{engine.label}: Docker com problema",
+                 f"Não consegui subir os containers de {project['name']} ({docker}). Veja o log.",
+                 priority=4, tags=["warning"])
+            state["_notify"]["docker_alerted"] = True
+        return 600
+    state["_notify"]["docker_alerted"] = False
+    out, err, code, unit_file = run_unit(cfg, engine, state, project)
+    wait = after_unit(cfg, engine, state, project, out, err, code, unit_file)
+    save_state(state)
+    if wait > 60:
+        log(f"aguardando até {time.strftime('%F %T', time.localtime(time.time() + wait))}")
+    return wait
+
+
 def cmd_run(args):
     cfg = load_config()
     state = load_state(cfg)
-    codex = find_codex()
-    d = cfg["defaults"]
+    engine = engines.make_engine(cfg)
 
     def on_signal(*_):
+        if CURRENT is not None:
+            stop_group(CURRENT)
         save_state(state)
         log("interrompido; rode de novo para retomar")
         sys.exit(130)
 
     signal.signal(signal.SIGINT, on_signal)
     signal.signal(signal.SIGTERM, on_signal)
-    log(f"autopilot iniciado (codex={codex}, orquestrador={d['orchestrator_model']}/{d['orchestrator_effort']})")
-
+    log(f"autopilot iniciado ({engine.describe()})")
     while True:
-        process_decisions(cfg, state)
-        limits = current_limits()
-        project, wait = pick(cfg, state, limits)
-        save_state(state)
-        if project is None:
-            if all(state[p["name"]]["status"] == "idle" for p in cfg["project"]):
-                log("todos os projetos idle; fim")
-                ntfy(cfg, "autopilot: fim", "Todos os projetos terminaram o backlog.", tags=["checkered_flag"])
-                return
-            log(f"nada elegível agora; próxima checagem em {int(wait // 60)} min")
-            nap(cfg, state, max(wait, 60))
-            continue
-
-        s = state[project["name"]]
-        pri_used, pri_reset = window(limits, "primary")
-        if pri_used + d["safety_factor"] * s["cost"]["primary"] > d["primary_cap"] and not s["interrupted"]:
-            wait = (pri_reset - time.time() + 120) if pri_reset else 1800
-            log(f"janela de 5 h em {pri_used:.0f}%; esperando o reset ({int(wait // 60)} min)")
-            nap(cfg, state, max(wait, 60))
-            continue
-
-        docker = prepare_docker(cfg, project)
-        if docker == "busy":
-            nap(cfg, state, 600)
-            continue
-        if docker != "ok":
-            # Sem os containers a unidade só gastaria cota; avisa uma vez e tenta de novo em 10 min.
-            if not state["_notify"].get("docker_alerted"):
-                ntfy(cfg, "autopilot: Docker com problema",
-                     f"Não consegui subir os containers de {project['name']} ({docker}). Veja o autopilot.log.",
-                     priority=4, tags=["warning"])
-                state["_notify"]["docker_alerted"] = True
-            nap(cfg, state, 600)
-            continue
-        state["_notify"]["docker_alerted"] = False
-        out, err, code, unit_file = run_unit(cfg, project, s)
-        wait = after_unit(cfg, project, s, out, err, code, unit_file)
-        save_state(state)
-        if wait > 60:
-            log(f"aguardando até {time.strftime('%F %T', time.localtime(time.time() + wait))}")
+        wait = run_once(cfg, engine, state)
+        if wait is None:
+            return
         nap(cfg, state, wait)
 
 
 def cmd_status(args):
     cfg = load_config()
     state = load_state(cfg)
-    limits = current_limits()
+    engine = engines.make_engine(cfg)
+    limits = engine.limits(state, max_age=float("inf"))
     for key, label in (("primary", "5 h"), ("secondary", "semanal")):
         used, reset = window(limits, key)
         when = time.strftime("%F %T", time.localtime(reset)) if reset else "-"
