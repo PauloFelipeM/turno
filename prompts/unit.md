@@ -32,8 +32,8 @@ option ids, file names and commit messages follow the project's own rules.
 4. Before starting a task, write `IN PROGRESS <task> BASE <sha>` in the ledger. When it ends, record
    the result, the rulings (with reason and cost if wrong) and any deferred minor.
 5. Subagents do the real work: `planner`, `plan-reviewer`, `implementer`, `reviewer`. You coordinate,
-   rule and keep the ledger; you do not implement. Check the spawn allowlist before passing a model
-   and record any substitution in the ledger.
+   rule and keep the ledger; you do not implement. If a role's model is unavailable, use the
+   fallback the engine notes give and record the substitution in the ledger.
 6. Product decisions come in two sizes:
    - **Minor** (naming, layout details, an internal default nobody sees): take the most
      conservative, reversible option, record it in the decisions file and keep going.
