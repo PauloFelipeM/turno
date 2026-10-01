@@ -106,6 +106,7 @@ def load_state(cfg):
         s.setdefault("blocked_until", 0)
         s.setdefault("cost", {"primary": d["initial_cost_primary"], "secondary": d["initial_cost_secondary"]})
         s.setdefault("dirty_logged", False)
+        s.setdefault("unit_start_limits", None)
     return state
 
 
