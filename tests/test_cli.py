@@ -39,6 +39,11 @@ class StatusTest(unittest.TestCase):
         self.assertIn("dentro", self.lines(win, dt.datetime(2026, 10, 2, 20, 0)))
         self.assertIn("fora", self.lines(win, dt.datetime(2026, 10, 6, 10, 0)))
 
+    def test_window_days_are_in_portuguese(self):
+        win = self.ap.schedule.Window("fri 19:00", "sun 03:00")
+        self.assertIn("abre sex 09/10 19:00", self.lines(win, dt.datetime(2026, 10, 6, 10, 0)))
+        self.assertIn("fecha dom 04/10 03:00", self.lines(win, dt.datetime(2026, 10, 2, 20, 0)))
+
 
 if __name__ == "__main__":
     unittest.main()

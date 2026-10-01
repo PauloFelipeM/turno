@@ -20,10 +20,9 @@ initial_cost_secondary = 1.5
 blocked_cooldown_hours = 6
 
 [notify]
-# Push gratuito via ntfy.sh. Assine este tópico no app ntfy do celular. Quem souber o nome lê e
-# publica nele, por isso ele é aleatório: não compartilhe. Respostas chegam em <topic>-reply.
+# Push gratuito via ntfy.sh. O tópico fica em secrets.toml (ver secrets.example.toml), fora do git;
+# assine-o no app ntfy do celular. Respostas chegam em <topic>-reply.
 server = "https://ntfy.sh"
-topic = "troque-por-um-nome-aleatorio"
 # Quanto tempo um projeto espera sua resposta antes de aplicar a opção padrão.
 decision_timeout_hours = 4
 

@@ -4,13 +4,20 @@ Roda o Codex sozinho no my-app, no my-api e no side-project, nessa ordem de prio
 cota da conta entre os três, espera o reset quando ela acaba e te pergunta pelo celular (ntfy) as
 decisões de produto que importam.
 
+Uma segunda instância roda o Claude Code nos mesmos projetos, só nos fins de semana (ver "Claude
+nos fins de semana"). As duas revezam: nunca trabalham no mesmo projeto nem no mesmo grupo Docker
+ao mesmo tempo.
+
 ## Iniciar
 
-Na primeira vez, crie a configuração a partir do exemplo e troque o `topic` do ntfy por um nome
-aleatório só seu (o `projects.toml` fica fora do git porque guarda esse segredo):
+Na primeira vez, crie a configuração a partir dos exemplos e troque o `topic` do ntfy, no
+`secrets.toml`, por um nome aleatório só seu (o `secrets.toml` fica fora do git porque guarda esse
+segredo):
 
 ```bash
-cp ~/.turno/projects.example.toml ~/.turno/projects.toml
+cd ~/.turno
+cp projects.example.toml projects.toml
+cp secrets.example.toml secrets.toml
 ```
 
 1. Confira o estado:
@@ -74,7 +81,9 @@ E as marcas no fim da linha:
 |---|---|
 | `árvore suja` | Há alterações sem commit que não são do autopilot; o projeto fica de fora |
 | `unidade interrompida` | Uma unidade parou no meio; ela é a próxima a rodar |
-| `sessão <id>` | A sessão do Codex que vai ser retomada |
+| `sessão <id>` | A sessão do Codex (ou do Claude) que vai ser retomada |
+| `reservado: <motor>` | O projeto tem uma unidade aberta nesse motor; o outro não mexe nele |
+| `bastão de <motor>` | Uma unidade foi cortada no fim da janela; o próximo motor a rodar retoma |
 
 O custo por unidade começa em 8% (5 h) e 1,5% (semana) e se ajusta ao custo real a cada unidade.
 
@@ -140,9 +149,43 @@ suspeita que as notificações pararam.
 | Soltar a tela sem parar | `Ctrl+B`, depois `D` |
 | Parar o loop | `tmux attach -t autopilot`, depois `Ctrl+C` |
 | Ver se o loop está rodando | `tmux ls` (aparece `autopilot` na lista) |
+| O mesmo para o Claude | troque `autopilot` por `autopilot-claude` e o log por `autopilot-claude.log` |
 
 Parar é seguro a qualquer momento. Para retomar, rode de novo o comando do passo 2 de "Iniciar": ele
 continua a unidade que estava no meio.
+
+## Claude nos fins de semana
+
+A instância do Claude usa o `claude.toml` e trabalha só de **sexta 19:00 a domingo 03:00**, até
+**90%** da cota semanal do Claude. Fora da janela ela não consulta nem gasta a cota, então você
+pode deixar o tmux aberto a semana toda.
+
+1. Antes de sexta 19:00, confira o que ela faria (lê a cota com uma consulta mínima ao Haiku):
+   ```bash
+   python3 ~/.turno/autopilot.py --config claude.toml check
+   ```
+2. Inicie num tmux próprio:
+   ```bash
+   tmux new -s autopilot-claude 'python3 ~/.turno/autopilot.py --config claude.toml run'
+   ```
+
+Como funciona:
+
+- **Modelos:** o Fable planeja (`planner`, `plan-reviewer`) e o Opus 5.5 executa (`implementer`,
+  `reviewer` e o orquestrador). Quando a cota do Fable acaba, o planejamento passa para o Opus até
+  ela voltar. Os papéis ficam em `claude-agents.json`, só para estas sessões; o Claude Code que você
+  usa na semana não os vê.
+- **Teto:** uma unidade só começa se o uso semanal mais 1,5 vez o custo médio dela couber em 90%.
+- **Fim da janela:** às 02:45 ele para de começar unidades novas. Às 03:00 em ponto a unidade em
+  andamento é cortada, e o projeto fica com o **bastão**: o próximo autopilot a rodar (em geral o
+  Codex) retoma pelo ledger, mesmo com alterações sem commit.
+- **Avisos:** "Claude: começou o fim de semana" e "Claude: fim de semana encerrado", com o uso da
+  cota e os projetos que ficaram com o bastão.
+- **Decisões:** as duas instâncias usam o mesmo tópico do ntfy e se revezam para ler as respostas;
+  cada pergunta chega uma vez só.
+
+O Codex precisa estar com o código atual antes de o Claude começar; senão ele não respeita as
+reservas. Os comandos `status`, `check`, `decisions` e os outros aceitam `--config claude.toml`.
 
 ## O que interrompe o loop
 
@@ -153,8 +196,10 @@ continua a unidade que estava no meio.
 
 ## Ajustes
 
-Tudo em `projects.toml`: a ordem e os tetos semanais dos projetos, os modelos do orquestrador, o
-número de sub-agents e o prazo das decisões (`decision_timeout_hours`). Os modelos dos sub-agents
-ficam em `~/.codex/agents/`. Mudanças valem quando você reinicia o loop.
+Tudo em `projects.toml` (Codex) e `claude.toml` (Claude): a ordem e os tetos semanais dos projetos,
+os modelos do orquestrador, o número de sub-agents, a janela do Claude e o prazo das decisões
+(`decision_timeout_hours`). Os modelos dos sub-agents ficam em `~/.codex/agents/` (Codex) e em
+`claude-agents.json` (Claude). Mudanças valem quando você reinicia o loop.
 
-Onde procurar quando algo der errado: `autopilot.log`, e os arquivos `.err` e `.jsonl` em `runs/`.
+Onde procurar quando algo der errado: `autopilot.log` e os arquivos `.err` e `.jsonl` em `runs/`
+(no Claude, `autopilot-claude.log` e `runs-claude/`).

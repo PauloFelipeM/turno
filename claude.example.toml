@@ -1,0 +1,43 @@
+# Instância do Claude Code: só nos fins de semana, até 90% da cota semanal. Ver README.
+[instance]
+name = "claude"
+
+[engine]
+kind = "claude"
+
+[schedule]
+start = "fri 19:00"
+end = "sun 03:00"
+# Não começa unidade nova nestes últimos minutos (ela seria cortada logo).
+start_margin_minutes = 15
+
+[defaults]
+orchestrator_model = "claude-opus-5-5"
+orchestrator_effort = "medium"
+safety_factor = 1.5
+primary_cap = 100
+initial_cost_primary = 8.0
+initial_cost_secondary = 1.5
+blocked_cooldown_hours = 6
+
+[notify]
+# O tópico vem do secrets.toml, o mesmo do Codex.
+server = "https://ntfy.sh"
+decision_timeout_hours = 4
+
+[[project]]
+name = "my-app"
+path = "/home/me/projects/my-app"
+weekly_cap = 90
+docker_group = "web"
+
+[[project]]
+name = "my-api"
+path = "/home/me/projects/my-api"
+weekly_cap = 90
+
+[[project]]
+name = "side-project"
+path = "/home/me/projects/side-project"
+weekly_cap = 90
+docker_group = "web"

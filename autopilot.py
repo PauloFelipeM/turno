@@ -753,9 +753,9 @@ def status_lines(cfg, engine, state, limits, win, now):
     out = [f"motor {engine.label}"]
     if win:
         if win.contains(now):
-            out.append(f"janela {win.describe()}: dentro, fecha {win.end_of(now):%a %d/%m %H:%M}")
+            out.append(f"janela {win.describe()}: dentro, fecha {schedule.label(win.end_of(now))}")
         else:
-            out.append(f"janela {win.describe()}: fora, abre {win.next_start(now):%a %d/%m %H:%M}")
+            out.append(f"janela {win.describe()}: fora, abre {schedule.label(win.next_start(now))}")
     if engine.needs_limits and not limits:
         out.append("cota: sem leitura")
     for key, label in (("primary", "5 h"), ("secondary", "semanal")):

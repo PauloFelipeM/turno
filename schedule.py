@@ -4,6 +4,12 @@ import datetime as dt
 import re
 
 DAYS = {"mon": 0, "tue": 1, "wed": 2, "thu": 3, "fri": 4, "sat": 5, "sun": 6}
+DAYS_PT = ("seg", "ter", "qua", "qui", "sex", "sáb", "dom")
+
+
+def label(when):
+    """'sex 02/10 19:00': o instante como o Paulo lê, sem depender do locale."""
+    return f"{DAYS_PT[when.weekday()]} {when:%d/%m %H:%M}"
 
 
 def parse(spec):
@@ -54,7 +60,9 @@ class Window:
         return self.contains(when) and self.end_of(when) - when > self.margin
 
     def describe(self):
-        return f"{self.start_spec} → {self.end_spec}"
+        def pt(minutes):
+            return f"{DAYS_PT[minutes // 1440]} {minutes % 1440 // 60:02d}:{minutes % 60:02d}"
+        return f"{pt(self.start)} → {pt(self.end)}"
 
 
 def from_config(cfg):
