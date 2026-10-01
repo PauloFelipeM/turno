@@ -39,6 +39,7 @@ from pathlib import Path
 
 import coord
 import engines
+import schedule
 
 BASE = Path(__file__).resolve().parent
 CONFIG = BASE / "projects.toml"
@@ -94,6 +95,7 @@ def load_state(cfg):
     d = cfg["defaults"]
     # `since` do ntfy começa agora: respostas anteriores ao primeiro run não valem.
     state.setdefault("_notify", {"since": str(int(time.time()))})
+    state.setdefault("_window", {"active": False})
     # Respostas digitadas no tópico principal: também só valem as que chegarem daqui em diante.
     state["_notify"].setdefault("since_typed", str(int(time.time())))
     for p in cfg["project"]:
@@ -501,6 +503,13 @@ def after_unit(cfg, engine, state, project, out, err, code, unit_file):
     """Atualiza o estado do projeto e devolve quantos segundos dormir antes da próxima unidade."""
     d = cfg["defaults"]
     s = state[project["name"]]
+    if code == CUT:
+        # Fim da janela: o trabalho fica no repositório e no ledger, e qualquer motor pode retomar.
+        engine.close_unit(s)
+        s.update(interrupted=False, session=None, early_ends=0, errors=0)
+        coord.hand_off(project["name"], engine.name)
+        log(f"{project['name']}: unidade cortada no fim da janela; bastão passado")
+        return 5
     status, reset, hard = engine.classify(out, err, code)
 
     if status == "usage_limit":
@@ -544,6 +553,7 @@ def after_unit(cfg, engine, state, project, out, err, code, unit_file):
             s["cost"][key] = round((1 - EMA_ALPHA) * s["cost"][key] + EMA_ALPHA * cost[key], 3)
     engine.close_unit(s)
     s.update(session=None, interrupted=False, early_ends=0)
+    coord.release(project["name"], engine.name)
     unit_status = result.get("status", "worked")
     summary = result.get("summary", "")
     log(f"{project['name']}: {unit_status} — {result.get('unit', '?')}")
@@ -562,19 +572,30 @@ def after_unit(cfg, engine, state, project, out, err, code, unit_file):
 
 
 def pick(cfg, engine, state, limits):
-    """Escolhe o próximo projeto. Devolve (projeto, None) ou (None, segundos até valer checar)."""
+    """Escolhe o próximo projeto e pega a trava do grupo dele.
+
+    Devolve (projeto, trava, None) ou (None, None, segundos até valer checar de novo).
+    """
     d = cfg["defaults"]
     sec_used, sec_reset = window(limits, "secondary")
     now = time.time()
     waits = []
 
-    # Unidade interrompida vai primeiro, qualquer que seja a prioridade: nada fica pela metade.
+    # Unidade interrompida deste motor e bastão de qualquer motor vão primeiro: nada fica pela metade.
     for p in cfg["project"]:
-        if state[p["name"]]["interrupted"]:
-            return p, None
+        name = p["name"]
+        if not (state[name]["interrupted"] or coord.is_handoff(name)) or coord.held_by_other(name, engine.name):
+            continue
+        lock = coord.try_lock(coord.group_of(p))
+        if lock:
+            return p, lock, None
+        waits.append(60)
 
     for p in cfg["project"]:
-        s = state[p["name"]]
+        name = p["name"]
+        s = state[name]
+        if s["interrupted"] or coord.is_handoff(name):
+            continue  # já tratado acima (o grupo estava ocupado)
         if s["status"] == "idle":
             continue
         if s["status"] == "waiting":
@@ -585,9 +606,12 @@ def pick(cfg, engine, state, limits):
                 waits.append(s["blocked_until"] - now)
                 continue
             s["status"] = "active"
+        if coord.held_by_other(name, engine.name):
+            waits.append(600)
+            continue
         if is_dirty(p["path"]):
             if not s["dirty_logged"]:
-                log(f"{p['name']}: árvore com alterações que não são do autopilot; pulando até ficar limpa")
+                log(f"{name}: árvore com alterações que não são do autopilot; pulando até ficar limpa")
                 s["dirty_logged"] = True
             waits.append(600)
             continue
@@ -596,16 +620,51 @@ def pick(cfg, engine, state, limits):
             if sec_reset:
                 waits.append(sec_reset - now + 120)
             continue
-        return p, None
-    return None, (min(waits) if waits else 3600)
+        lock = coord.try_lock(coord.group_of(p))
+        if not lock:
+            waits.append(60)  # o outro motor roda um projeto do mesmo grupo Docker
+            continue
+        return p, lock, None
+    return None, None, (min(waits) if waits else 3600)
 
 
-def run_once(cfg, engine, state, win=None):
+def window_notice(cfg, engine, state, active):
+    """Avisa o começo e o fim da janela, com o uso da cota semanal."""
+    used, _ = window(engine.limits(state, max_age=0), "secondary")
+    if active:
+        cap = max(p["weekly_cap"] for p in cfg["project"])
+        log(f"janela aberta; cota semanal em {used:.0f}%")
+        ntfy(cfg, f"{engine.label}: começou o fim de semana", f"Cota semanal em {used:.0f}%; teto {cap}%.",
+             priority=2, tags=["arrow_forward"])
+        return
+    handed = [name for name, c in coord.claims().items()
+              if c and c.get("engine") == coord.ANY and c.get("handoff_from") == engine.name]
+    tail = f"Ficaram com o bastão: {', '.join(handed)}." if handed else "Nenhuma unidade ficou pela metade."
+    log(f"janela fechada; cota semanal em {used:.0f}%")
+    ntfy(cfg, f"{engine.label}: fim de semana encerrado", f"Cota semanal em {used:.0f}%. {tail}",
+         priority=2, tags=["stop_button"])
+
+
+def run_once(cfg, engine, state, win=None, now=None):
     """Uma volta do loop. Devolve quantos segundos dormir, ou None quando não há mais trabalho."""
-    d = cfg["defaults"]
     process_decisions(cfg, state)
+    now = now or datetime.datetime.now()
+    if win:
+        active = win.contains(now)
+        if active != state["_window"]["active"]:
+            state["_window"]["active"] = active
+            window_notice(cfg, engine, state, active)
+        if not win.can_start(now):
+            # Fora da janela, nem a cota é consultada: ela é do Paulo nesses dias.
+            until = win.end_of(now) if active else win.next_start(now)
+            save_state(state)
+            return max(60, (until - now).total_seconds())
     limits = engine.limits(state)
-    project, wait = pick(cfg, engine, state, limits)
+    if engine.needs_limits and not limits:
+        log("sem leitura da cota; nenhuma unidade nova até conseguir ler")
+        save_state(state)
+        return 600
+    project, lock, wait = pick(cfg, engine, state, limits)
     save_state(state)
     if project is None:
         if all(state[p["name"]]["status"] == "idle" for p in cfg["project"]):
@@ -614,27 +673,45 @@ def run_once(cfg, engine, state, win=None):
             return None
         log(f"nada elegível agora; próxima checagem em {int(wait // 60)} min")
         return max(wait, 60)
+    try:
+        return run_project(cfg, engine, state, project, limits, win)
+    finally:
+        coord.unlock(lock)
 
-    s = state[project["name"]]
+
+def run_project(cfg, engine, state, project, limits, win):
+    """Roda uma unidade no projeto escolhido (a trava do grupo já está com quem chama)."""
+    d = cfg["defaults"]
+    name = project["name"]
+    s = state[name]
+    current = coord.read_claim(name)
+    handoff = bool(current) and current.get("engine") == coord.ANY
     pri_used, pri_reset = window(limits, "primary")
-    if pri_used + d["safety_factor"] * s["cost"]["primary"] > d["primary_cap"] and not s["interrupted"]:
+    if pri_used + d["safety_factor"] * s["cost"]["primary"] > d["primary_cap"] and not (s["interrupted"] or handoff):
         wait = (pri_reset - time.time() + 120) if pri_reset else 1800
         log(f"janela de 5 h em {pri_used:.0f}%; esperando o reset ({int(wait // 60)} min)")
         return max(wait, 60)
+    if not coord.claim(name, engine.name):
+        log(f"{name}: reservado pelo outro motor; pulando")
+        return 60
+    if handoff:
+        log(f"{name}: pegando o bastão deixado por {current.get('handoff_from')}")
+        engine.close_unit(s)
+        s.update(interrupted=True, session=None, early_ends=0)
 
     docker = prepare_docker(cfg, project)
-    if docker == "busy":
-        return 600
     if docker != "ok":
-        # Sem os containers a unidade só gastaria cota; avisa uma vez e tenta de novo em 10 min.
-        if not state["_notify"].get("docker_alerted"):
+        if not s["interrupted"]:
+            coord.release(name, engine.name)  # nada começou: o projeto fica livre para o outro motor
+        if docker != "busy" and not state["_notify"].get("docker_alerted"):
+            # Sem os containers a unidade só gastaria cota; avisa uma vez e tenta de novo em 10 min.
             ntfy(cfg, f"{engine.label}: Docker com problema",
-                 f"Não consegui subir os containers de {project['name']} ({docker}). Veja o log.",
-                 priority=4, tags=["warning"])
+                 f"Não consegui subir os containers de {name} ({docker}). Veja o log.", priority=4, tags=["warning"])
             state["_notify"]["docker_alerted"] = True
         return 600
     state["_notify"]["docker_alerted"] = False
-    out, err, code, unit_file = run_unit(cfg, engine, state, project)
+    deadline = win.end_of(datetime.datetime.now()).timestamp() if win else None
+    out, err, code, unit_file = run_unit(cfg, engine, state, project, deadline)
     wait = after_unit(cfg, engine, state, project, out, err, code, unit_file)
     save_state(state)
     if wait > 60:
@@ -646,6 +723,7 @@ def cmd_run(args):
     cfg = load_config()
     state = load_state(cfg)
     engine = engines.make_engine(cfg)
+    win = schedule.from_config(cfg)
 
     def on_signal(*_):
         if CURRENT is not None:
@@ -656,9 +734,15 @@ def cmd_run(args):
 
     signal.signal(signal.SIGINT, on_signal)
     signal.signal(signal.SIGTERM, on_signal)
-    log(f"autopilot iniciado ({engine.describe()})")
+    log(f"autopilot iniciado ({engine.describe()}{', janela ' + win.describe() if win else ''})")
+    open_units = {p["name"]: state[p["name"]]["interrupted"] for p in cfg["project"]}
+    for name in coord.reconcile(engine.name, open_units):
+        log(f"{name}: unidade aberta aqui, mas o projeto está reservado pelo outro motor; deixando de lado")
+        ntfy(cfg, f"{engine.label}: projeto em conflito",
+             f"{name} tem unidade aberta nos dois autopilots. Veja os logs.", priority=4, tags=["warning"])
+    save_state(state)
     while True:
-        wait = run_once(cfg, engine, state)
+        wait = run_once(cfg, engine, state, win)
         if wait is None:
             return
         nap(cfg, state, wait)
