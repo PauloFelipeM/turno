@@ -59,6 +59,24 @@ class LoopTest(unittest.TestCase):
         self.ap.is_dirty = lambda path: True
         self.assertEqual(self.pick("codex"), "side-project")
 
+    def test_five_hour_window_skips_to_a_cheaper_project(self):
+        self.limits["primary"]["used_percent"] = 62
+        self.state["my-app"]["cost"]["primary"] = 28.9  # 62 + 1.5 * 28.9 > 100
+        self.state["my-api"]["cost"]["primary"] = 18.5   # 62 + 1.5 * 18.5 < 100
+        self.assertEqual(self.pick(), "my-api")
+
+    def test_five_hour_window_full_waits_for_its_reset(self):
+        self.limits["primary"].update(used_percent=95, resets_at=time.time() + 1800)
+        engine = helpers.FakeEngine(TRUE)
+        project, lock, wait = self.ap.pick(self.cfg, engine, self.state, self.limits)
+        self.assertIsNone(project)
+        self.assertAlmostEqual(wait, 1800 + 120, delta=5)
+
+    def test_interrupted_unit_ignores_the_five_hour_check(self):
+        self.limits["primary"]["used_percent"] = 99
+        self.state["side-project"]["interrupted"] = True
+        self.assertEqual(self.pick(), "side-project")
+
     def test_weekly_cap_blocks_new_units(self):
         self.limits["secondary"]["used_percent"] = 88  # 88 + 1.5 * 1.5 > 90
         self.assertIsNone(self.pick())

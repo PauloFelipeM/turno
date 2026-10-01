@@ -578,6 +578,7 @@ def pick(cfg, engine, state, limits):
     Devolve (projeto, trava, None) ou (None, None, segundos até valer checar de novo).
     """
     d = cfg["defaults"]
+    pri_used, pri_reset = window(limits, "primary")
     sec_used, sec_reset = window(limits, "secondary")
     now = time.time()
     waits = []
@@ -620,6 +621,10 @@ def pick(cfg, engine, state, limits):
         if sec_used + d["safety_factor"] * s["cost"]["secondary"] > p["weekly_cap"]:
             if sec_reset:
                 waits.append(sec_reset - now + 120)
+            continue
+        # Janela de 5 h por projeto: se o primeiro da fila não cabe, um mais barato ainda pode rodar.
+        if pri_used + d["safety_factor"] * s["cost"]["primary"] > d["primary_cap"]:
+            waits.append((pri_reset - now + 120) if pri_reset else 1800)
             continue
         lock = coord.try_lock(coord.group_of(p))
         if not lock:
@@ -708,16 +713,10 @@ def run_once(cfg, engine, state, win=None, now=None):
 
 def run_project(cfg, engine, state, project, limits, win):
     """Roda uma unidade no projeto escolhido (a trava do grupo já está com quem chama)."""
-    d = cfg["defaults"]
     name = project["name"]
     s = state[name]
     current = coord.read_claim(name)
     handoff = bool(current) and current.get("engine") == coord.ANY
-    pri_used, pri_reset = window(limits, "primary")
-    if pri_used + d["safety_factor"] * s["cost"]["primary"] > d["primary_cap"] and not (s["interrupted"] or handoff):
-        wait = (pri_reset - time.time() + 120) if pri_reset else 1800
-        log(f"janela de 5 h em {pri_used:.0f}%; esperando o reset ({int(wait // 60)} min)")
-        return max(wait, 60)
     if not coord.claim(name, engine.name):
         log(f"{name}: reservado pelo outro motor; pulando")
         return 60

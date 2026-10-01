@@ -71,9 +71,11 @@ Cada instância tem um motor (`[engine] kind`, `codex` por padrão). A cada volt
    começa nada;
 4. `pick`: a unidade interrompida deste motor e o bastão de qualquer motor vão primeiro. Senão, o
    primeiro projeto por prioridade que não esteja `idle`, `waiting` ou em cooldown de `blocked`, não
-   reservado pelo outro motor, com a árvore limpa e cujo uso semanal mais `safety_factor` × o custo
-   aprendido caiba no `weekly_cap`. Pega a trava do grupo (`shared/<docker_group ou nome>.lock`);
-5. `run_project`: confere a folga na janela de 5 h, grava a reserva, `prepare_docker` (para o stack
+   reservado pelo outro motor, com a árvore limpa e cujo uso mais `safety_factor` × o custo
+   aprendido caiba no `weekly_cap` (semana) e no `primary_cap` (5 h). Um projeto que não cabe não
+   segura a fila: o próximo, mais barato, pode rodar. Pega a trava do grupo
+   (`shared/<docker_group ou nome>.lock`);
+5. `run_project`: grava a reserva, `prepare_docker` (para o stack
    do outro projeto do grupo, salvo se ele tiver trabalho sem commit, e sobe o do projeto);
 6. `run_unit` (grava o estado antes de iniciar a CLI; com janela, corta no fim dela) e `after_unit`:
    classifica a saída (`usage_limit`, `error`, `ok` ou corte), aprende o custo da unidade (média
