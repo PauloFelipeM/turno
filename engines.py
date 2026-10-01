@@ -322,24 +322,25 @@ class ClaudeEngine:
     def limits(self, state, max_age=1800):
         """A última leitura da cota; consulta de novo se ela tiver mais de `max_age` segundos."""
         cache = self._cache(state)
-        if time.time() - cache.get("limits_at", 0) > max_age:
-            self.probe(state)
+        if time.time() - cache.get("limits_at", 0) > max_age and not self.probe(state):
+            return {}  # a consulta falhou: uma leitura velha não serve para decidir
         return cache.get("limits") or {}
 
     def probe(self, state):
-        """Consulta mínima ao Haiku, sem plugins nem hooks, só para ler o evento de cota."""
+        """Consulta mínima ao Haiku, sem plugins nem hooks, só para ler o evento de cota. True se leu."""
         cmd = [self._bin(), "-p", "ok", "--model", "haiku", "--max-turns", "1", "--safe-mode",
                "--no-session-persistence", "--output-format", "stream-json", "--verbose"]
         try:
             r = subprocess.run(cmd, stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=180)
         except (OSError, subprocess.TimeoutExpired) as e:
             log(f"consulta de cota do Claude falhou: {e}")
-            return
+            return False
         infos = rate_infos(parse_events(r.stdout.splitlines()))
         if not infos:
             log(f"consulta de cota do Claude sem evento de cota (exit={r.returncode})")
-            return
+            return False
         self.record(state, infos)
+        return True
 
     def record(self, state, infos):
         cache = self._cache(state)
@@ -415,10 +416,22 @@ class ClaudeEngine:
         result = next((e for e in reversed(events) if e.get("type") == "result"), None)
         if result and not result.get("is_error") and code == 0:
             return "ok", None, False  # terminou bem: um evento "rejected" de outro modelo não conta
-        rejected = [i for i in rate_infos(events) if i.get("status") == "rejected"]
+        # Só conta a recusa que esgotou as janelas gerais: a de outro modelo (o Fable de um
+        # subagente) não impede o orquestrador de continuar.
+        resets = []
+        for info in rate_infos(events):
+            if info.get("status") != "rejected":
+                continue
+            windows = info.get("unifiedWindows") or {}
+            if not windows:
+                resets.append(int(info.get("resetsAt") or 0))
+            for key in BASE_WINDOWS:
+                w = windows.get(key) or {}
+                if float(w.get("utilization") or 0) >= 0.98:
+                    resets.append(int(w.get("resetsAt") or info.get("resetsAt") or 0))
         text = str((result or {}).get("result") or "") + "\n" + read_text(err)
-        if rejected or LIMIT_TEXT.search(text):
-            reset = max([int(i.get("resetsAt") or 0) for i in rejected] or [0])
+        if resets or LIMIT_TEXT.search(text):
+            reset = max(resets or [0])
             if not reset and (m := re.search(r"limit reached\|(\d{9,})", text)):
                 reset = int(m.group(1))
             if not reset:
@@ -429,7 +442,8 @@ class ClaudeEngine:
     def unit_cost(self, state, s):
         """Uso depois da unidade (consulta nova) menos o do início dela, por janela."""
         start = s.get("unit_start_limits")
-        self.probe(state)
+        if not self.probe(state):
+            return None  # sem leitura nova, o "fim" seria o próprio início e o custo daria zero
         end = self._cache(state).get("limits")
         if not start or not end:
             return None

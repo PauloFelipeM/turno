@@ -131,6 +131,48 @@ class LoopTest(unittest.TestCase):
         titles = [t for t, _ in self.ap.sent]
         self.assertEqual(titles, ["Claude: começou o fim de semana", "Claude: fim de semana encerrado"])
 
+    def test_window_close_hands_off_an_interrupted_unit_that_is_not_running(self):
+        engine = helpers.FakeEngine(TRUE)
+        engine.label = "Claude"
+        win = self.ap.schedule.Window("fri 19:00", "sun 03:00")
+        self.coord.claim("my-app", "claude")
+        self.state["my-app"].update(interrupted=True, session="s1")
+        self.state["_window"]["active"] = True
+        self.ap.run_once(self.cfg, engine, self.state, win, now=dt.datetime(2026, 10, 4, 3, 1))
+        claim = self.coord.read_claim("my-app")
+        self.assertEqual((claim["engine"], claim["handoff_from"]), ("any", "claude"))
+        self.assertEqual((self.state["my-app"]["interrupted"], self.state["my-app"]["session"]), (False, None))
+        self.assertIn("my-app", self.ap.sent[-1][1])
+
+    def test_open_unit_found_outside_the_window_is_handed_off(self):
+        engine = helpers.FakeEngine(TRUE)
+        win = self.ap.schedule.Window("fri 19:00", "sun 03:00")
+        self.coord.claim("my-api", "claude")
+        self.state["my-api"]["interrupted"] = True
+        self.ap.run_once(self.cfg, engine, self.state, win, now=dt.datetime(2026, 10, 6, 10, 0))
+        self.assertTrue(self.coord.is_handoff("my-api"))
+
+    def test_window_close_does_not_probe_the_quota(self):
+        engine = helpers.FakeEngine(TRUE)
+        win = self.ap.schedule.Window("fri 19:00", "sun 03:00")
+        self.state["_window"]["active"] = True
+        self.ap.run_once(self.cfg, engine, self.state, win, now=dt.datetime(2026, 10, 6, 10, 0))
+        self.assertNotIn(0, engine.max_ages)
+
+    def test_long_waits_inside_the_window_wake_up_at_its_end(self):
+        engine = helpers.FakeEngine(TRUE, limits=self.limits)
+        engine.classify = lambda out, err, code: ("usage_limit", time.time() + 48 * 3600, True)
+        win = self.ap.schedule.Window("fri 19:00", "sun 03:00")
+        self.state["_window"]["active"] = True
+        now = dt.datetime.now()
+        win = self.ap.schedule.Window(f"{['mon','tue','wed','thu','fri','sat','sun'][now.weekday()]} 00:00",
+                                      f"{['mon','tue','wed','thu','fri','sat','sun'][now.weekday()]} 23:59", 0)
+        end = win.end_of(now)
+        if (end - now).total_seconds() < 120:
+            self.skipTest("perto demais da meia-noite")
+        wait = self.ap.run_once(self.cfg, engine, self.state, win, now=now)
+        self.assertLessEqual(wait, (end - now).total_seconds() + 60)
+
     def test_claude_waits_when_quota_is_unknown(self):
         engine = helpers.FakeEngine(TRUE, limits={})
         engine.needs_limits = True

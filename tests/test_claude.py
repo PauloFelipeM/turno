@@ -94,8 +94,26 @@ class ClaudeEngineTest(unittest.TestCase):
 
     def test_rejected_without_result_is_usage_limit(self):
         resets = int(time.time()) + 1800
-        out, err = self.write_run(rate_event(status="rejected", resets=resets))
+        out, err = self.write_run(rate_event(status="rejected", five=1.0, resets=resets))
         self.assertEqual(self.engine.classify(out, err, 1), ("usage_limit", resets, True))
+
+    def test_rejection_of_another_model_on_a_failed_unit_is_an_error(self):
+        out, err = self.write_run(rate_event(status="rejected", five=0.3, week=0.5),
+                                  {"type": "result", "is_error": True, "result": "boom"})
+        self.assertEqual(self.engine.classify(out, err, 1)[0], "error")
+
+    def test_failed_probe_does_not_return_a_stale_reading(self):
+        self.engine.record(self.state, [rate_event(week=0.89)["rate_limit_info"]])
+        self.state["_engine"]["limits_at"] = time.time() - 7 * 86400
+        self.engine.binary = str(self.tmp / "does-not-exist")
+        self.assertEqual(self.engine.limits(self.state, max_age=1800), {})
+        self.assertIn("secondary", self.engine.limits(self.state, max_age=float("inf")))
+
+    def test_unit_cost_is_unknown_when_the_closing_probe_fails(self):
+        start = self.engines.to_limits(rate_event(five=0.10, week=0.40, resets=2000000000)["rate_limit_info"])
+        self.engine.record(self.state, [rate_event(five=0.10, week=0.40, resets=2000000000)["rate_limit_info"]])
+        self.engine.probe = lambda state: None  # falhou: nada novo
+        self.assertIsNone(self.engine.unit_cost(self.state, {"unit_start_limits": start}))
 
     def test_limit_message_with_epoch(self):
         out, err = self.write_run({"type": "result", "is_error": True,
@@ -137,7 +155,7 @@ class ClaudeEngineTest(unittest.TestCase):
     def test_unit_cost_from_start_to_probe(self):
         s = {"unit_start_limits": self.engines.to_limits(rate_event(five=0.10, week=0.40, resets=2000000000)["rate_limit_info"])}
         self.engine.probe = lambda state: self.engine.record(
-            state, [rate_event(five=0.25, week=0.43, resets=2000000000)["rate_limit_info"]])
+            state, [rate_event(five=0.25, week=0.43, resets=2000000000)["rate_limit_info"]]) or True
         cost = self.engine.unit_cost(self.state, s)
         self.assertAlmostEqual(cost["primary"], 15.0)
         self.assertAlmostEqual(cost["secondary"], 3.0)

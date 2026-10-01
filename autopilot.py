@@ -505,10 +505,7 @@ def after_unit(cfg, engine, state, project, out, err, code, unit_file):
     d = cfg["defaults"]
     s = state[project["name"]]
     if code == CUT:
-        # Fim da janela: o trabalho fica no repositório e no ledger, e qualquer motor pode retomar.
-        engine.close_unit(s)
-        s.update(interrupted=False, session=None, early_ends=0, errors=0)
-        coord.hand_off(project["name"], engine.name)
+        pass_baton(engine, project["name"], s)
         log(f"{project['name']}: unidade cortada no fim da janela; bastão passado")
         return 5
     status, reset, hard = engine.classify(out, err, code)
@@ -629,9 +626,26 @@ def pick(cfg, engine, state, limits):
     return None, None, (min(waits) if waits else 3600)
 
 
+def pass_baton(engine, name, s):
+    """Fim da janela: o trabalho fica no repositório e no ledger, e qualquer motor pode retomar."""
+    engine.close_unit(s)
+    s.update(interrupted=False, session=None, early_ends=0, errors=0)
+    coord.hand_off(name, engine.name)
+
+
+def hand_off_open_units(cfg, engine, state):
+    """Fora da janela nenhuma unidade deste motor fica aberta: passa o bastão das interrompidas."""
+    for p in cfg["project"]:
+        s = state[p["name"]]
+        if s["interrupted"] and not coord.held_by_other(p["name"], engine.name):
+            pass_baton(engine, p["name"], s)
+            log(f"{p['name']}: janela fechada com a unidade interrompida; bastão passado")
+
+
 def window_notice(cfg, engine, state, active):
     """Avisa o começo e o fim da janela, com o uso da cota semanal."""
-    used, _ = window(engine.limits(state, max_age=0), "secondary")
+    # No fechamento vale a última leitura: fora da janela a cota não é consultada.
+    used, _ = window(engine.limits(state, max_age=0 if active else float("inf")), "secondary")
     if active:
         cap = max(p["weekly_cap"] for p in cfg["project"])
         log(f"janela aberta; cota semanal em {used:.0f}%")
@@ -649,9 +663,12 @@ def window_notice(cfg, engine, state, active):
 def run_once(cfg, engine, state, win=None, now=None):
     """Uma volta do loop. Devolve quantos segundos dormir, ou None quando não há mais trabalho."""
     process_decisions(cfg, state)
+    started = time.time()
     now = now or datetime.datetime.now()
     if win:
         active = win.contains(now)
+        if not active:
+            hand_off_open_units(cfg, engine, state)
         if active != state["_window"]["active"]:
             state["_window"]["active"] = active
             window_notice(cfg, engine, state, active)
@@ -675,9 +692,15 @@ def run_once(cfg, engine, state, win=None, now=None):
         log(f"nada elegível agora; próxima checagem em {int(wait // 60)} min")
         return max(wait, 60)
     try:
-        return run_project(cfg, engine, state, project, limits, win)
+        wait = run_project(cfg, engine, state, project, limits, win)
     finally:
         coord.unlock(lock)
+    if win:
+        # Uma espera longa (limite de uso, erro) não pode passar do fim da janela: no fechamento o
+        # loop precisa estar acordado para passar o bastão.
+        left = (win.end_of(now) - now).total_seconds() - (time.time() - started)
+        wait = min(wait, max(5, left + 5))
+    return wait
 
 
 def run_project(cfg, engine, state, project, limits, win):

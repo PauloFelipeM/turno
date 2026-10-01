@@ -42,12 +42,14 @@ class FakeEngine:
     def __init__(self, cmd, name="claude", limits=None):
         self.cmd, self.name, self._limits = cmd, name, limits if limits is not None else {}
         self.limits_calls = 0
+        self.max_ages = []
 
     def describe(self):
         return "fake"
 
     def limits(self, state, max_age=1800):
         self.limits_calls += 1
+        self.max_ages.append(max_age)
         return self._limits
 
     def resumable(self, s):
