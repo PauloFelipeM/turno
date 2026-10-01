@@ -10,11 +10,13 @@ documentação em português (pt-BR), como no resto do arquivo.
 
 ## Regra número um
 
-**Nunca rode `autopilot.py run` nem `autopilot.py --config claude.toml run` a partir de uma sessão
-do Codex ou do Claude Code.** O loop dispara outras sessões, gasta a mesma cota que você e morre junto
-com a sua sessão. Quem inicia os loops é o Paulo, cada um num tmux (ver `README.md`). Os comandos
+**Nunca rode `autopilot.py start`, `autopilot.py run` nem `autopilot.py --config claude.toml run` a
+partir de uma sessão do Codex ou do Claude Code.** O loop dispara outras sessões, gasta a mesma cota que você e morre junto
+com a sua sessão. Quem inicia os loops é o Paulo, com `autopilot.py start` (ver `README.md`). Os comandos
 `status`, `decisions` e `test-notify` são seguros; `check` também, mas lê a cota (no Claude, com uma
-consulta mínima ao Haiku). `answer` e `reset` alteram estado e só rodam quando o Paulo pedir.
+consulta mínima ao Haiku). `stop`, `answer` e `reset` alteram estado e só rodam quando o Paulo pedir.
+Cada motor tem uma trava de instância (`shared/instance-<motor>.lock`, com o pid): nunca rodam dois
+loops do mesmo motor.
 
 ## Arquivos
 

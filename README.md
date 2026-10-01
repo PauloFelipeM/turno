@@ -24,11 +24,19 @@ cp secrets.example.toml secrets.toml
    ```bash
    python3 ~/.turno/autopilot.py status
    ```
-2. Inicie dentro do tmux:
+2. Inicie os dois loops, Codex e Claude, com um comando só:
    ```bash
-   tmux new -s autopilot 'python3 ~/.turno/autopilot.py run'
+   python3 ~/.turno/autopilot.py start
    ```
-3. Solte o terminal com `Ctrl+B` e depois `D`. Pode fechar o terminal e o VS Code.
+   Eles ficam numa sessão tmux `autopilot`, uma janela cada (`codex` e `claude`). Pode fechar o
+   terminal e o VS Code. O do Claude dorme fora do fim de semana, sem gastar cota, então pode deixar
+   os dois rodando a semana toda.
+3. Para parar os dois: `python3 ~/.turno/autopilot.py stop`. É como um `Ctrl+C` em cada
+   um: a unidade em andamento é encerrada, o estado é gravado e o `start` seguinte continua dali.
+
+O `start` nunca duplica um loop: o que já estiver rodando, inclusive um iniciado à mão, fica como
+está. O `autopilot.py run` (só o Codex) e o `autopilot.py --config claude.toml run` (só o Claude)
+continuam valendo para rodar um deles sozinho.
 
 O Docker não precisa estar no ar: o agendador abre o Docker Desktop e sobe os containers de cada
 projeto antes de cada unidade.
@@ -145,14 +153,15 @@ suspeita que as notificações pararam.
 | Para | Comando |
 |---|---|
 | Acompanhar o log ao vivo | `tail -f ~/.turno/autopilot.log` (`Ctrl+C` sai só do `tail`) |
-| Voltar à tela do loop | `tmux attach -t autopilot` |
+| Acompanhar o log do Claude | `tail -f ~/.turno/autopilot-claude.log` |
+| Ver a tela dos loops | `tmux attach -t autopilot` |
+| Trocar entre a janela do Codex e a do Claude | `Ctrl+B`, depois `N` |
 | Soltar a tela sem parar | `Ctrl+B`, depois `D` |
-| Parar o loop | `tmux attach -t autopilot`, depois `Ctrl+C` |
-| Ver se o loop está rodando | `tmux ls` (aparece `autopilot` na lista) |
-| O mesmo para o Claude | troque `autopilot` por `autopilot-claude` e o log por `autopilot-claude.log` |
+| Parar os dois | `python3 ~/.turno/autopilot.py stop` |
+| Ver se estão rodando | `python3 ~/.turno/autopilot.py start` (diz "já está rodando") |
 
-Parar é seguro a qualquer momento. Para retomar, rode de novo o comando do passo 2 de "Iniciar": ele
-continua a unidade que estava no meio.
+Parar é seguro a qualquer momento. Para retomar, rode o `start` de novo: ele continua a unidade que
+estava no meio. Se um loop parar sozinho, a janela dele continua aberta com a última mensagem.
 
 ## Claude nos fins de semana
 
@@ -160,14 +169,12 @@ A instância do Claude usa o `claude.toml` e trabalha só de **sexta 19:00 a dom
 **90%** da cota semanal do Claude. Fora da janela ela não consulta nem gasta a cota, então você
 pode deixar o tmux aberto a semana toda.
 
-1. Antes de sexta 19:00, confira o que ela faria (lê a cota com uma consulta mínima ao Haiku):
-   ```bash
-   python3 ~/.turno/autopilot.py --config claude.toml check
-   ```
-2. Inicie num tmux próprio:
-   ```bash
-   tmux new -s autopilot-claude 'python3 ~/.turno/autopilot.py --config claude.toml run'
-   ```
+Ela já sobe junto com o Codex no `start` (ver "Iniciar"). Para conferir o que ela faria agora
+(lê a cota com uma consulta mínima ao Haiku):
+
+```bash
+python3 ~/.turno/autopilot.py --config claude.toml check
+```
 
 Como funciona:
 

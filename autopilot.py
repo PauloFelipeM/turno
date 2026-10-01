@@ -14,7 +14,9 @@ O projeto espera a resposta até o prazo; sem resposta, vale a opção padrão. 
 outros projetos seguem.
 
 Uso:
-  autopilot.py run                        loop principal (Ctrl+C para; rodar de novo retoma)
+  autopilot.py start                      inicia os dois loops (Codex e Claude) no tmux "autopilot"
+  autopilot.py stop                       para os dois loops (como um Ctrl+C em cada um)
+  autopilot.py run                        um loop só, o do Codex (Ctrl+C para; rodar de novo retoma)
   autopilot.py status                     estado de cada projeto e o uso atual das janelas
   autopilot.py check                      o que o loop faria agora (lê a cota; não roda nada)
   autopilot.py reset NOME                 volta um projeto idle ou blocked para ativo
@@ -29,6 +31,7 @@ import datetime
 import json
 import os
 import re
+import shlex
 import signal
 import subprocess
 import sys
@@ -745,8 +748,11 @@ def run_project(cfg, engine, state, project, limits, win):
 
 def cmd_run(args):
     cfg = load_config()
-    state = load_state(cfg)
     engine = engines.make_engine(cfg)
+    instance = instance_lock(engine.name)  # mantido aberto enquanto o loop roda
+    if instance is None:
+        sys.exit(f"o loop do {engine.label} já está rodando (pid {running_pid(engine.name)})")
+    state = load_state(cfg)
     win = schedule.from_config(cfg)
 
     def on_signal(*_):
@@ -811,6 +817,121 @@ def status_lines(cfg, engine, state, limits, win, now):
     if pending:
         out.append(f"\n{pending} decisão(ões) pendente(s): autopilot.py decisions")
     return out
+
+
+# --- iniciar e parar os dois loops --------------------------------------------------------------
+
+TMUX_SESSION = "autopilot"
+# (janela do tmux e nome do motor, configuração): a do Codex é a padrão.
+LOOPS = (("codex", None), ("claude", BASE / "claude.toml"))
+
+
+def instance_lock(name):
+    """Um loop por motor: o flock dura enquanto o loop roda e o arquivo guarda o pid de quem o tem."""
+    handle = coord.try_lock(f"instance-{name}")
+    if handle is not None:
+        handle.truncate(0)
+        handle.write(str(os.getpid()))
+        handle.flush()
+    return handle
+
+
+def running_pid(name):
+    """O pid do loop do motor, se ele estiver rodando; None se a trava estiver livre."""
+    handle = coord.try_lock(f"instance-{name}")
+    if handle is not None:
+        coord.unlock(handle)
+        return None
+    try:
+        return int((coord.shared_dir() / f"instance-{name}.lock").read_text().strip())
+    except (OSError, ValueError):
+        return 0  # rodando, mas o pid ainda não foi gravado
+
+
+def is_loop(argv, config):
+    """Se a linha de comando é a de um loop (`autopilot.py [--config X] run`) dessa configuração."""
+    if len(argv) < 3 or not argv[1].endswith("autopilot.py") or argv[-1] != "run":
+        return False
+    given = argv[argv.index("--config") + 1] if "--config" in argv[:-1] else None
+    if config is None:
+        return given is None
+    return given is not None and Path(given).name == Path(config).name
+
+
+def loop_pids(config):
+    """Loops dessa configuração já rodando, inclusive os iniciados à mão do jeito antigo."""
+    pids = []
+    for proc in Path("/proc").glob("[0-9]*"):
+        try:
+            argv = (proc / "cmdline").read_bytes().decode(errors="replace").split("\0")[:-1]
+        except OSError:
+            continue
+        if int(proc.name) != os.getpid() and is_loop(argv, config):
+            pids.append(int(proc.name))
+    return pids
+
+
+def tmux(*args):
+    r = subprocess.run(["tmux", *args], capture_output=True, text=True)
+    return r.returncode, r.stdout
+
+
+def loop_command(config):
+    script = shlex.quote(str(Path(__file__).resolve()))
+    return f"python3 {script}" + (f" --config {shlex.quote(str(config))}" if config else "") + " run"
+
+
+def start_loops():
+    """Os dois loops numa sessão tmux, uma janela cada; não duplica um loop que já roda."""
+    has_session = tmux("has-session", "-t", TMUX_SESSION)[0] == 0
+    windows = {}
+    if has_session:
+        for line in tmux("list-windows", "-t", TMUX_SESSION, "-F", "#{window_name} #{pane_dead}")[1].splitlines():
+            name, _, dead = line.partition(" ")
+            windows[name] = dead
+    for name, config in LOOPS:
+        if running_pid(name) is not None or loop_pids(config):
+            print(f"{name}: já está rodando")
+            continue
+        cmd = loop_command(config)
+        if not has_session:
+            tmux("new-session", "-d", "-s", TMUX_SESSION, "-n", name, cmd)
+            # A janela fica aberta quando o loop termina: dá para ler a última mensagem.
+            tmux("set-option", "-t", TMUX_SESSION, "remain-on-exit", "on")
+            has_session = True
+        elif name in windows:
+            tmux("respawn-window", "-k", "-t", f"{TMUX_SESSION}:{name}", cmd)
+        else:
+            tmux("new-window", "-d", "-t", TMUX_SESSION, "-n", name, cmd)
+        print(f"{name}: iniciado")
+
+
+def stop_loops():
+    """Ctrl+C nos dois loops: cada um encerra a unidade em andamento e grava o estado."""
+    for name, config in LOOPS:
+        pids = {pid for pid in [running_pid(name), *loop_pids(config)] if pid}
+        if not pids:
+            print(f"{name}: não está rodando")
+            continue
+        for pid in pids:
+            try:
+                os.kill(pid, signal.SIGINT)
+            except ProcessLookupError:
+                pass
+        for _ in range(60):
+            if running_pid(name) is None and not loop_pids(config):
+                break
+            time.sleep(1)
+        print(f"{name}: parado" if running_pid(name) is None else f"{name}: ainda encerrando (veja o log)")
+
+
+def cmd_start(args):
+    start_loops()
+    print(f"acompanhe com: tmux attach -t {TMUX_SESSION}  (Ctrl+B e depois N troca de janela)")
+
+
+def cmd_stop(args):
+    stop_loops()
 
 
 def cmd_status(args):
@@ -904,6 +1025,8 @@ def main():
     sub.add_parser("run").set_defaults(func=cmd_run)
     sub.add_parser("status").set_defaults(func=cmd_status)
     sub.add_parser("check").set_defaults(func=cmd_check)
+    sub.add_parser("start").set_defaults(func=cmd_start)
+    sub.add_parser("stop").set_defaults(func=cmd_stop)
     reset = sub.add_parser("reset")
     reset.add_argument("name")
     reset.set_defaults(func=cmd_reset)
