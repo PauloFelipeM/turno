@@ -16,6 +16,7 @@ outros projetos seguem.
 Uso:
   autopilot.py run                        loop principal (Ctrl+C para; rodar de novo retoma)
   autopilot.py status                     estado de cada projeto e o uso atual das janelas
+  autopilot.py check                      o que o loop faria agora (lê a cota; não roda nada)
   autopilot.py reset NOME                 volta um projeto idle ou blocked para ativo
   autopilot.py decisions                  decisões pendentes
   autopilot.py answer NOME ID OPÇÃO       responde uma decisão pelo terminal
@@ -748,16 +749,24 @@ def cmd_run(args):
         nap(cfg, state, wait)
 
 
-def cmd_status(args):
-    cfg = load_config()
-    state = load_state(cfg)
-    engine = engines.make_engine(cfg)
-    limits = engine.limits(state, max_age=float("inf"))
+def status_lines(cfg, engine, state, limits, win, now):
+    out = [f"motor {engine.label}"]
+    if win:
+        if win.contains(now):
+            out.append(f"janela {win.describe()}: dentro, fecha {win.end_of(now):%a %d/%m %H:%M}")
+        else:
+            out.append(f"janela {win.describe()}: fora, abre {win.next_start(now):%a %d/%m %H:%M}")
+    if engine.needs_limits and not limits:
+        out.append("cota: sem leitura")
     for key, label in (("primary", "5 h"), ("secondary", "semanal")):
         used, reset = window(limits, key)
         when = time.strftime("%F %T", time.localtime(reset)) if reset else "-"
-        print(f"janela {label:8} {used:5.1f}%   reset {when}")
-    print()
+        out.append(f"janela {label:8} {used:5.1f}%   reset {when}")
+    if hasattr(engine, "fable_available") and not engine.fable_available(state):
+        until = state["_engine"]["fable_exhausted_until"]
+        out.append(f"Fable sem cota até {time.strftime('%F %T', time.localtime(until))}; planejamento no Opus")
+    out.append("")
+    claims = coord.claims()
     for p in cfg["project"]:
         s = state[p["name"]]
         flags = []
@@ -765,14 +774,54 @@ def cmd_status(args):
             flags.append("unidade interrompida")
         if s["session"]:
             flags.append(f"sessão {s['session']}")
+        c = claims.get(p["name"])
+        if c and c.get("engine") == coord.ANY:
+            flags.append(f"bastão de {c.get('handoff_from')}")
+        elif c:
+            flags.append(f"reservado: {c.get('engine')}")
         if is_dirty(p["path"]):
             flags.append("árvore suja")
-        print(f"{p['name']:10} {s['status']:8} teto {p['weekly_cap']:>3}%  "
-              f"custo/unidade {s['cost']['primary']:.1f}% (5 h) {s['cost']['secondary']:.2f}% (semana)  "
-              f"{', '.join(flags)}")
+        out.append(f"{p['name']:10} {s['status']:8} teto {p['weekly_cap']:>3}%  "
+                   f"custo/unidade {s['cost']['primary']:.1f}% (5 h) {s['cost']['secondary']:.2f}% (semana)  "
+                   f"{', '.join(flags)}")
     pending = sum(1 for p in cfg["project"] for d in map(read_json, decision_files(p)) if d and "answer" not in d)
     if pending:
-        print(f"\n{pending} decisão(ões) pendente(s): autopilot.py decisions")
+        out.append(f"\n{pending} decisão(ões) pendente(s): autopilot.py decisions")
+    return out
+
+
+def cmd_status(args):
+    """Não consulta o modelo: mostra a última leitura de cota que esta instância tem."""
+    cfg = load_config()
+    state = load_state(cfg)
+    engine = engines.make_engine(cfg)
+    limits = engine.limits(state, max_age=float("inf"))
+    print("\n".join(status_lines(cfg, engine, state, limits, schedule.from_config(cfg), datetime.datetime.now())))
+
+
+def cmd_check(args):
+    """O que o loop faria agora, sem rodar nenhuma unidade e sem gravar o estado."""
+    cfg = load_config()
+    state = load_state(cfg)
+    engine = engines.make_engine(cfg)
+    win = schedule.from_config(cfg)
+    now = datetime.datetime.now()
+    limits = engine.limits(state, max_age=0)  # leitura nova (no Claude, uma consulta mínima)
+    print("\n".join(status_lines(cfg, engine, state, limits, win, now)))
+    print()
+    if win and not win.can_start(now):
+        print(f"agora: não começa unidade ({'últimos minutos da janela' if win.contains(now) else 'fora da janela'})")
+        return
+    if engine.needs_limits and not limits:
+        print("agora: não começa unidade (sem leitura da cota)")
+        return
+    project, lock, wait = pick(cfg, engine, state, limits)
+    coord.unlock(lock)
+    if project:
+        kind = "retomaria" if state[project["name"]]["interrupted"] or coord.is_handoff(project["name"]) else "começaria"
+        print(f"agora: {kind} uma unidade em {project['name']}")
+    else:
+        print(f"agora: nada elegível; checaria de novo em {int(wait // 60)} min")
 
 
 def cmd_decisions(args):
@@ -831,6 +880,7 @@ def main():
     sub = parser.add_subparsers(dest="cmd", required=True)
     sub.add_parser("run").set_defaults(func=cmd_run)
     sub.add_parser("status").set_defaults(func=cmd_status)
+    sub.add_parser("check").set_defaults(func=cmd_check)
     reset = sub.add_parser("reset")
     reset.add_argument("name")
     reset.set_defaults(func=cmd_reset)
