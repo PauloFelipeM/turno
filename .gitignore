@@ -1,0 +1,12 @@
+# Gerados pelo loop
+state.json
+state.tmp
+*.tmp
+autopilot.log
+runs/
+shared/
+__pycache__/
+
+# Contém o tópico do ntfy, que é segredo. Sai daqui quando o tópico for para secrets.toml.
+projects.toml
+secrets.toml
