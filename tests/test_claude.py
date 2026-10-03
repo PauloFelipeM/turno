@@ -63,6 +63,36 @@ class ClaudeEngineTest(unittest.TestCase):
         self.assertEqual(agents["planner"]["model"], "claude-opus-5-5")
         self.assertNotIn("fallback_model", agents["planner"])
 
+    def fable_reading(self, used, status="allowed"):
+        resets = int(time.time()) + 86400
+        info = rate_event(status=status, extra={"seven_day_overage_included":
+                                                {"utilization": used, "resetsAt": resets}})["rate_limit_info"]
+        self.engine.record(self.state, [info])
+
+    def test_fable_below_its_cap_stays(self):
+        self.fable_reading(0.79)
+        self.assertTrue(self.engine.fable_available(self.state))
+
+    def test_fable_at_its_cap_switches_to_opus(self):
+        self.fable_reading(0.80)
+        self.assertFalse(self.engine.fable_available(self.state))
+
+    def test_fable_cap_comes_from_the_config(self):
+        self.engine.cfg["defaults"]["fable_cap"] = 60
+        self.fable_reading(0.65)
+        self.assertFalse(self.engine.fable_available(self.state))
+
+    def test_claude_code_warning_switches_to_opus_early(self):
+        self.fable_reading(0.50, status="allowed_warning")
+        self.assertFalse(self.engine.fable_available(self.state))
+
+    def test_saturday_sequence_plans_with_opus_after_the_90_percent_reading(self):
+        for used, status in ((0.58, "allowed"), (0.75, "allowed"), (0.90, "allowed_warning")):
+            self.fable_reading(used, status)
+        path = self.tmp / "agents.json"
+        self.engine.write_agents(self.state, path)
+        self.assertEqual(json.loads(path.read_text())["planner"]["model"], "claude-opus-5-5")
+
     def test_fresh_agents_keep_fable_and_drop_fallback_key(self):
         path = self.tmp / "agents.json"
         self.engine.write_agents(self.state, path)

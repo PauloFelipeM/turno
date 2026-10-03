@@ -835,7 +835,7 @@ def status_lines(cfg, engine, state, limits, win, now):
         out.append(f"janela {label:8} {used:5.1f}%   reset {when}")
     if hasattr(engine, "fable_available") and not engine.fable_available(state):
         until = state["_engine"]["fable_exhausted_until"]
-        out.append(f"Fable sem cota até {time.strftime('%F %T', time.localtime(until))}; planejamento no Opus")
+        out.append(f"Fable poupado até {time.strftime('%F %T', time.localtime(until))}; planejamento no Opus")
     out.append("")
     claims = coord.claims()
     for p in cfg["project"]:

@@ -14,6 +14,9 @@ start_margin_minutes = 15
 [defaults]
 orchestrator_model = "claude-opus-5-5"
 orchestrator_effort = "medium"
+# Teto da cota do Fable, em %: acima dele o planner e o plan-reviewer usam o Opus até o reset,
+# para sobrar Fable para você. Uma unidade com planejamento chega a gastar 15 pontos.
+fable_cap = 80
 safety_factor = 1.5
 primary_cap = 100
 initial_cost_primary = 8.0

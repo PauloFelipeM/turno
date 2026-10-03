@@ -200,8 +200,9 @@ python3 ~/.turno/autopilot.py --config claude.toml check
 Como funciona:
 
 - **Modelos:** o Fable planeja (`planner`, `plan-reviewer`) e o Opus 5.5 executa (`implementer`,
-  `reviewer` e o orquestrador). Quando a cota do Fable acaba, o planejamento passa para o Opus até
-  ela voltar. Os papéis ficam em `claude-agents.json`, só para estas sessões; o Claude Code que você
+  `reviewer` e o orquestrador). Quando a cota do Fable passa de 80% (`fable_cap` no `claude.toml`),
+  ou quando o Claude Code avisa que ela está perto do fim, o planejamento passa para o Opus até o
+  reset, para sobrar Fable para você. Os papéis ficam em `claude-agents.json`, só para estas sessões; o Claude Code que você
   usa na semana não os vê.
 - **Teto:** uma unidade só começa se o uso semanal mais 1,5 vez o custo médio dela couber em 90%.
 - **Fim da janela:** às 02:45 ele para de começar unidades novas. Às 03:00 em ponto a unidade em

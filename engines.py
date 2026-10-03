@@ -351,16 +351,25 @@ class ClaudeEngine:
             merged.update(limits)
             merged.setdefault("extra", {}).update(extra)
         cache.update(limits=merged, limits_at=time.time())
-        for key, w in merged.get("extra", {}).items():
-            # Janela além das gerais = a cota própria do Fable (aparece nas execuções com Fable).
-            if w["used_percent"] >= 98 and w["resets_at"] > time.time():
-                self._fable_out(state, w["resets_at"], f"janela {key} em {w['used_percent']:.0f}%")
+        # Janela além das gerais = a cota própria do Fable (aparece nas execuções com Fable). Ela
+        # tem teto como a semanal: o planejamento vai para o Opus antes de esgotá-la, para sobrar
+        # Fable para o Paulo. O aviso do próprio Claude Code (allowed_warning) também conta.
+        cap = float(self.cfg.get("defaults", {}).get("fable_cap", 80))
+        for info in infos:
+            warned = info.get("status") in ("allowed_warning", "rejected")
+            for key, w in to_limits(info).get("extra", {}).items():
+                if w["resets_at"] <= time.time():
+                    continue
+                if w["used_percent"] >= cap:
+                    self._fable_out(state, w["resets_at"], f"janela {key} em {w['used_percent']:.0f}%, teto {cap:.0f}%")
+                elif warned:
+                    self._fable_out(state, w["resets_at"], f"aviso do Claude Code com a janela {key} em {w['used_percent']:.0f}%")
 
     def _fable_out(self, state, until, why):
         cache = self._cache(state)
         if cache.get("fable_exhausted_until", 0) < until:
             cache["fable_exhausted_until"] = until
-            log(f"Fable sem cota até {time.strftime('%F %T', time.localtime(until))} ({why}); "
+            log(f"Fable poupado até {time.strftime('%F %T', time.localtime(until))} ({why}); "
                 f"planner e plan-reviewer passam para o Opus")
 
     def fable_available(self, state):
