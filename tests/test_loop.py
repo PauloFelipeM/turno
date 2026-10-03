@@ -191,6 +191,23 @@ class LoopTest(unittest.TestCase):
         wait = self.ap.run_once(self.cfg, engine, self.state, win, now=now)
         self.assertLessEqual(wait, (end - now).total_seconds() + 60)
 
+    def test_idle_checks_do_not_fill_the_log(self):
+        engine = helpers.FakeEngine(TRUE, limits=self.limits)
+        for p in self.projects:
+            self.state[p["name"]]["status"] = "waiting"
+        self.ap.run_once(self.cfg, engine, self.state)
+        log = self.ap.LOG.read_text() if self.ap.LOG.exists() else ""
+        self.assertNotIn("nada elegível", log)
+
+    def test_finished_unit_does_not_log_the_wait(self):
+        engine = helpers.FakeEngine(TRUE, limits=self.limits)
+        engine.classify = lambda out, err, code: ("error", None, False)
+        self.state["my-app"]["status"] = self.state["side-project"]["status"] = "idle"
+        self.ap.run_once(self.cfg, engine, self.state)
+        log = self.ap.LOG.read_text()
+        self.assertIn("my-api: unidade nova", log)
+        self.assertNotIn("aguardando até", log)
+
     def test_claude_waits_when_quota_is_unknown(self):
         engine = helpers.FakeEngine(TRUE, limits={})
         engine.needs_limits = True

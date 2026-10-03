@@ -697,7 +697,7 @@ def run_once(cfg, engine, state, win=None, now=None):
             log("todos os projetos idle; fim")
             ntfy(cfg, f"{engine.label}: fim", "Todos os projetos terminaram o backlog.", tags=["checkered_flag"])
             return None
-        log(f"nada elegível agora; próxima checagem em {int(wait // 60)} min")
+        # Sem registro no log: ele mostra só o trabalho. O motivo da espera aparece no `check`.
         return max(wait, 60)
     try:
         wait = run_project(cfg, engine, state, project, limits, win)
@@ -740,8 +740,6 @@ def run_project(cfg, engine, state, project, limits, win):
     out, err, code, unit_file = run_unit(cfg, engine, state, project, deadline)
     wait = after_unit(cfg, engine, state, project, out, err, code, unit_file)
     save_state(state)
-    if wait > 60:
-        log(f"aguardando até {time.strftime('%F %T', time.localtime(time.time() + wait))}")
     return wait
 
 
