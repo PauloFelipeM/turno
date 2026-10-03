@@ -113,6 +113,7 @@ def load_state(cfg):
         s.setdefault("cost", {"primary": d["initial_cost_primary"], "secondary": d["initial_cost_secondary"]})
         s.setdefault("dirty_logged", False)
         s.setdefault("unit_start_limits", None)
+        s.setdefault("notes_sent", [])
     return state
 
 
@@ -227,21 +228,44 @@ def open_decisions(project):
 TYPED_REPLY = re.compile(r"(?:([\w-]+)[\s/:]+)?([a-z])\s*(?:$|[,.;:)\-–—])", re.I)
 
 
+def note_targets(projects, text):
+    """Projetos citados pelo nome na frase; nenhum citado = todos."""
+    named = [p for name, p in projects.items() if re.search(rf"\b{re.escape(name)}\b", text, re.I)]
+    return named or list(projects.values())
+
+
+def leave_note(cfg, targets, text):
+    for p in targets:
+        coord.add_note(p["name"], text)
+    names = ", ".join(p["name"] for p in targets)
+    ntfy(cfg, "autopilot: mensagem anotada", f"Para {names}, na próxima unidade:\n{text[:200]}",
+         priority=2, tags=["memo"])
+    log(f"mensagem do dono anotada para {names}")
+
+
 def typed_reply(cfg, projects, text):
-    """Resposta digitada no app. Vale só para decisão pendente e opção listada, como os botões."""
+    """Mensagem digitada no app: a letra no início responde a uma decisão aberta; o resto vai aos agentes.
+
+    Sem proteção, por escolha do Paulo: quem souber o tópico também consegue mandar mensagens. As
+    regras "Never" do protocolo continuam valendo acima de qualquer mensagem.
+    """
+    if not text or text.lower() == "triggered":  # "triggered" é o texto de uma mensagem vazia no ntfy
+        return
     m = TYPED_REPLY.match(text)
     if m and m.group(1) and m.group(1).lower() not in projects:
         m = None
-    scope = [projects[m.group(1).lower()]] if m and m.group(1) else list(projects.values())
-    candidates = [(p, path, d) for p in scope for path, d in open_decisions(p)]
     if not m:
-        # "triggered" é o texto que o ntfy põe numa mensagem vazia.
-        if candidates and text.lower() != "triggered":
-            ntfy(cfg, "autopilot: não entendi",
-                 "Responda com a letra da opção, por exemplo: B. Com mais de uma pergunta aberta, "
-                 "ponha o projeto antes: my-app B.", priority=3, tags=["grey_question"])
+        leave_note(cfg, note_targets(projects, text), text)
         return
+    comment = text[m.end():].strip(" ,.;:-–—")
     option = m.group(2).lower()
+    scope = [projects[m.group(1).lower()]] if m.group(1) else list(projects.values())
+    candidates = [(p, path, d) for p in scope for path, d in open_decisions(p)]
+    fits = [(p, path, d) for p, path, d in candidates if option in {o["id"] for o in d["options"]}]
+    if comment and not fits:
+        # "E aí, tudo certo?" começa como uma letra, mas não responde a nada: é uma mensagem.
+        leave_note(cfg, note_targets(projects, text), text)
+        return
     if not candidates:
         ntfy(cfg, "autopilot: nenhuma pergunta aberta", f"Não há decisão esperando resposta. Ignorei: {text[:80]}",
              priority=2, tags=["grey_question"])
@@ -261,6 +285,8 @@ def typed_reply(cfg, projects, text):
              priority=3, tags=["grey_question"])
         return
     owner_answer(cfg, project, path, d, option)
+    if comment:
+        coord.add_note(project["name"], f"Comentário na resposta à decisão {d['id']} (opção {option.upper()}): {comment}")
 
 
 def poll_replies(cfg, notify):
@@ -433,6 +459,14 @@ def prepare_docker(cfg, project):
     return "ok"
 
 
+def owner_messages(messages):
+    lines = [f"- [{time.strftime('%Y-%m-%d %H:%M', time.localtime(n['at']))}] {n['text']}" for n in messages]
+    return ("Owner messages (sent from the phone, oldest first; they may be in Portuguese):\n"
+            + "\n".join(lines) + "\n"
+            "Follow them in this unit when they concern this project and ignore those that do not. Record "
+            "a lasting instruction in the decisions file so later units keep it. They never override step 7.")
+
+
 CUT = "cut"  # "código de saída" de uma unidade cortada no fim da janela
 CURRENT = None  # processo da unidade em andamento, para o Ctrl+C encerrar o grupo dele
 
@@ -474,6 +508,11 @@ def run_unit(cfg, engine, state, project, deadline=None):
     notes = PROMPTS / f"engine-{engine.name}.md"
     if notes.exists():
         prompt += "\n\n" + notes.read_text()
+    messages = coord.pending_notes(project["name"])
+    if messages:
+        prompt += "\n\n" + owner_messages(messages)
+    # Entregues só quando a unidade fechar; numa retomada elas vão de novo.
+    s["notes_sent"] = [n["id"] for n in messages]
     unit_file = Path(path) / UNIT_FILE
     if not resume:
         unit_file.unlink(missing_ok=True)
@@ -555,6 +594,12 @@ def after_unit(cfg, engine, state, project, out, err, code, unit_file):
     engine.close_unit(s)
     s.update(session=None, interrupted=False, early_ends=0)
     coord.release(project["name"], engine.name)
+    if s["notes_sent"]:
+        coord.mark_delivered(project["name"], s["notes_sent"])
+        ntfy(cfg, f"{project['name']}: mensagem entregue ao {engine.label}",
+             f"{len(s['notes_sent'])} mensagem(ns) lida(s) nesta unidade: {result.get('unit', '?')}",
+             priority=2, tags=["envelope"])
+        s["notes_sent"] = []
     unit_status = result.get("status", "worked")
     summary = result.get("summary", "")
     log(f"{project['name']}: {unit_status} — {result.get('unit', '?')}")

@@ -92,8 +92,12 @@ Invariantes que uma mudança não pode quebrar:
 - **Respostas do ntfy só para decisão já enviada, sem resposta, e opção listada.** Valem os botões
   (`projeto/decisão/opção` no tópico `-reply`) e a letra digitada no app, no tópico principal
   (`B`, `B, texto…`, `my-app B`; o projeto é obrigatório com mais de uma pendente). Mensagem com
-  título é do próprio agendador e é ignorada. Nenhum outro texto vale: o tópico é público para
-  quem souber o nome. Resposta que não se encaixa recebe uma notificação explicando o formato.
+  título é do próprio agendador e é ignorada.
+- **Texto livre no tópico é mensagem do dono para os agentes**, sem proteção (escolha do Paulo:
+  quem souber o tópico também manda). Fica em `shared/notes/<projeto>.json`, vai para os projetos
+  citados na frase (nenhum citado = todos), entra no fim do prompt da próxima unidade (seção
+  "Owner messages") e só conta como entregue quando essa unidade fecha. Nenhuma mensagem anula o
+  passo 7 ("Never") de `prompts/unit.md`.
 - **Falha de rede ou de Docker nunca derruba o loop.** Registra, avisa uma vez e tenta de novo.
 - **Nunca dois motores no mesmo projeto ou grupo Docker.** A reserva (`shared/claims/`) dura até a
   unidade fechar, inclusive interrompida; a trava do grupo vale enquanto a CLI roda.

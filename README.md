@@ -116,8 +116,24 @@ botões) ou digite a letra no campo de mensagem do tópico, no app do ntfy:
 | `B` ou `B, manter até trocar a senha` | Há uma só pergunta aberta |
 | `my-app B` | Há perguntas abertas em mais de um projeto |
 
-O que vale é a letra no início. Texto sem a letra, como "Email cadastrado", não é aceito, e o
-autopilot responde avisando o formato. Quando ele aceita, chega uma notificação "anotado".
+O que vale é a letra no início. Quando ele aceita, chega uma notificação "anotado". Um comentário
+depois da letra (`B, mas só para médicos ativos`) também chega ao agente que aplica a resposta.
+
+### Mandar mensagens aos agentes
+
+Qualquer outro texto que você digitar no tópico vira uma mensagem para os agentes, como
+"prioriza o chat no my-app" ou "não mexam no módulo de pagamento".
+
+- **Destino:** vai para os projetos citados pelo nome na frase; se nenhum for citado, vai para os
+  três. O agente também ignora a mensagem se ela não disser respeito ao projeto dele.
+- **Quando é lida:** na próxima unidade do projeto, de qualquer motor (uma unidade em andamento não
+  a recebe). Chega "mensagem anotada" na hora e "mensagem entregue ao Codex/Claude" quando a unidade
+  que a leu fecha. Se a unidade for interrompida, a mensagem vai de novo na retomada.
+- **Orientação duradoura** ("nunca mexa em pagamento") o agente registra no arquivo de decisões do
+  projeto, para valer nas unidades seguintes.
+- **Sem proteção:** quem souber o nome do tópico também consegue mandar mensagens aos agentes.
+  Mesmo assim, nenhuma mensagem anula as regras fixas do protocolo (não apagar dados, não forçar
+  push, não ler o `.env`).
 
 ### `autopilot answer <projeto> <id> <opção>`: responder pelo terminal
 

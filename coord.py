@@ -145,3 +145,47 @@ def save_notify(data):
     tmp = path.with_suffix(".tmp")
     tmp.write_text(json.dumps(data))
     tmp.replace(path)
+
+
+# --- mensagens do dono (texto livre pelo ntfy) ----------------------------------------------------
+
+
+def _notes_path(project):
+    return shared_dir("notes") / f"{project}.json"
+
+
+def _read_notes(project):
+    try:
+        return json.loads(_notes_path(project).read_text())
+    except (OSError, ValueError):
+        return []
+
+
+def _write_notes(project, notes):
+    path = _notes_path(project)
+    tmp = path.with_suffix(".tmp")
+    tmp.write_text(json.dumps(notes, ensure_ascii=False, indent=1))
+    tmp.replace(path)
+
+
+def add_note(project, text):
+    """Guarda uma mensagem para a próxima unidade do projeto, de qualquer motor."""
+    with _claims_mutex():
+        notes = _read_notes(project)
+        notes.append({"id": f"{time.time_ns()}", "at": time.time(), "text": text, "delivered": False})
+        _write_notes(project, notes)
+
+
+def pending_notes(project):
+    return [n for n in _read_notes(project) if not n.get("delivered")]
+
+
+def mark_delivered(project, ids):
+    """Marca como entregues as mensagens que foram no prompt de uma unidade que fechou."""
+    ids = set(ids)
+    with _claims_mutex():
+        notes = _read_notes(project)
+        for n in notes:
+            if n["id"] in ids:
+                n["delivered"] = True
+        _write_notes(project, notes)
