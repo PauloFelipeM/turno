@@ -923,6 +923,29 @@ def loop_command(config):
     return f"python3 {script}" + (f" --config {shlex.quote(str(config))}" if config else "") + " run"
 
 
+def log_file(name, config):
+    return BASE / ("autopilot.log" if config is None else f"autopilot-{name}.log")
+
+
+def open_logs_window(has_session, windows):
+    """Janela "logs": os dois logs ao vivo, um em cima do outro. É a que o `tmux attach` mostra."""
+    target = f"{TMUX_SESSION}:logs"
+    if "logs" not in windows:
+        (top_name, top_cfg), (bottom_name, bottom_cfg) = LOOPS
+        top = f"tail -n 40 -F {shlex.quote(str(log_file(top_name, top_cfg)))}"
+        bottom = f"tail -n 40 -F {shlex.quote(str(log_file(bottom_name, bottom_cfg)))}"
+        if has_session:
+            tmux("new-window", "-d", "-t", TMUX_SESSION, "-n", "logs", top)
+        else:
+            tmux("new-session", "-d", "-s", TMUX_SESSION, "-n", "logs", top)
+        tmux("split-window", "-v", "-d", "-t", target, bottom)
+        tmux("set-option", "-w", "-t", target, "pane-border-status", "top")
+        tmux("set-option", "-w", "-t", target, "pane-border-format", " #{pane_title} ")
+        tmux("select-pane", "-t", f"{target}.0", "-T", top_name.capitalize())
+        tmux("select-pane", "-t", f"{target}.1", "-T", bottom_name.capitalize())
+    tmux("select-window", "-t", target)
+
+
 def start_loops():
     """Os dois loops numa sessão tmux, uma janela cada; não duplica um loop que já roda."""
     has_session = tmux("has-session", "-t", TMUX_SESSION)[0] == 0
@@ -946,6 +969,7 @@ def start_loops():
         else:
             tmux("new-window", "-d", "-t", TMUX_SESSION, "-n", name, cmd)
         print(f"{name}: iniciado")
+    open_logs_window(has_session, windows)
 
 
 def stop_loops():

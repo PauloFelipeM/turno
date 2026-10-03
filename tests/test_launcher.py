@@ -41,6 +41,10 @@ class LauncherTest(unittest.TestCase):
     def commands(self, verb):
         return [c for c in self.calls if c[0] == verb]
 
+    def loop_launches(self):
+        """new-session/new-window dos loops (não da janela de logs)."""
+        return [c for c in self.commands("new-session") + self.commands("new-window") if "logs" not in c]
+
     def test_start_creates_one_session_with_both_loops(self):
         self.windows = None
         self.ap.start_loops()
@@ -58,7 +62,7 @@ class LauncherTest(unittest.TestCase):
         self.ap.start_loops()
         self.ap.coord.unlock(held)
         self.assertFalse(any("codex" in c for c in self.commands("respawn-window")))
-        self.assertEqual(len(self.commands("new-window")), 1)
+        self.assertEqual(len(self.loop_launches()), 1)
 
     def test_start_respawns_a_dead_window(self):
         self.windows = {"codex": "1", "claude": "1"}
@@ -70,9 +74,37 @@ class LauncherTest(unittest.TestCase):
         self.windows = None
         self.ap.loop_pids = lambda config: [4242] if config is None else []
         self.ap.start_loops()
-        launched = self.commands("new-session") + self.commands("new-window")
+        launched = self.loop_launches()
         self.assertEqual(len(launched), 1)
         self.assertIn("claude", launched[0])
+
+    def test_start_opens_a_logs_window_with_both_logs_selected(self):
+        self.windows = None
+        self.ap.start_loops()
+        logs = [c for c in self.calls if "logs" in c and c[0] in ("new-window", "new-session")]
+        self.assertEqual(len(logs), 1)
+        self.assertIn(str(self.ap.BASE / "autopilot.log"), logs[0][-1])
+        split = self.commands("split-window")
+        self.assertEqual(len(split), 1)
+        self.assertIn(str(self.ap.BASE / "autopilot-claude.log"), split[0][-1])
+        self.assertEqual(self.commands("select-window")[-1][-1], "autopilot:logs")
+
+    def test_logs_window_is_not_duplicated(self):
+        self.windows = {"codex": "0", "claude": "0", "logs": "0"}
+        held = [self.ap.instance_lock("codex"), self.ap.instance_lock("claude")]
+        self.ap.start_loops()
+        for h in held:
+            self.ap.coord.unlock(h)
+        self.assertEqual(self.commands("split-window"), [])
+        self.assertEqual(self.commands("select-window")[-1][-1], "autopilot:logs")
+
+    def test_logs_window_needs_no_running_session(self):
+        self.windows = None
+        self.ap.loop_pids = lambda config: [4242]  # os dois loops rodando fora do tmux
+        self.ap.start_loops()
+        session = self.commands("new-session")
+        self.assertEqual(len(session), 1)
+        self.assertIn("logs", session[0])
 
     def test_second_instance_of_the_same_engine_is_refused(self):
         held = self.ap.instance_lock("claude")

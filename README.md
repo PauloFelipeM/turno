@@ -28,7 +28,8 @@ cp secrets.example.toml secrets.toml
    ```bash
    python3 ~/.turno/autopilot.py start
    ```
-   Eles ficam numa sessão tmux `autopilot`, uma janela cada (`codex` e `claude`). Pode fechar o
+   Eles ficam numa sessão tmux `autopilot`, uma janela cada (`codex` e `claude`), e uma terceira
+   janela, `logs`, mostra os dois logs ao vivo, um em cima do outro. Pode fechar o
    terminal e o VS Code. O do Claude dorme fora do fim de semana, sem gastar cota, então pode deixar
    os dois rodando a semana toda.
 3. Para parar os dois: `python3 ~/.turno/autopilot.py stop`. É como um `Ctrl+C` em cada
@@ -170,11 +171,15 @@ suspeita que as notificações pararam.
 |---|---|
 | Acompanhar o log ao vivo | `tail -f ~/.turno/autopilot.log` (`Ctrl+C` sai só do `tail`) |
 | Acompanhar o log do Claude | `tail -f ~/.turno/autopilot-claude.log` |
-| Ver a tela dos loops | `tmux attach -t autopilot` |
-| Trocar entre a janela do Codex e a do Claude | `Ctrl+B`, depois `N` |
+| Ver os dois logs ao vivo | `tmux attach -t autopilot` (abre na janela `logs`: Codex em cima, Claude embaixo) |
+| Trocar de janela | `Ctrl+B`, depois `N` (no terminal do VS Code o `Ctrl+B` é da barra lateral; ver abaixo) |
 | Soltar a tela sem parar | `Ctrl+B`, depois `D` |
 | Parar os dois | `python3 ~/.turno/autopilot.py stop` |
 | Ver se estão rodando | `python3 ~/.turno/autopilot.py start` (diz "já está rodando") |
+
+No terminal do VS Code, o `Ctrl+B` abre e fecha a barra lateral e não chega ao tmux. Para liberá-lo,
+acrescente ao `settings.json` do VS Code:
+`"terminal.integrated.commandsToSkipShell": ["-workbench.action.toggleSidebarVisibility"]`.
 
 Parar é seguro a qualquer momento. Para retomar, rode o `start` de novo: ele continua a unidade que
 estava no meio. Se um loop parar sozinho, a janela dele continua aberta com a última mensagem.
