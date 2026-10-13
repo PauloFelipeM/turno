@@ -26,18 +26,22 @@ class ApiError(Exception):
         self.status, self.code, self.message = status, code, message
 
 
+def _dict(x):
+    return x if isinstance(x, dict) else {}
+
+
 def bad(message):
     return ApiError(400, "bad_request", message)
 
 
 def _number(x):
-    return overrides._cap(x)
+    return overrides.valid_cap(x)
 
 
 def _known(home):
     """(project names in config order, engines that have an instance)."""
     names, kinds = [], []
-    for inst in panel._ok(home):
+    for inst in panel.configured(home):
         kinds.append(inst["engine"])
         names += [p["name"] for p in inst["cfg"]["project"] if p["name"] not in names]
     return names, kinds
@@ -72,23 +76,35 @@ def engine_action(home, engine, action):
     return 202, {"ok": True}
 
 
+def _project_entry(d, name):
+    """d["projects"][name], replacing anything that is not an object (a corrupt file) with {}."""
+    if not isinstance(d.get("projects"), dict):
+        d["projects"] = {}
+    if not isinstance(d["projects"].get(name), dict):
+        d["projects"][name] = {}
+    return d["projects"][name]
+
+
 def _set_project(home, name, **fields):
-    def fn(d):
-        d.setdefault("projects", {}).setdefault(name, {}).update(fields)
-    overrides.update(home, fn)
+    overrides.update(home, lambda d: _project_entry(d, name).update(fields))
 
 
 def project_action(home, name, action):
     _need_project(home, name)
-    ov = overrides.read(home)
     if action in ("pause", "resume"):
         _set_project(home, name, paused=action == "pause")
     elif action == "next":
-        if panel._dict(panel._dict(ov.get("projects")).get(name)).get("paused") is True:
-            raise ApiError(409, "paused", "the project is paused")
-        overrides.update(home, lambda d: d.__setitem__("next", name))
+        def fn(d):
+            if _project_entry(d, name).get("paused") is True:
+                raise ApiError(409, "paused", "the project is paused")  # under the lock: no race with pause
+            d["next"] = name
+        overrides.update(home, fn)
     elif action == "reset":
-        overrides.update(home, lambda d: d.setdefault("reset", {}).__setitem__(name, time.time()))
+        def fn(d):
+            if not isinstance(d.get("reset"), dict):
+                d["reset"] = {}
+            d["reset"][name] = time.time()
+        overrides.update(home, fn)
     elif action == "interrupt":
         return interrupt(home, name)
     else:
@@ -97,9 +113,9 @@ def project_action(home, name, action):
 
 
 def _running_pid(home, name):
-    for inst in panel._ok(home):
+    for inst in panel.configured(home):
         state = panel.read_json(inst["state"]) or {}
-        loop = panel._dict(state.get("_loop"))
+        loop = _dict(state.get("_loop"))
         if loop.get("phase") == "running" and loop.get("project") == name:
             pid = panel.loop_pid(home, inst["engine"])
             if pid:
@@ -130,7 +146,7 @@ def _lock_decisions():
 
 
 def answer_decision(home, project, decision_id, body):
-    path = panel._project_path(home, project)
+    path = panel.project_path(home, project)
     if path is None:
         raise ApiError(404, "not_found", f"unknown project: {project}")
     option, comment = body.get("option"), body.get("comment")
@@ -178,7 +194,7 @@ def _caps(value, names, kinds, what):
         raise bad(f"{what} must be an object")
     for key, v in value.items():
         if names is not None:
-            if key not in names or not isinstance(v, dict):
+            if key not in names or not isinstance(v, dict) or not v:
                 raise bad(f"{what}: unknown project or invalid value: {key!r}")
             pairs = v.items()
         else:
@@ -205,9 +221,14 @@ def put_settings(home, body):
         if "order" in body:
             d["order"] = order
         for name, per in body.get("weekly_cap", {}).items():
-            d.setdefault("projects", {}).setdefault(name, {}).setdefault("weekly_cap", {}).update(per)
+            entry = _project_entry(d, name)
+            if not isinstance(entry.get("weekly_cap"), dict):
+                entry["weekly_cap"] = {}
+            entry["weekly_cap"].update(per)
         if "primary_cap" in body:
-            d.setdefault("primary_cap", {}).update(body["primary_cap"])
+            if not isinstance(d.get("primary_cap"), dict):
+                d["primary_cap"] = {}
+            d["primary_cap"].update(body["primary_cap"])
     overrides.update(home, fn)
     return 200, panel.settings(home)
 

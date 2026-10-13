@@ -23,6 +23,8 @@ import panel
 WEB = Path(__file__).resolve().parent / "web"
 TYPES = {".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8",
          ".css": "text/css; charset=utf-8", ".svg": "image/svg+xml"}
+
+
 class Hub:
     """The event stream subscribers and the watcher that announces changes."""
 

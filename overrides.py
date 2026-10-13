@@ -66,7 +66,7 @@ def take_next(home, project):
         return True
 
 
-def _cap(value):
+def valid_cap(value):
     ok = isinstance(value, (int, float)) and not isinstance(value, bool) and 0 <= value <= 100
     return ok
 
@@ -94,11 +94,11 @@ def apply(cfg, engine_name, ov):
         mine = _dict(per_project.get(p.get("name")))
         p["paused"] = mine.get("paused") is True
         cap = _dict(mine.get("weekly_cap")).get(engine_name)
-        if _cap(cap):
+        if valid_cap(cap):
             p["weekly_cap"] = cap
     out["project"] = projects
     primary = _dict(ov.get("primary_cap")).get(engine_name)
-    if _cap(primary):
+    if valid_cap(primary):
         out.setdefault("defaults", {})["primary_cap"] = primary
     return out
 
@@ -110,3 +110,6 @@ def resets(ov):
         for k, v in _dict(_dict(ov).get("reset")).items()
         if isinstance(v, (int, float)) and not isinstance(v, bool)
     }
+
+
+_cap = valid_cap  # old internal name

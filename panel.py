@@ -66,7 +66,7 @@ def instances(home):
     return out
 
 
-def _ok(home):
+def configured(home):
     return [i for i in instances(home) if "error" not in i]
 
 
@@ -129,13 +129,23 @@ def _engine_view(home, inst, state, homes):
             "window": window}
 
 
+_DECISION_KEYS = ("id", "question", "context", "options", "default", "deadline", "notified_at")
+
+
 def pending_decisions(project_path):
     out = []
     for path in autopilot.decision_files({"path": str(project_path)}):
         d = read_json(path)
         if d and "answer" not in d and autopilot.valid_decision(d, path):
-            out.append({k: d.get(k) for k in ("id", "question", "context", "options", "default", "deadline", "notified_at")})
+            out.append({k: d.get(k) for k in _DECISION_KEYS})
     return out
+
+
+def answerable_decisions(project_path):
+    """The decisions that accept an answer, like `autopilot.open_decisions`: sent, unanswered and valid.
+
+    Built from `pending_decisions` because `open_decisions` trusts the files to be objects."""
+    return [d for d in pending_decisions(project_path) if d.get("notified_at")]
 
 
 def _backlog_summary(project_path, cache):
@@ -154,7 +164,7 @@ def _backlog_summary(project_path, cache):
 def live_runs(home, homes=None):
     """The runs in progress, with the JSONL path (for the server's internal use)."""
     out = []
-    for inst in _ok(home):
+    for inst in configured(home):
         state = read_json(inst["state"]) or {}
         phase = _dict(state.get("_loop"))
         if phase.get("phase") != "running" or not loop_pid(home, inst["engine"]):
@@ -214,15 +224,18 @@ def overview(home, cache, homes=None):
                 if u["closed"] and u["outcome"] == "blocked":
                     blocked.setdefault(u["project"], u["summary"])
         claim = read_json(home / "shared" / "claims" / f"{entry['name']}.json")
-        open_list = pending_decisions(entry["path"]) if Path(entry["path"]).is_dir() else []
+        is_dir = Path(entry["path"]).is_dir()
+        count = len(pending_decisions(entry["path"])) if is_dir else 0
+        open_list = answerable_decisions(entry["path"]) if is_dir else []
         out_projects.append({
             "name": entry["name"], "engines": entry["engines"],
             "claim": {"engine": claim.get("engine"), "handoff_from": claim.get("handoff_from")} if claim else None,
             "backlog": _backlog_summary(entry["path"], cache),
-            "decisions": len(open_list), "decisions_open": open_list,
+            "decisions": count, "decisions_open": open_list,
             "paused": _dict(ov_projects.get(entry["name"])).get("paused") is True,
             "next": ov.get("next") == entry["name"],
-            "blocked_summary": blocked.get(entry["name"])})
+            "blocked_summary": blocked.get(entry["name"]) if any(
+                e["status"] == "blocked" for e in entry["engines"].values()) else None})
     return {"engines": views, "projects": out_projects, "errors": errors, "now": time.time(),
             "live": [{k: v for k, v in r.items() if k not in ("path", "root")} for r in live_runs(home, homes)]}
 
@@ -231,21 +244,21 @@ def settings(home):
     """The effective order and caps (the .toml with the overrides applied) and what is overridden."""
     ov = overrides.read(home)
     order, engines_view = [], {}
-    for inst in _ok(home):
+    for inst in configured(home):
         cfg = overrides.apply(inst["cfg"], inst["engine"], ov)
         order += [p["name"] for p in cfg["project"] if p["name"] not in order]
         engines_view[inst["engine"]] = {
             "primary_cap": _dict(cfg.get("defaults")).get("primary_cap"),
             "weekly_cap": {p["name"]: p.get("weekly_cap") for p in cfg["project"]}}
     ov_projects = _dict(ov.get("projects"))
-    caps = any(overrides._cap(c) for per in ov_projects.values() for c in _dict(_dict(per).get("weekly_cap")).values())
-    caps = caps or any(overrides._cap(c) for c in _dict(ov.get("primary_cap")).values())
+    caps = any(overrides.valid_cap(c) for per in ov_projects.values() for c in _dict(_dict(per).get("weekly_cap")).values())
+    caps = caps or any(overrides.valid_cap(c) for c in _dict(ov.get("primary_cap")).values())
     return {"order": order, "engines": engines_view,
             "overridden": {"order": isinstance(ov.get("order"), list) and bool(ov["order"]), "caps": caps}}
 
 
-def _project_path(home, name):
-    for inst in _ok(home):
+def project_path(home, name):
+    for inst in configured(home):
         for p in inst["cfg"]["project"]:
             if p["name"] == name:
                 return p["path"]
@@ -253,7 +266,7 @@ def _project_path(home, name):
 
 
 def project_detail(home, name, cache):
-    path = _project_path(home, name)
+    path = project_path(home, name)
     if path is None:
         return None
     if not Path(path).is_dir():
@@ -262,7 +275,7 @@ def project_detail(home, name, cache):
 
 
 def units(home, project=None, before=None, limit=50):
-    entries = [e for inst in _ok(home) for e in history.read(inst["history"])]
+    entries = [e for inst in configured(home) for e in history.read(inst["history"])]
     out = history.group(entries)
     if project:
         out = [u for u in out if u["project"] == project]
@@ -273,12 +286,12 @@ def units(home, project=None, before=None, limit=50):
 
 
 def unit_detail(home, unit_id):
-    insts = {i["engine"]: i for i in _ok(home)}
+    insts = {i["engine"]: i for i in configured(home)}
     entries = [e for i in insts.values() for e in history.read(i["history"]) if e.get("unit_id") == unit_id]
     if not entries:
         return None
     unit = history.group(entries)[0]
-    root = _project_path(home, unit["project"])
+    root = project_path(home, unit["project"])
     for r in unit["runs"]:
         inst = insts.get(r.get("engine"))
         r["feed"] = feed.read_run(r["engine"], inst["runs"] / f"{r['run']}.jsonl", root) if inst and r.get("run") else None
@@ -291,9 +304,12 @@ def watched_files(home):
     files = [p for p in home.glob("*.toml") if p.name != "secrets.toml"]
     files += list(home.glob("state*.json")) + list(home.glob("history-*.jsonl"))
     files += list((home / "shared" / "claims").glob("*.json")) + list((home / "shared").glob("instance-*.lock"))
-    for inst in _ok(home):
+    for inst in configured(home):
         for p in inst["cfg"]["project"]:
             base = Path(p["path"]) / ".superpowers" / "autopilot"
             files.append(base / "backlog.json")
             files += list((base / "decisions").glob("*.json"))
     return files
+
+
+_ok, _project_path = configured, project_path  # old internal names

@@ -261,12 +261,25 @@ class ControlApiTest(unittest.TestCase):
         self.assertNotIn("my-api", ov["projects"])
         self.assertEqual(ov["next"], "my-api")
 
+    def test_corrupt_overrides_types_do_not_break_writes(self):
+        (self.home / "overrides.json").write_text(json.dumps({"projects": [], "reset": 5, "primary_cap": 1}))
+        self.assertEqual(self.post("/api/projects/side-project/pause")[0], 200)
+        self.assertEqual(self.post("/api/projects/side-project/resume")[0], 200)
+        self.assertEqual(self.post("/api/projects/side-project/next")[0], 200)
+        self.assertEqual(self.post("/api/projects/side-project/reset")[0], 200)
+        (self.home / "overrides.json").write_text(json.dumps({"projects": {"side-project": []}, "reset": 5}))
+        self.assertEqual(self.call("PUT", "/api/settings", {"weekly_cap": {"side-project": {"codex": 5}}, "primary_cap": {"codex": 9}})[0], 200)
+        (self.home / "overrides.json").write_text(json.dumps({"projects": {"side-project": {"weekly_cap": 3}}}))
+        self.assertEqual(self.call("PUT", "/api/settings", {"weekly_cap": {"side-project": {"codex": 5}}})[0], 200)
+        self.assertEqual(self.ov()["projects"]["side-project"]["weekly_cap"], {"codex": 5})
+        self.assertEqual(self.call("DELETE", "/api/settings")[0], 200)
+
     def test_settings_validation_writes_nothing(self):
         bad = [{"order": ["nope"]}, {"order": "side-project"}, {"order": ["side-project", "side-project"]}, {"order": [1]},
                {"weekly_cap": {"nope": {"codex": 50}}}, {"weekly_cap": {"side-project": {"gemini": 50}}},
                {"weekly_cap": {"side-project": {"codex": 101}}}, {"weekly_cap": {"side-project": {"codex": -1}}},
                {"weekly_cap": {"side-project": {"codex": "50"}}}, {"weekly_cap": {"side-project": {"codex": True}}},
-               {"weekly_cap": {"side-project": 50}}, {"weekly_cap": []},
+               {"weekly_cap": {"side-project": 50}}, {"weekly_cap": {"side-project": {}}}, {"weekly_cap": []},
                {"primary_cap": {"codex": 101}}, {"primary_cap": {"gemini": 50}}, {"primary_cap": 5},
                {"colour": "red"},
                # a valid part next to an invalid one: nothing is written

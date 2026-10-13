@@ -115,6 +115,13 @@ class PanelTest(unittest.TestCase):
         my-app, my-api, side-project = self.overview()["projects"]
         self.assertEqual((my-api["paused"], my-api["next"], side-project["next"]), (True, False, True))
 
+    def test_decisions_open_only_has_sent_unanswered_decisions(self):
+        folder = self.projects["my-app"] / ".superpowers" / "autopilot" / "decisions"
+        (folder / "unsent.json").write_text(json.dumps(dict(DECISION, id="unsent", notified_at=None)))
+        my-app = self.overview()["projects"][0]
+        self.assertEqual([d["id"] for d in my-app["decisions_open"]], ["pay"])
+        self.assertEqual(my-app["decisions"], 2)
+
     def test_blocked_summary_is_the_latest_closed_blocked_unit(self):
         self.assertIsNone(self.overview()["projects"][1]["blocked_summary"])
         rows = [
@@ -130,6 +137,11 @@ class PanelTest(unittest.TestCase):
         o = self.overview()["projects"]
         self.assertEqual(o[1]["blocked_summary"], "novo")
         self.assertIsNone(o[0]["blocked_summary"])
+        # a blocked unit in the history does not show while no engine has the project blocked
+        row = dict(rows[1], unit_id="b4", project="side-project", summary="de outro")
+        with (self.home / "history-codex.jsonl").open("a") as f:
+            f.write(json.dumps(row) + "\n")
+        self.assertIsNone(self.overview()["projects"][2]["blocked_summary"])
 
     def test_settings_without_and_with_overrides(self):
         import overrides
