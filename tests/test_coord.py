@@ -22,7 +22,7 @@ def _hold_lock(shared, ready, release):
     assert handle is not None
     ready.set()
     release.wait(10)
-    os._exit(0)  # morre sem soltar a trava: o sistema tem de soltar
+    os._exit(0)  # dies without releasing the lock: the OS must release it
 
 
 class CoordTest(unittest.TestCase):
@@ -96,8 +96,8 @@ class CoordTest(unittest.TestCase):
         self.assertEqual(coord.group_of({"name": "my-api"}), "my-api")
 
     def test_reconcile(self):
-        coord.claim("my-app", "codex")       # reserva sem unidade aberta: some
-        coord.claim("side-project", "claude")       # unidade aberta, reserva do outro: conflito
+        coord.claim("my-app", "codex")       # claim without an open unit: removed
+        coord.claim("side-project", "claude")       # open unit, other engine's claim: conflict
         conflicts = coord.reconcile("codex", {"my-app": False, "my-api": True, "side-project": True})
         self.assertIsNone(coord.read_claim("my-app"))
         self.assertEqual(coord.read_claim("my-api")["engine"], "codex")

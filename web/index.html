@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Turno</title>
+  <link rel="stylesheet" href="/static/style.css">
+  <script type="module" src="/static/app.js"></script>
+</head>
+<body class="loading">
+  <div id="offline" class="banner" role="status" hidden></div>
+  <header id="engines" class="engines"></header>
+  <main class="grid">
+    <section id="live" class="live" aria-labelledby="live-h">
+      <h2 id="live-h"></h2>
+      <div id="live-body"></div>
+    </section>
+    <section id="projects" class="projects" aria-labelledby="projects-h">
+      <h2 id="projects-h"></h2>
+      <div id="project-list" class="project-list"></div>
+      <div id="project-detail" class="project-detail" hidden></div>
+    </section>
+    <section id="history" class="history" aria-labelledby="history-h">
+      <h2 id="history-h"></h2>
+      <ol id="history-list" class="history-list"></ol>
+      <button id="more" class="more" type="button" hidden></button>
+    </section>
+  </main>
+  <dialog id="unit" class="unit-dialog">
+    <div id="unit-body"></div>
+    <form method="dialog"><button id="unit-close" type="submit"></button></form>
+  </dialog>
+</body>
+</html>

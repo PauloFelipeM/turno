@@ -50,7 +50,7 @@ class LoopTest(unittest.TestCase):
         self.state["my-app"]["status"] = "idle"
         self.assertEqual(self.pick(), "my-api")
         self.state["my-api"]["status"] = "idle"
-        self.assertIsNone(self.pick())  # side-project é do mesmo grupo do lock ocupado
+        self.assertIsNone(self.pick())  # side-project is in the same group as the held lock
         self.coord.unlock(held)
 
     def test_handoff_goes_first_even_when_dirty(self):
@@ -142,7 +142,7 @@ class LoopTest(unittest.TestCase):
         win = self.ap.schedule.Window("fri 19:00", "sun 03:00")
         for p in self.projects:
             self.state[p["name"]]["status"] = "idle"
-        self.state["my-app"]["status"] = "waiting"  # não termina o loop
+        self.state["my-app"]["status"] = "waiting"  # does not end the loop
         self.ap.run_once(self.cfg, engine, self.state, win, now=dt.datetime(2026, 10, 2, 19, 5))
         self.ap.run_once(self.cfg, engine, self.state, win, now=dt.datetime(2026, 10, 2, 19, 10))
         self.ap.run_once(self.cfg, engine, self.state, win, now=dt.datetime(2026, 10, 4, 3, 1))
@@ -197,7 +197,7 @@ class LoopTest(unittest.TestCase):
             self.state[p["name"]]["status"] = "waiting"
         self.ap.run_once(self.cfg, engine, self.state)
         log = self.ap.LOG.read_text() if self.ap.LOG.exists() else ""
-        self.assertNotIn("nada elegível", log)
+        self.assertNotIn("nothing eligible", log)
 
     def test_finished_unit_does_not_log_the_wait(self):
         engine = helpers.FakeEngine(TRUE, limits=self.limits)
@@ -205,8 +205,8 @@ class LoopTest(unittest.TestCase):
         self.state["my-app"]["status"] = self.state["side-project"]["status"] = "idle"
         self.ap.run_once(self.cfg, engine, self.state)
         log = self.ap.LOG.read_text()
-        self.assertIn("my-api: unidade nova", log)
-        self.assertNotIn("aguardando até", log)
+        self.assertIn("my-api: new unit", log)
+        self.assertNotIn("waiting until", log)
 
     def test_claude_waits_when_quota_is_unknown(self):
         engine = helpers.FakeEngine(TRUE, limits={})

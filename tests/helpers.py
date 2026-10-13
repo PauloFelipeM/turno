@@ -1,5 +1,6 @@
-"""Carrega o autopilot com todo efeito colateral (estado, log, shared, ntfy) numa pasta temporária."""
+"""Loads the autopilot with every side effect (state, log, shared, ntfy) in a temporary folder."""
 
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -7,14 +8,16 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-MODULES = ("autopilot", "coord", "engines", "schedule")
+MODULES = ("autopilot", "coord", "engines", "schedule", "paths", "history", "backlog", "feed", "panel", "server")
 
 
 def load(tmp):
+    os.environ["TURNO_HOME"] = str(tmp)
     for name in MODULES:
         sys.modules.pop(name, None)
     import autopilot as ap
     ap.STATE, ap.LOG, ap.RUNS = tmp / "state.json", tmp / "log", tmp / "runs"
+    ap.HISTORY = tmp / "history-codex.jsonl"
     ap.SECRETS = tmp / "secrets.toml"
     if "coord" in sys.modules:
         sys.modules["coord"].SHARED = tmp / "shared"
@@ -34,7 +37,7 @@ def git_repo(path):
 
 
 class FakeEngine:
-    """Motor de teste: roda `cmd` e não lê cota de verdade."""
+    """Test engine: runs `cmd` and never reads a real quota."""
 
     label = "Fake"
     needs_limits = False
@@ -73,3 +76,20 @@ class FakeEngine:
 
     def close_unit(self, s):
         pass
+
+
+DEFAULTS = '[defaults]\norchestrator_model = "m"\norchestrator_effort = "medium"\nprimary_cap = 100\n'
+
+
+def make_home(home, topic="segredo-xyz"):
+    """Sample data folder: Codex and Claude, three projects, and the ntfy topic in both places."""
+    home = Path(home)
+    projects = {}
+    for name in ("my-app", "my-api", "side-project"):
+        projects[name] = home / "projects" / name
+        (projects[name] / ".superpowers" / "autopilot" / "decisions").mkdir(parents=True)
+    body = "".join(f'\n[[project]]\nname = "{n}"\npath = "{p}"\nweekly_cap = 90\n' for n, p in projects.items())
+    (home / "projects.toml").write_text(DEFAULTS + f'\n[notify]\ntopic = "{topic}"\n' + body)
+    (home / "claude.toml").write_text('[instance]\nname = "claude"\n\n[engine]\nkind = "claude"\n\n' + DEFAULTS + body)
+    (home / "secrets.toml").write_text(f'[notify]\ntopic = "{topic}"\n')
+    return projects

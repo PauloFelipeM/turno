@@ -1,4 +1,4 @@
-# Gerados pelo loop
+# Written by the loop
 state.json
 state-*.json
 *.tmp
@@ -9,5 +9,9 @@ runs-*/
 shared/
 __pycache__/
 
-# O tópico do ntfy é segredo.
+# The real config lives in ~/.turno.
+projects.toml
+claude.toml
+
+# The ntfy topic is a secret.
 secrets.toml

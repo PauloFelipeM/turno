@@ -204,7 +204,7 @@ class ClaudeEngineTest(unittest.TestCase):
 
     def test_cached_limits_are_reused(self):
         self.engine.record(self.state, [rate_event()["rate_limit_info"]])
-        self.engine.probe = lambda state: self.fail("não devia consultar")
+        self.engine.probe = lambda state: self.fail("should not query")
         self.assertIn("primary", self.engine.limits(self.state, max_age=1800))
 
     def test_make_engine(self):

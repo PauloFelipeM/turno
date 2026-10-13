@@ -1,4 +1,4 @@
-"""Motores do autopilot: como cada CLI roda, lê a cota e diz como uma execução terminou."""
+"""Engines: how each CLI runs, reads the quota and reports how a run ended."""
 
 import datetime
 import json
@@ -15,15 +15,15 @@ import schedule
 
 
 def log(msg):
-    """Trocada pelo log do autopilot.py ao importar."""
+    """Replaced by autopilot.py's log on import."""
     print(msg, flush=True)
 
 
-# --- genéricos ---------------------------------------------------------------------------------
+# --- generic -----------------------------------------------------------------------------
 
 
 def window(limits, key):
-    """(uso em %, resets_at) de uma janela; janela já resetada conta como 0%."""
+    """(usage in %, resets_at) of a window; a window that already reset counts as 0%."""
     w = (limits or {}).get(key) or {}
     used, resets = float(w.get("used_percent") or 0), int(w.get("resets_at") or 0)
     if resets and resets <= time.time():
@@ -56,22 +56,34 @@ def read_text(path):
         return ""
 
 
+def tail_output(text, lines=20, chars=2000):
+    """The end of a command's output, for the live feed."""
+    out = "\n".join(str(text or "").splitlines()[-lines:])
+    return out[-chars:]
+
+
+def shell_command(cmd):
+    """Strips the `/bin/bash -lc '...'` that Codex wraps around the command."""
+    m = re.fullmatch(r"\S*/(?:ba)?sh -lc (['\"])(.*)\1", cmd or "", re.S)
+    return m.group(2) if m else (cmd or "")
+
+
 def failure_text(out, err):
-    """Eventos de falha do JSONL mais o stderr, e se houve algum evento de falha."""
+    """Failure events of the JSONL plus stderr, and whether there was any failure event."""
     failures = [json.dumps(ev, ensure_ascii=False) for ev in read_events(out)
                 if ev.get("type") in ("error", "turn.failed")]
     return "\n".join(failures) + "\n" + read_text(err), bool(failures)
 
 
 def retry_at(text):
-    """Horário do "try again at ..." da mensagem de limite, como timestamp; None se não houver."""
+    """Time of the "try again at ..." in the limit message, as a timestamp; None if absent."""
     m = re.search(r"try again at (.*?\d{1,2}:\d{2}\s*[AP]M)", text, re.I)
     if not m:
         return None
     when = re.sub(r"(\d)(st|nd|rd|th)\b", r"\1", m.group(1)).strip()
     now = datetime.datetime.now()
     try:
-        # Só a hora ("1:33 AM"): a próxima vez que ela chegar.
+        # Time only ("1:33 AM"): the next time it comes around.
         t = datetime.datetime.strptime(when.upper(), "%I:%M %p").time()
         at = datetime.datetime.combine(now.date(), t)
         if at <= now:
@@ -91,7 +103,7 @@ def retry_at(text):
 
 
 def find_rate_limits(node):
-    """Procura a chave `rate_limits` em qualquer nível de um evento do log da sessão."""
+    """Looks for the `rate_limits` key at any level of a session log event."""
     if isinstance(node, dict):
         if isinstance(node.get("rate_limits"), dict):
             return node["rate_limits"]
@@ -105,13 +117,13 @@ def find_rate_limits(node):
 
 
 def has_windows(limits):
-    # O log também traz snapshots de outros limites (ex.: "premium") com as janelas vazias;
-    # tomá-los como o uso atual faria a cota parecer 0% e esconderia o horário do reset.
+    # The log also has snapshots of other limits (e.g. "premium") with empty windows; taking
+    # them as the current usage would make the quota look like 0% and hide the reset time.
     return isinstance(limits.get("primary"), dict) or isinstance(limits.get("secondary"), dict)
 
 
 def snapshots(path):
-    """Todos os `rate_limits` com janelas de um log de sessão, em ordem."""
+    """Every `rate_limits` with windows in a session log, in order."""
     out = []
     try:
         with open(path, errors="replace") as f:
@@ -134,13 +146,13 @@ def find_codex():
     found = shutil.which("codex")
     if found:
         return found
-    # A extensão do VS Code traz o binário; usa a versão mais nova instalada.
+    # The VS Code extension ships the binary; use the newest installed version.
     exts = Path.home() / ".vscode-server" / "extensions"
     bins = sorted(exts.glob("openai.chatgpt-*/bin/linux-x86_64/codex"),
                   key=lambda p: [int(x) for x in re.findall(r"\d+", p.parts[-4])])
     if bins:
         return str(bins[-1])
-    sys.exit("codex não encontrado; defina CODEX_BIN")
+    sys.exit("codex not found; set CODEX_BIN")
 
 
 
@@ -156,13 +168,47 @@ class CodexEngine:
     label = "Codex"
     needs_limits = False
 
+    QUIET = {"thread.started", "turn.started", "turn.completed"}
+
+    @staticmethod
+    def feed_items(ev):
+        """One `codex exec --json` event -> live feed items.
+
+        Codex does not say which subagent was called: only the wait for one shows up (`wait`).
+        """
+        t = ev.get("type")
+        if t in ("error", "turn.failed"):
+            msg = ev.get("message") or (ev.get("error") or {}).get("message") or ""
+            return [{"kind": "error", "text": str(msg)}]
+        if t in CodexEngine.QUIET:
+            return []
+        if t not in ("item.started", "item.completed"):
+            return [{"kind": "unknown", "text": str(t)}]
+        item = ev.get("item") or {}
+        kind, done = item.get("type"), t == "item.completed"
+        if kind == "agent_message":
+            return [{"kind": "message", "text": item.get("text") or ""}] if done else []
+        if kind == "command_execution":
+            cmd = shell_command(item.get("command"))
+            if not done:
+                return [{"kind": "command", "text": cmd}]
+            return [{"kind": "command_done", "text": cmd, "exit_code": item.get("exit_code"),
+                     "output": tail_output(item.get("aggregated_output"))}]
+        if kind == "file_change":
+            return [{"kind": "file", "text": c.get("path") or ""} for c in item.get("changes") or []] if done else []
+        if kind == "collab_tool_call":
+            return [{"kind": "wait", "text": ""}] if not done and item.get("tool") == "wait" else []
+        if kind == "error":
+            return [{"kind": "error", "text": item.get("message") or ""}]
+        return [{"kind": "unknown", "text": str(kind)}] if done else []
+
     def __init__(self, cfg, home=None):
         self.cfg = cfg
         self.home = home or Path.home() / ".codex"
         self.binary = None
 
     def _bin(self):
-        # Procurado de novo se sumir: a extensão do VS Code troca de pasta quando se atualiza.
+        # Looked up again if it disappears: the VS Code extension changes folder when it updates.
         if not self.binary or not Path(self.binary).exists():
             self.binary = find_codex()
         return self.binary
@@ -172,7 +218,7 @@ class CodexEngine:
         return f"codex={self._bin()}, orquestrador={d['orchestrator_model']}/{d['orchestrator_effort']}"
 
     def limits(self, state, max_age=None):
-        """O snapshot mais recente entre as sessões mais novas (inclui uso interativo seu)."""
+        """The latest snapshot among the newest sessions (includes your interactive use)."""
         sessions = self.home / "sessions"
         files = sorted(sessions.rglob("rollout-*.jsonl"), key=lambda p: p.stat().st_mtime, reverse=True)
         for path in files[:10]:
@@ -185,7 +231,7 @@ class CodexEngine:
         return bool(s["session"])
 
     def begin(self, s, resume):
-        pass  # o id da sessão do Codex só aparece na saída
+        pass  # the Codex session id only shows up in the output
 
     def command(self, state, project, s, resume, stem):
         d = self.cfg["defaults"]
@@ -193,7 +239,7 @@ class CodexEngine:
                  "-c", f'model_reasoning_effort="{d["orchestrator_effort"]}"',
                  "-c", f"agents.max_concurrent_threads_per_session={d['max_subagents']}",
                  "--enable", "multi_agent",
-                 # Docker, rede e instalação de dependências exigem sair do sandbox.
+                 # Docker, network and installing dependencies require leaving the sandbox.
                  "--dangerously-bypass-approvals-and-sandbox"]
         codex = self._bin()
         if resume:
@@ -205,20 +251,20 @@ class CodexEngine:
             s["session"] = thread_id(out)
 
     def classify(self, out, err, code):
-        """('usage_limit' | 'error' | 'ok', horário do reset ou None, se o limite é duro)."""
+        """('usage_limit' | 'error' | 'ok', reset time or None, whether the limit is hard)."""
         text, failed = failure_text(out, err)
         if re.search(r"usage limit|usage_limit|rate.?limit", text, re.I):
             hard = bool(re.search(r"usage limit|usage_limit", text, re.I))
             limits = self.limits(None)
             resets = [r for used, r in (window(limits, "primary"), window(limits, "secondary")) if used >= 90 and r]
             if not resets and (at := retry_at(text)):
-                # Sem snapshot com o reset: vale o horário que a própria mensagem de erro informa.
+                # No snapshot with the reset: use the time the error message itself gives.
                 resets = [at]
             return "usage_limit", (max(resets) if resets else None), hard
         return ("error" if failed or code != 0 else "ok"), None, False
 
     def unit_cost(self, state, s):
-        """Custo da unidade em pontos percentuais, do primeiro ao último snapshot da sessão."""
+        """Unit cost in percentage points, from the session's first to last snapshot."""
         thread = s["session"]
         files = list((self.home / "sessions").rglob(f"rollout-*{thread}*.jsonl")) if thread else []
         snaps = [x for f in files for x in snapshots(f)]
@@ -227,7 +273,7 @@ class CodexEngine:
         cost = {}
         for key in ("primary", "secondary"):
             a, b = (snaps[0].get(key) or {}), (snaps[-1].get(key) or {})
-            # Reset no meio da unidade invalida a medida daquela janela.
+            # A reset in the middle of the unit invalidates that window's measure.
             if a.get("resets_at") != b.get("resets_at"):
                 return None
             cost[key] = max(0.0, float(b.get("used_percent") or 0) - float(a.get("used_percent") or 0))
@@ -252,11 +298,11 @@ def find_claude():
     found = shutil.which("claude") or (Path.home() / ".local" / "bin" / "claude")
     if Path(found).exists():
         return str(found)
-    sys.exit("claude não encontrado; defina CLAUDE_BIN")
+    sys.exit("claude not found; set CLAUDE_BIN")
 
 
 def to_limits(info):
-    """rate_limit_info do Claude -> o formato do Codex: primary (5 h), secondary (7 dias), extra."""
+    """Claude's rate_limit_info -> the Codex format: primary (5 h), secondary (7 days), extra."""
     windows = info.get("unifiedWindows") or {}
 
     def convert(w):
@@ -280,7 +326,7 @@ def rate_infos(events):
 
 
 def tool_result_texts(events):
-    """Textos dos resultados de ferramenta (inclui as respostas dos subagentes), não os do orquestrador."""
+    """Texts of tool results (including the subagents' answers), not the orchestrator's."""
     for e in events:
         if e.get("type") != "user":
             continue
@@ -299,7 +345,34 @@ def tool_result_texts(events):
 class ClaudeEngine:
     name = "claude"
     label = "Claude"
-    needs_limits = True  # sem saber o uso, não dá para respeitar o teto de 90%
+    needs_limits = True  # without knowing the usage, the 90% cap cannot be honoured
+
+    KNOWN = {"system", "user", "rate_limit_event", "tool_progress", "stream_event"}
+
+    @staticmethod
+    def feed_items(ev):
+        """One `claude -p --output-format stream-json` event -> live feed items."""
+        t = ev.get("type")
+        if t == "result":
+            return [{"kind": "error", "text": str(ev.get("result") or "")[:2000]}] if ev.get("is_error") else []
+        if t != "assistant":
+            return [] if t in ClaudeEngine.KNOWN else [{"kind": "unknown", "text": str(t)}]
+        top = ev.get("parent_tool_use_id") is None  # subagent text is left out; its work is not
+        out = []
+        for c in (ev.get("message") or {}).get("content") or []:
+            if not isinstance(c, dict):
+                continue
+            if c.get("type") == "text" and top and (c.get("text") or "").strip():
+                out.append({"kind": "message", "text": c["text"]})
+            elif c.get("type") == "tool_use":
+                name, args = c.get("name"), c.get("input") or {}
+                if name in ("Agent", "Task"):
+                    out.append({"kind": "role", "role": args.get("subagent_type"), "text": args.get("description") or ""})
+                elif name == "Bash":
+                    out.append({"kind": "command", "text": args.get("command") or ""})
+                elif name in ("Edit", "Write", "NotebookEdit"):
+                    out.append({"kind": "file", "text": args.get("file_path") or args.get("notebook_path") or ""})
+        return out
 
     def __init__(self, cfg, home=None, roles=None):
         self.cfg = cfg
@@ -320,24 +393,24 @@ class ClaudeEngine:
         return state.setdefault("_engine", {})
 
     def limits(self, state, max_age=1800):
-        """A última leitura da cota; consulta de novo se ela tiver mais de `max_age` segundos."""
+        """The last quota reading; queries again if it is older than `max_age` seconds."""
         cache = self._cache(state)
         if time.time() - cache.get("limits_at", 0) > max_age and not self.probe(state):
-            return {}  # a consulta falhou: uma leitura velha não serve para decidir
+            return {}  # the query failed: an old reading is no basis for deciding
         return cache.get("limits") or {}
 
     def probe(self, state):
-        """Consulta mínima ao Haiku, sem plugins nem hooks, só para ler o evento de cota. True se leu."""
+        """A minimal Haiku query, without plugins or hooks, only to read the quota event. True if read."""
         cmd = [self._bin(), "-p", "ok", "--model", "haiku", "--max-turns", "1", "--safe-mode",
                "--no-session-persistence", "--output-format", "stream-json", "--verbose"]
         try:
             r = subprocess.run(cmd, stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=180)
         except (OSError, subprocess.TimeoutExpired) as e:
-            log(f"consulta de cota do Claude falhou: {e}")
+            log(f"Claude quota query failed: {e}")
             return False
         infos = rate_infos(parse_events(r.stdout.splitlines()))
         if not infos:
-            log(f"consulta de cota do Claude sem evento de cota (exit={r.returncode})")
+            log(f"Claude quota query without a quota event (exit={r.returncode})")
             return False
         self.record(state, infos)
         return True
@@ -351,9 +424,9 @@ class ClaudeEngine:
             merged.update(limits)
             merged.setdefault("extra", {}).update(extra)
         cache.update(limits=merged, limits_at=time.time())
-        # Janela além das gerais = a cota própria do Fable (aparece nas execuções com Fable). Ela
-        # tem teto como a semanal: o planejamento vai para o Opus antes de esgotá-la, para sobrar
-        # Fable para o Paulo. O aviso do próprio Claude Code (allowed_warning) também conta.
+        # A window beyond the general ones = Fable's own quota (it shows up in runs with Fable). It
+        # has a cap like the weekly one: planning moves to Opus before it runs out, so the owner
+        # keeps some Fable. Claude Code's own warning (allowed_warning) also counts.
         cap = float(self.cfg.get("defaults", {}).get("fable_cap", 80))
         for info in infos:
             warned = info.get("status") in ("allowed_warning", "rejected")
@@ -361,16 +434,16 @@ class ClaudeEngine:
                 if w["resets_at"] <= time.time():
                     continue
                 if w["used_percent"] >= cap:
-                    self._fable_out(state, w["resets_at"], f"janela {key} em {w['used_percent']:.0f}%, teto {cap:.0f}%")
+                    self._fable_out(state, w["resets_at"], f"window {key} at {w['used_percent']:.0f}%, cap {cap:.0f}%")
                 elif warned:
-                    self._fable_out(state, w["resets_at"], f"aviso do Claude Code com a janela {key} em {w['used_percent']:.0f}%")
+                    self._fable_out(state, w["resets_at"], f"Claude Code warning with window {key} at {w['used_percent']:.0f}%")
 
     def _fable_out(self, state, until, why):
         cache = self._cache(state)
         if cache.get("fable_exhausted_until", 0) < until:
             cache["fable_exhausted_until"] = until
-            log(f"Fable poupado até {time.strftime('%F %T', time.localtime(until))} ({why}); "
-                f"planner e plan-reviewer passam para o Opus")
+            log(f"Fable spared until {time.strftime('%F %T', time.localtime(until))} ({why}); "
+                f"planner and plan-reviewer move to Opus")
 
     def fable_available(self, state):
         return self._cache(state).get("fable_exhausted_until", 0) <= time.time()
@@ -381,7 +454,7 @@ class ClaudeEngine:
 
     def begin(self, s, resume):
         if not resume:
-            # O id é escolhido aqui e gravado antes de a CLI começar: um corte nunca o perde.
+            # The id is chosen here and saved before the CLI starts: a cut never loses it.
             s["session"] = str(uuid.uuid4())
 
     def write_agents(self, state, path):
@@ -418,15 +491,15 @@ class ClaudeEngine:
             until = max((w["resets_at"] for w in extra.values()), default=0)
             if until <= time.time():
                 until = schedule.next_occurrence("sun 04:00", datetime.datetime.now()).timestamp()
-            self._fable_out(state, until, "mensagem de limite num subagente")
+            self._fable_out(state, until, "limit message in a subagent")
 
     def classify(self, out, err, code):
         events = read_events(out)
         result = next((e for e in reversed(events) if e.get("type") == "result"), None)
         if result and not result.get("is_error") and code == 0:
-            return "ok", None, False  # terminou bem: um evento "rejected" de outro modelo não conta
-        # Só conta a recusa que esgotou as janelas gerais: a de outro modelo (o Fable de um
-        # subagente) não impede o orquestrador de continuar.
+            return "ok", None, False  # ended fine: a "rejected" event of another model does not count
+        # Only a rejection that exhausted the general windows counts: another model's (a subagent's
+        # Fable) does not stop the orchestrator from going on.
         resets = []
         for info in rate_infos(events):
             if info.get("status") != "rejected":
@@ -449,10 +522,10 @@ class ClaudeEngine:
         return "error", None, False
 
     def unit_cost(self, state, s):
-        """Uso depois da unidade (consulta nova) menos o do início dela, por janela."""
+        """Usage after the unit (fresh query) minus usage at its start, per window."""
         start = s.get("unit_start_limits")
         if not self.probe(state):
-            return None  # sem leitura nova, o "fim" seria o próprio início e o custo daria zero
+            return None  # without a fresh reading the "end" would be the start itself and the cost would be zero
         end = self._cache(state).get("limits")
         if not start or not end:
             return None
@@ -468,9 +541,11 @@ class ClaudeEngine:
         s["unit_start_limits"] = None
 
 
+ENGINES = {"codex": CodexEngine, "claude": ClaudeEngine}
+
+
 def make_engine(cfg):
     kind = (cfg.get("engine") or {}).get("kind", "codex")
-    engines = {"codex": CodexEngine, "claude": ClaudeEngine}
-    if kind not in engines:
-        sys.exit(f"motor desconhecido em [engine] kind: {kind}")
-    return engines[kind](cfg)
+    if kind not in ENGINES:
+        sys.exit(f"unknown engine in [engine] kind: {kind}")
+    return ENGINES[kind](cfg)

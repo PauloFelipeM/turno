@@ -1,7 +1,7 @@
 import datetime as dt
 import unittest
 
-import helpers  # noqa: F401  (põe a raiz no sys.path)
+import helpers  # noqa: F401  (puts the root on sys.path)
 import schedule
 
 FRI = dt.datetime(2026, 10, 2)
@@ -21,7 +21,7 @@ class WindowTest(unittest.TestCase):
         self.assertTrue(self.w.contains(at(1, 12, 0)))
         self.assertTrue(self.w.contains(at(2, 2, 59, 59)))
         self.assertFalse(self.w.contains(at(2, 3, 0)))
-        self.assertFalse(self.w.contains(at(4, 10, 0)))  # terça
+        self.assertFalse(self.w.contains(at(4, 10, 0)))  # Tuesday
 
     def test_no_new_unit_in_the_last_15_minutes(self):
         self.assertTrue(self.w.can_start(at(2, 2, 44)))
@@ -31,8 +31,8 @@ class WindowTest(unittest.TestCase):
     def test_end_and_next_start(self):
         self.assertEqual(self.w.end_of(at(0, 19, 0)), at(2, 3, 0))
         self.assertEqual(self.w.next_start(at(0, 18, 0)), at(0, 19, 0))
-        self.assertEqual(self.w.next_start(at(4, 10, 0)), at(7, 19, 0))  # terça -> sexta seguinte
-        self.assertEqual(self.w.next_start(at(1, 9, 0)), at(1, 9, 0))  # já dentro
+        self.assertEqual(self.w.next_start(at(4, 10, 0)), at(7, 19, 0))  # Tuesday -> next Friday
+        self.assertEqual(self.w.next_start(at(1, 9, 0)), at(1, 9, 0))  # already inside
 
     def test_window_crossing_the_week_boundary(self):
         w = schedule.Window("sat 20:00", "mon 02:00")

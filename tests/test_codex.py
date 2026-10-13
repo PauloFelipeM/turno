@@ -52,7 +52,7 @@ class CodexEngineTest(unittest.TestCase):
     def test_resume_command(self):
         cfg = {"defaults": {"orchestrator_model": "m", "orchestrator_effort": "medium", "max_subagents": 2}}
         engine = self.engines.CodexEngine(cfg, home=self.home)
-        engine.binary = sys.executable  # existe: não dispara a busca pelo binário
+        engine.binary = sys.executable  # exists: does not trigger the binary search
         cmd, env = engine.command({}, {"name": "x", "path": "/tmp"}, {"session": "t1"}, True, self.tmp / "stem")
         self.assertEqual(cmd[:3], [sys.executable, "exec", "resume"])
         self.assertIn("t1", cmd)

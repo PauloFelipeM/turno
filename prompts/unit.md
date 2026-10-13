@@ -58,6 +58,12 @@ option ids, file names and commit messages follow the project's own rules.
    `{"status": "worked" | "waiting" | "idle" | "blocked", "unit": "<what you did>",
    "summary": "<one paragraph>", "milestone": "<optional>"}`, with `unit`, `summary` and `milestone`
    in pt-BR.
+   Also rewrite `.superpowers/autopilot/backlog.json` whole, every unit, from the backlog that
+   docs/autopilot.md points to, in backlog order:
+   `{"items": [{"id": "<kebab-case>", "title": "<pt-BR>", "state": "todo" | "spec" | "plan" | "doing" | "done",
+   "tasks": {"done": <n>, "total": <n>}}]}`. `todo` = no approved spec, `spec` = spec approved,
+   `plan` = plan approved, `doing` = tasks under way, `done` = item finished. `tasks` goes only on
+   `doing` items, counted from the active plan and its ledger. The file is outside git: never commit it.
    Set `milestone` (a few words, e.g. "Spec do chat aprovada", "Estoque integrado e enviado") only when
    a backlog item's spec or plan was approved or the item was finished; it is sent to the owner's
    phone. Use `idle` only when docs/autopilot.md says there is nothing left. Then end your turn. Do
