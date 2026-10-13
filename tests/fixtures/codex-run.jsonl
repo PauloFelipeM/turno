@@ -1,0 +1,12 @@
+{"type":"thread.started","thread_id":"t-1"}
+{"type":"turn.started"}
+{"type":"item.completed","item":{"id":"item_0","type":"agent_message","text":"Vou retomar a tarefa 4."}}
+{"type":"item.started","item":{"id":"item_1","type":"command_execution","command":"/bin/bash -lc 'php artisan test --filter=Clinic'","aggregated_output":"","exit_code":null,"status":"in_progress"}}
+{"type":"item.completed","item":{"id":"item_1","type":"command_execution","command":"/bin/bash -lc 'php artisan test --filter=Clinic'","aggregated_output":"PASS  Tests\\Feature\\ClinicTest\n\nTests:  12 passed\n","exit_code":0,"status":"completed"}}
+{"type":"item.started","item":{"id":"item_2","type":"collab_tool_call","tool":"wait","sender_thread_id":"t-1","receiver_thread_ids":[],"prompt":null,"agents_states":{},"status":"in_progress"}}
+{"type":"item.completed","item":{"id":"item_2","type":"collab_tool_call","tool":"wait","sender_thread_id":"t-1","receiver_thread_ids":[],"prompt":null,"agents_states":{},"status":"completed"}}
+{"type":"item.started","item":{"id":"item_3","type":"file_change","changes":[{"path":"/tmp/proj/app/Policies/ClinicPolicy.php","kind":"update"}],"status":"in_progress"}}
+{"type":"item.completed","item":{"id":"item_3","type":"file_change","changes":[{"path":"/tmp/proj/app/Policies/ClinicPolicy.php","kind":"update"}],"status":"completed"}}
+{"type":"item.completed","item":{"id":"item_4","type":"web_search","query":"x","action":{"type":"other"}}}
+{"type":"error","message":"Falling back from WebSockets to HTTPS transport."}
+{"type":"turn.completed","usage":{"input_tokens":1,"output_tokens":1}}

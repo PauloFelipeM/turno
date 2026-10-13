@@ -56,6 +56,18 @@ def read_text(path):
         return ""
 
 
+def tail_output(text, lines=20, chars=2000):
+    """O fim de uma saída de comando, para o fluxo ao vivo."""
+    out = "\n".join(str(text or "").splitlines()[-lines:])
+    return out[-chars:]
+
+
+def shell_command(cmd):
+    """Tira o `/bin/bash -lc '...'` que o Codex põe em volta do comando."""
+    m = re.fullmatch(r"\S*/(?:ba)?sh -lc (['\"])(.*)\1", cmd or "", re.S)
+    return m.group(2) if m else (cmd or "")
+
+
 def failure_text(out, err):
     """Eventos de falha do JSONL mais o stderr, e se houve algum evento de falha."""
     failures = [json.dumps(ev, ensure_ascii=False) for ev in read_events(out)
@@ -155,6 +167,40 @@ class CodexEngine:
     name = "codex"
     label = "Codex"
     needs_limits = False
+
+    QUIET = {"thread.started", "turn.started", "turn.completed"}
+
+    @staticmethod
+    def feed_items(ev):
+        """Um evento do `codex exec --json` -> itens do fluxo ao vivo.
+
+        O Codex não diz qual subagente foi acionado: só a espera por um aparece (`wait`).
+        """
+        t = ev.get("type")
+        if t in ("error", "turn.failed"):
+            msg = ev.get("message") or (ev.get("error") or {}).get("message") or ""
+            return [{"kind": "error", "text": str(msg)}]
+        if t in CodexEngine.QUIET:
+            return []
+        if t not in ("item.started", "item.completed"):
+            return [{"kind": "unknown", "text": str(t)}]
+        item = ev.get("item") or {}
+        kind, done = item.get("type"), t == "item.completed"
+        if kind == "agent_message":
+            return [{"kind": "message", "text": item.get("text") or ""}] if done else []
+        if kind == "command_execution":
+            cmd = shell_command(item.get("command"))
+            if not done:
+                return [{"kind": "command", "text": cmd}]
+            return [{"kind": "command_done", "text": cmd, "exit_code": item.get("exit_code"),
+                     "output": tail_output(item.get("aggregated_output"))}]
+        if kind == "file_change":
+            return [{"kind": "file", "text": c.get("path") or ""} for c in item.get("changes") or []] if done else []
+        if kind == "collab_tool_call":
+            return [{"kind": "wait", "text": ""}] if not done and item.get("tool") == "wait" else []
+        if kind == "error":
+            return [{"kind": "error", "text": item.get("message") or ""}]
+        return [{"kind": "unknown", "text": str(kind)}] if done else []
 
     def __init__(self, cfg, home=None):
         self.cfg = cfg
@@ -300,6 +346,33 @@ class ClaudeEngine:
     name = "claude"
     label = "Claude"
     needs_limits = True  # sem saber o uso, não dá para respeitar o teto de 90%
+
+    KNOWN = {"system", "user", "rate_limit_event", "tool_progress", "stream_event"}
+
+    @staticmethod
+    def feed_items(ev):
+        """Um evento do `claude -p --output-format stream-json` -> itens do fluxo ao vivo."""
+        t = ev.get("type")
+        if t == "result":
+            return [{"kind": "error", "text": str(ev.get("result") or "")[:2000]}] if ev.get("is_error") else []
+        if t != "assistant":
+            return [] if t in ClaudeEngine.KNOWN else [{"kind": "unknown", "text": str(t)}]
+        top = ev.get("parent_tool_use_id") is None  # texto de subagente não entra; o trabalho dele, sim
+        out = []
+        for c in (ev.get("message") or {}).get("content") or []:
+            if not isinstance(c, dict):
+                continue
+            if c.get("type") == "text" and top and (c.get("text") or "").strip():
+                out.append({"kind": "message", "text": c["text"]})
+            elif c.get("type") == "tool_use":
+                name, args = c.get("name"), c.get("input") or {}
+                if name in ("Agent", "Task"):
+                    out.append({"kind": "role", "role": args.get("subagent_type"), "text": args.get("description") or ""})
+                elif name == "Bash":
+                    out.append({"kind": "command", "text": args.get("command") or ""})
+                elif name in ("Edit", "Write", "NotebookEdit"):
+                    out.append({"kind": "file", "text": args.get("file_path") or args.get("notebook_path") or ""})
+        return out
 
     def __init__(self, cfg, home=None, roles=None):
         self.cfg = cfg
@@ -468,9 +541,11 @@ class ClaudeEngine:
         s["unit_start_limits"] = None
 
 
+ENGINES = {"codex": CodexEngine, "claude": ClaudeEngine}
+
+
 def make_engine(cfg):
     kind = (cfg.get("engine") or {}).get("kind", "codex")
-    engines = {"codex": CodexEngine, "claude": ClaudeEngine}
-    if kind not in engines:
+    if kind not in ENGINES:
         sys.exit(f"motor desconhecido em [engine] kind: {kind}")
-    return engines[kind](cfg)
+    return ENGINES[kind](cfg)

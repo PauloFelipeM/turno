@@ -1,0 +1,11 @@
+{"type":"system","subtype":"init","session_id":"s-1"}
+{"type":"assistant","message":{"content":[{"type":"text","text":"Vou ler o ledger."}]},"parent_tool_use_id":null}
+{"type":"assistant","message":{"content":[{"type":"tool_use","id":"tu1","name":"Bash","input":{"command":"git status"}}]},"parent_tool_use_id":null}
+{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"tu1","content":"clean"}]},"parent_tool_use_id":null}
+{"type":"assistant","message":{"content":[{"type":"tool_use","id":"tu2","name":"Agent","input":{"subagent_type":"planner","description":"Escrever a spec","prompt":"..."}}]},"parent_tool_use_id":null}
+{"type":"system","subtype":"task_started","tool_use_id":"tu2","subagent_type":"planner"}
+{"type":"assistant","message":{"content":[{"type":"text","text":"texto do subagente"},{"type":"tool_use","id":"tu3","name":"Write","input":{"file_path":"/tmp/proj/docs/spec.md","content":"x"}}]},"parent_tool_use_id":"tu2"}
+{"type":"assistant","message":{"content":[{"type":"tool_use","id":"tu4","name":"Read","input":{"file_path":"/tmp/proj/a"}}]},"parent_tool_use_id":null}
+{"type":"rate_limit_event","rate_limit_info":{"status":"allowed"}}
+{"type":"mystery"}
+{"type":"result","is_error":true,"result":"Claude AI usage limit reached"}
