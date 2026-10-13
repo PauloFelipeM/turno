@@ -3,7 +3,7 @@ import T from "./i18n/pt-BR.js";
 
 const $ = (sel) => document.querySelector(sel);
 const PAGE = 30;
-const view = { overview: null, filter: null, feeds: new Map(), units: [], exhausted: false };
+const view = { overview: null, filter: null, feeds: new Map(), units: [], exhausted: false, liveEls: new Map() };
 
 function t(path, vars = {}) {
   const raw = path.split(".").reduce((o, k) => (o == null ? o : o[k]), T);
@@ -35,6 +35,16 @@ async function getJSON(url) {
   const r = await fetch(url, { cache: "no-store" });
   if (!r.ok) throw new Error(`${url}: ${r.status}`);
   return r.json();
+}
+
+// Guarda e devolve o foco do teclado quando a lista é redesenhada.
+function keepFocus(attr, render) {
+  const key = document.activeElement && document.activeElement.dataset ? document.activeElement.dataset[attr] : null;
+  render();
+  if (key == null) return;
+  for (const el of document.querySelectorAll(`[data-${attr}]`)) {
+    if (el.dataset[attr] === key) { el.focus(); break; }
+  }
 }
 
 // --- motores ---------------------------------------------------------------------------------
@@ -91,17 +101,22 @@ function progress(b) {
   const tasks = cur && cur.tasks;
   return [
     cur ? h("span", {}, cur.title, " · ", h("span", { class: "muted" }, tasks ? `${tasks.done}/${tasks.total}` : t(`backlog.state.${cur.state}`))) : null,
-    tasks ? h("span", { class: "bar" }, h("i", { style: `width:${(100 * tasks.done) / tasks.total}%` })) : null,
+    tasks ? h("span", { class: "bar" }, h("i", { style: `width:${tasks.total ? (100 * tasks.done) / tasks.total : 0}%` })) : null,
     h("span", { class: "muted small" }, t("backlog.items", { done: b.done, total: b.total }), b.stale ? ` · ${t("backlog.stale")}` : ""),
   ];
 }
 
 function renderProjects() {
+  keepFocus("project", drawProjects);
+}
+
+function drawProjects() {
   const running = new Set(view.overview.live.map((l) => l.project));
   $("#project-list").replaceChildren(...view.overview.projects.map((p) => {
     const extra = [claimText(p.claim), p.decisions ? (p.decisions === 1 ? t("decisionsOne") : t("decisionsMany", { n: p.decisions })) : null];
     return h("button", {
       type: "button",
+      "data-project": p.name,
       class: "project" + (running.has(p.name) ? " on" : "") + (view.filter === p.name ? " sel" : ""),
       "aria-pressed": String(view.filter === p.name),
       onclick: () => selectProject(p.name),
@@ -116,13 +131,20 @@ async function selectProject(name) {
   view.filter = view.filter === name ? null : name;
   renderProjects();
   renderLive();
-  await loadUnits(true);
   const box = $("#project-detail");
-  if (!view.filter) {
-    box.hidden = true;
+  box.hidden = true;
+  await loadUnits("reset");
+  if (!view.filter) return;
+  let d;
+  try {
+    d = await getJSON(`/api/projects/${encodeURIComponent(name)}`);
+  } catch {
+    if (view.filter === name) {
+      box.hidden = false;
+      box.replaceChildren(h("p", { class: "error" }, t("loadError")));
+    }
     return;
   }
-  const d = await getJSON(`/api/projects/${encodeURIComponent(name)}`);
   if (view.filter !== name) return;
   box.hidden = false;
   box.replaceChildren(
@@ -168,6 +190,7 @@ function currentStep(items) {
 function renderLive() {
   const runs = view.overview.live.filter((l) => !view.filter || l.project === view.filter);
   const body = $("#live-body");
+  view.liveEls = new Map();
   if (!runs.length) {
     body.replaceChildren(h("p", { class: "muted" }, t("live.none")),
       ...view.overview.engines.map((e) => h("p", { class: "muted small" }, `${e.label}: ${phaseText(e)}`)));
@@ -176,38 +199,82 @@ function renderLive() {
   body.replaceChildren(...runs.map((l) => {
     const items = view.feeds.get(l.run) || [];
     const step = currentStep(items);
+    const chip = h("span", { class: "chip", hidden: !step }, step || "");
     const list = h("ol", { class: "feed", "aria-live": "polite" }, items.slice(-200).map(feedItem));
     requestAnimationFrame(() => { list.scrollTop = list.scrollHeight; });
-    return h("article", { class: "run" },
+    const article = h("article", { class: "run" },
       h("h3", {}, h("span", { class: "dot", "aria-hidden": "true" }), `${l.project} · ${engineName(l.engine)}`,
-        step ? h("span", { class: "chip" }, step) : null, h("span", { class: "muted small num" }, clock(l.started_at))),
+        chip, h("span", { class: "muted small num" }, clock(l.started_at))),
       list);
+    view.liveEls.set(l.run, { list, chip });
+    return article;
   }));
 }
 
-function addItems(run, incoming) {
+// Une itens por n (sem repetir, em ordem); devolve só os que eram novos.
+function mergeItems(run, incoming) {
   const items = view.feeds.get(run) || [];
-  const last = items.length ? items[items.length - 1].n : -1;
-  view.feeds.set(run, items.concat(incoming.filter((i) => i.n > last)).slice(-500));
+  const seen = new Set(items.map((i) => i.n));
+  const fresh = incoming.filter((i) => !seen.has(i.n));
+  view.feeds.set(run, items.concat(fresh).sort((a, b) => a.n - b.n).slice(-500));
+  return fresh.sort((a, b) => a.n - b.n);
+}
+
+function addItems(run, incoming) {
+  const fresh = mergeItems(run, incoming);
+  const els = view.liveEls.get(run);
+  if (!els) return false;
+  if (!fresh.length) return true;
+  const { list, chip } = els;
+  const atEnd = list.scrollHeight - list.scrollTop - list.clientHeight <= 24;
+  list.append(...fresh.map(feedItem));
+  while (list.children.length > 200) list.firstChild.remove();
+  if (atEnd) list.scrollTop = list.scrollHeight;
+  const step = currentStep(view.feeds.get(run));
+  chip.textContent = step || "";
+  chip.hidden = !step;
+  return true;
 }
 
 async function loadLive() {
-  for (const r of await getJSON("/api/live")) view.feeds.set(r.run, r.items.slice(-500));
+  for (const r of await getJSON("/api/live")) mergeItems(r.run, r.items);
 }
 
 // --- histórico -------------------------------------------------------------------------------
 
-async function loadUnits(reset = false) {
+// mode: "reset" (filtro mudou), "refresh" (evento: só a primeira página, mantém as já carregadas), "more".
+async function loadUnits(mode = "reset") {
   const params = new URLSearchParams({ limit: String(PAGE) });
   if (view.filter) params.set("project", view.filter);
-  if (!reset && view.units.length) params.set("before", view.units[view.units.length - 1].started_at);
-  const page = await getJSON(`/api/units?${params}`);
-  view.units = reset ? page : view.units.concat(page);
-  view.exhausted = page.length < PAGE;
+  if (mode === "more" && view.units.length) params.set("before", view.units[view.units.length - 1].started_at);
+  let page;
+  try {
+    page = await getJSON(`/api/units?${params}`);
+  } catch {
+    $("#history-list").replaceChildren(h("li", { class: "error" }, t("loadError")));
+    return;
+  }
+  if (mode === "more") {
+    view.units = view.units.concat(page);
+    view.exhausted = page.length < PAGE;
+  } else if (mode === "refresh" && page.length && view.units.length) {
+    const oldest = page[page.length - 1].started_at;
+    const ids = new Set(page.map((u) => u.unit_id));
+    const kept = view.units.filter((u) => u.started_at < oldest && !ids.has(u.unit_id));
+    view.units = page.concat(kept);
+    if (!kept.length) view.exhausted = page.length < PAGE;
+  } else {
+    view.units = page;
+    view.exhausted = page.length < PAGE;
+  }
   renderHistory();
 }
 
 function renderHistory() {
+  keepFocus("unit", drawHistory);
+}
+
+function drawHistory() {
   const list = $("#history-list");
   $("#more").hidden = view.exhausted || !view.units.length;
   if (!view.units.length) {
@@ -215,7 +282,7 @@ function renderHistory() {
     return;
   }
   list.replaceChildren(...view.units.map((u) => h("li", {},
-    h("button", { type: "button", class: "unit", onclick: () => openUnit(u.unit_id) },
+    h("button", { type: "button", class: "unit", "data-unit": u.unit_id, onclick: () => openUnit(u.unit_id) },
       h("span", { class: "num muted" }, clock(u.started_at)),
       h("b", {}, u.project),
       h("span", { class: `chip oc-${u.outcome}` }, t(`outcome.${u.outcome}`)),
@@ -225,7 +292,14 @@ function renderHistory() {
 }
 
 async function openUnit(id) {
-  const u = await getJSON(`/api/units/${encodeURIComponent(id)}`);
+  let u;
+  try {
+    u = await getJSON(`/api/units/${encodeURIComponent(id)}`);
+  } catch {
+    $("#unit-body").replaceChildren(h("p", { class: "error" }, t("loadError")));
+    $("#unit").showModal();
+    return;
+  }
   $("#unit-body").replaceChildren(
     h("h2", {}, `${u.project} · ${u.unit || t(`outcome.${u.outcome}`)}`),
     u.milestone ? h("p", {}, h("b", {}, `${t("unit.milestone")}: `), u.milestone) : null,
@@ -249,17 +323,21 @@ function connect() {
     view.overview = JSON.parse(e.data);
     const runs = new Set(view.overview.live.map((l) => l.run));
     for (const run of [...view.feeds.keys()]) if (!runs.has(run)) view.feeds.delete(run);
-    if ([...runs].some((run) => !view.feeds.has(run))) await loadLive();
     renderEngines();
     renderProjects();
     renderLive();
-    await loadUnits(true);
     document.body.classList.remove("loading");
+    if ([...runs].some((run) => !view.feeds.has(run))) {
+      try {
+        await loadLive();
+        renderLive();
+      } catch { /* o passo a passo chega nos próximos eventos */ }
+    }
+    await loadUnits("refresh");
   });
   es.addEventListener("feed", (e) => {
     const d = JSON.parse(e.data);
-    addItems(d.run, d.items);
-    if (view.overview) renderLive();
+    if (!addItems(d.run, d.items) && view.overview) renderLive();
   });
 }
 
@@ -267,7 +345,7 @@ $("#live-h").textContent = t("live.title");
 $("#projects-h").textContent = t("projects.title");
 $("#history-h").textContent = t("history.title");
 $("#more").textContent = t("history.more");
-$("#more").addEventListener("click", () => loadUnits(false));
+$("#more").addEventListener("click", () => loadUnits("more"));
 $("#unit-close").textContent = t("unit.close");
 $("#offline").textContent = t("offline");
 connect();

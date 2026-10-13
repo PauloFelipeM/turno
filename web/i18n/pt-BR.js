@@ -14,6 +14,7 @@ export default {
   reset: "reset {when}",
   cap: "teto {cap}%",
   configError: "Configuração ilegível: {config}",
+  loadError: "Não foi possível carregar. Tente de novo.",
   offline: "Sem conexão com o painel. Tentando de novo…",
   status: {
     active: "ativo",
