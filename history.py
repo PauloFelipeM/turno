@@ -4,7 +4,7 @@ import datetime
 import json
 from pathlib import Path
 
-OUTCOMES = ("worked", "waiting", "idle", "blocked", "usage_limit", "error", "cut", "unfinished")
+OUTCOMES = ("worked", "waiting", "idle", "blocked", "usage_limit", "error", "cut", "unfinished", "stopped")
 
 
 def iso(ts):

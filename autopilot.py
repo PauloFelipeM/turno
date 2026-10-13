@@ -508,7 +508,10 @@ def owner_messages(messages):
 
 
 CUT = "cut"  # "exit code" of a unit cut at the end of the window
+STOPPED = "stopped"  # "exit code" of a unit interrupted from the panel (SIGUSR1)
 CURRENT = None  # process of the running unit, so Ctrl+C can end its group
+CURRENT_UNIT = None  # (engine, project, s) of the running unit, for the history line on stop
+STOP_REQUESTED = False  # set by request_interrupt; read by run_unit once the process ends
 
 
 def stop_group(proc):
@@ -523,6 +526,24 @@ def stop_group(proc):
         proc.wait()
     except ProcessLookupError:
         pass
+
+
+def request_interrupt(*_):
+    """SIGUSR1 handler: ends the running unit's group and marks the run as stopped. No unit: nothing."""
+    global STOP_REQUESTED
+    proc = CURRENT
+    if proc is None:
+        return
+    STOP_REQUESTED = True
+    stop_group(proc)
+
+
+def record_interrupted_run():
+    """One `stopped` history line for the unit running now (Ctrl+C / SIGTERM). No-op without a unit."""
+    unit = CURRENT_UNIT
+    if unit is not None:
+        engine, project, s = unit
+        record_run(engine, project, s, "stopped")
 
 
 def wait_until(proc, deadline):
@@ -548,7 +569,7 @@ def idle_phase(win, now):
 
 
 def run_unit(cfg, engine, state, project, deadline=None):
-    global CURRENT
+    global CURRENT, CURRENT_UNIT, STOP_REQUESTED
     s = state[project["name"]]
     path = project["path"]
     resume = engine.resumable(s)
@@ -585,6 +606,8 @@ def run_unit(cfg, engine, state, project, deadline=None):
     save_state(state)  # if the loop dies now, the unit stays marked as open
     with open(out, "w") as fo, open(err, "w") as fe:
         # Own process group: the cut and Ctrl+C also end the processes the CLI started.
+        STOP_REQUESTED = False
+        CURRENT_UNIT = (engine, project, s)
         CURRENT = subprocess.Popen(cmd, cwd=path, stdin=subprocess.PIPE, stdout=fo, stderr=fe, text=True,
                                    env=env, start_new_session=True)
         try:
@@ -593,7 +616,10 @@ def run_unit(cfg, engine, state, project, deadline=None):
         except BrokenPipeError:
             pass
         code = wait_until(CURRENT, deadline)
+        if STOP_REQUESTED:
+            code, STOP_REQUESTED = STOPPED, False
         CURRENT = None
+        CURRENT_UNIT = None
     engine.after_run(state, s, out, resume)
     for old in sorted(RUNS.iterdir(), key=lambda p: p.stat().st_mtime, reverse=True)[KEEP_RUNS * 3:]:
         old.unlink(missing_ok=True)
@@ -620,6 +646,11 @@ def after_unit(cfg, engine, state, project, out, err, code, unit_file):
     """Updates the project state and returns how many seconds to sleep before the next unit."""
     d = cfg["defaults"]
     s = state[project["name"]]
+    if code == STOPPED:
+        # Not closed: no cost, the session and the claim stay, `interrupted` stays True.
+        record_run(engine, project, s, "stopped")
+        log(f"{project['name']}: unit interrupted from the panel; it resumes when the project is resumed")
+        return 5
     if code == CUT:
         record_run(engine, project, s, "cut")
         pass_baton(engine, project["name"], s)
@@ -899,12 +930,14 @@ def cmd_run(args):
     def on_signal(*_):
         if CURRENT is not None:
             stop_group(CURRENT)
+        record_interrupted_run()
         save_state(state)
         log("interrupted; run again to resume")
         sys.exit(130)
 
     signal.signal(signal.SIGINT, on_signal)
     signal.signal(signal.SIGTERM, on_signal)
+    signal.signal(signal.SIGUSR1, request_interrupt)
     log(f"autopilot started ({engine.describe()}{', window ' + win.describe() if win else ''})")
     open_units = {p["name"]: state[p["name"]]["interrupted"] for p in cfg["project"]}
     for name in coord.reconcile(engine.name, open_units):
