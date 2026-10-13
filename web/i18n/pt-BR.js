@@ -48,6 +48,7 @@ export default {
     title: "Teto semanal por motor",
     save: "Salvar",
     saved: "Vale a partir da próxima volta do loop",
+    nothing: "Nenhum teto foi alterado.",
     invalid: "Os tetos precisam ser números de 0 a 100.",
   },
   settings: {

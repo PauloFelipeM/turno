@@ -72,6 +72,7 @@ function toast(text, kind = "ok") {
   el.textContent = text;
   el.className = `toast ${kind}`;
   el.hidden = false;
+  try { el.hidePopover(); } catch { /* not open */ }
   try { el.showPopover(); } catch { /* already open, or no popover support */ } // the top layer keeps it above open dialogs
   clearTimeout(toastTimer);
   toastTimer = setTimeout(() => {
@@ -277,6 +278,7 @@ function projectActions(p, running) {
 
 function drawProjects() {
   const running = new Set(view.overview.live.map((l) => l.project));
+  if (view.confirm && view.confirm.startsWith("project:") && !running.has(view.confirm.slice(8))) view.confirm = null;
   fill($("#project-list"), ...view.overview.projects.map((p) => {
     const extra = [claimText(p.claim), p.next ? t("card.nextBadge") : null,
       p.decisions ? (p.decisions === 1 ? t("decisionsOne") : t("decisionsMany", { n: p.decisions })) : null];
@@ -303,6 +305,11 @@ async function selectProject(name) {
   box.hidden = true;
   await loadUnits("reset");
   if (!view.filter) return;
+  await loadDetail(name);
+}
+
+async function loadDetail(name) {
+  const box = $("#project-detail");
   let d;
   let settings = null;
   try {
@@ -329,7 +336,7 @@ async function selectProject(name) {
       h("p", {}, h("b", {}, x.question)),
       x.context ? h("p", { class: "muted small" }, x.context) : null,
       h("ul", {}, x.options.map((o) => h("li", {}, `${o.id.toUpperCase()}. ${o.label}`, o.id === x.default ? ` (${t("project.default")})` : ""))),
-      h("p", { class: "muted small" }, x.deadline ? `${t("project.deadline", { when: when(x.deadline) })}. ` : "", t("project.answerByPhone"))),
+      h("p", { class: "muted small" }, x.deadline ? `${t("project.deadline", { when: when(x.deadline) })}. ` : "", t("project.answerByPhone")))),
     messageForm(name),
     settings ? capsForm(name, settings) : null);
 }
@@ -370,10 +377,12 @@ function capsForm(name, settings) {
     h("div", { class: "btn-row" }, h("button", { type: "button", class: "btn", onclick: (ev) => {
       const body = {};
       for (const e of engs) {
+        if (String(values[e] ?? "").trim() === "") continue; // empty: leave that value alone
         const n = parseCap(values[e]);
         if (n == null) { toast(t("caps.invalid"), "error"); return; }
-        body[e] = n;
+        if (n !== settings.engines[e].weekly_cap[name]) body[e] = n;
       }
+      if (!Object.keys(body).length) { toast(t("caps.nothing")); return; }
       return act(ev.currentTarget, () => post("/api/settings", { weekly_cap: { [name]: body } }, "PUT"), t("caps.saved"));
     } }, t("caps.save"))));
 }
@@ -383,10 +392,13 @@ function capsForm(name, settings) {
 function loadDraft(s) {
   view.draft = {
     order: [...s.order],
+    orig: [...s.order],
     engines: Object.keys(s.engines),
     weekly: Object.fromEntries(s.order.map((n) => [n, Object.fromEntries(Object.entries(s.engines).map(([e, v]) => [e, v.weekly_cap[n] ?? ""]))])),
     primary: Object.fromEntries(Object.entries(s.engines).map(([e, v]) => [e, v.primary_cap ?? ""])),
   };
+  view.draft.origWeekly = JSON.parse(JSON.stringify(view.draft.weekly));
+  view.draft.origPrimary = { ...view.draft.primary };
 }
 
 function renderSettings() {
@@ -399,24 +411,31 @@ function move(i, delta) {
   renderSettings();
 }
 
+// Only what changed since the dialog was loaded; an empty field means "leave it alone". null = invalid field.
 function saveBody() {
   const d = view.draft;
+  const body = {};
+  if (d.order.some((n, i) => n !== d.orig[i])) body.order = d.order;
   const weekly = {};
+  const primary = {};
+  const read = (raw, was, put) => {
+    if (String(raw ?? "").trim() === "") return true;
+    const v = parseCap(raw);
+    if (v == null) return false;
+    if (v !== was) put(v);
+    return true;
+  };
   for (const n of d.order) {
-    weekly[n] = {};
     for (const e of d.engines) {
-      const v = parseCap(d.weekly[n][e]);
-      if (v == null) return null;
-      weekly[n][e] = v;
+      if (!read(d.weekly[n][e], d.origWeekly[n][e], (v) => { (weekly[n] ||= {})[e] = v; })) return null;
     }
   }
-  const primary = {};
   for (const e of d.engines) {
-    const v = parseCap(d.primary[e]);
-    if (v == null) return null;
-    primary[e] = v;
+    if (!read(d.primary[e], d.origPrimary[e], (v) => { primary[e] = v; })) return null;
   }
-  return { order: d.order, weekly_cap: weekly, primary_cap: primary };
+  if (Object.keys(weekly).length) body.weekly_cap = weekly;
+  if (Object.keys(primary).length) body.primary_cap = primary;
+  return body;
 }
 
 function drawSettings() {
@@ -436,10 +455,15 @@ function drawSettings() {
       h("button", { type: "button", class: "btn", onclick: (ev) => {
         const body = saveBody();
         if (!body) { toast(t("caps.invalid"), "error"); return; }
-        return act(ev.currentTarget, async () => { loadDraft(await post("/api/settings", body, "PUT")); drawSettings(); }, t("settings.saved"));
+        if (!Object.keys(body).length) { toast(t("caps.nothing")); return; }
+        return act(ev.currentTarget, async () => {
+          loadDraft(await post("/api/settings", body, "PUT"));
+          drawSettings();
+          if (view.filter) loadDetail(view.filter);
+        }, t("settings.saved"));
       } }, t("settings.save")),
       h("button", { type: "button", class: "btn", onclick: (ev) =>
-        act(ev.currentTarget, async () => { loadDraft(await post("/api/settings", undefined, "DELETE")); drawSettings(); }, t("settings.resetDone")) }, t("settings.reset")),
+        act(ev.currentTarget, async () => { loadDraft(await post("/api/settings", undefined, "DELETE")); drawSettings(); if (view.filter) loadDetail(view.filter); }, t("settings.resetDone")) }, t("settings.reset")),
       h("button", { type: "button", class: "btn", onclick: () => $("#settings").close() }, t("settings.close"))));
 }
 
