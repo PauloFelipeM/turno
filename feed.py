@@ -48,10 +48,14 @@ class Tail:
 
 
 def translate(engine_name, event, root=None):
+    """Traduz um evento do motor em itens do fluxo; evento estranho vira `unknown`."""
     cls = engines.ENGINES.get(engine_name)
     if cls is None:
         return [{"kind": "unknown", "text": str(event.get("type"))}]
-    items = cls.feed_items(event)
+    try:
+        items = cls.feed_items(event)
+    except Exception:  # formato novo de CLI não derruba o fluxo
+        return [{"kind": "unknown", "text": str(event.get("type"))}]
     if root:
         prefix = str(root).rstrip("/") + "/"
         for item in items:

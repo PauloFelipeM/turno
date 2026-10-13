@@ -57,6 +57,21 @@ class TranslateTest(unittest.TestCase):
         self.assertEqual(out.splitlines()[0], "linha 80")
         self.assertEqual(len(engines.tail_output("x" * 5000)), 2000)
 
+    def test_malformed_events_become_unknown(self):
+        cases = [
+            ("codex", {"type": "error", "error": "texto"}),
+            ("codex", {"type": "item.completed", "item": "x"}),
+            ("codex", {"type": "item.completed", "item": {"type": "file_change", "changes": ["a"]}}),
+            ("claude", {"type": "assistant", "message": ["x"]}),
+            ("claude", {"type": "assistant", "message": {"content": [{"type": "text", "text": 3}]}}),
+            ("claude", {"type": "assistant", "message": {"content": [{"type": "tool_use", "name": "Bash", "input": "x"}]}}),
+        ]
+        import engines
+        for name, ev in cases:
+            with self.assertRaises(Exception, msg=ev):
+                engines.ENGINES[name].feed_items(ev)
+            self.assertEqual(self.feed.translate(name, ev), [{"kind": "unknown", "text": ev["type"]}], ev)
+
 
 class TailTest(unittest.TestCase):
     def setUp(self):
