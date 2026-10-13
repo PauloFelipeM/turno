@@ -23,6 +23,7 @@ Uso:
   autopilot.py decisions                  decisões pendentes
   autopilot.py answer NOME ID OPÇÃO       responde uma decisão pelo terminal
   autopilot.py test-notify                manda uma notificação de teste
+  autopilot.py serve [--port 8765]        o painel em http://localhost:8765 (só lê; seguro)
   autopilot.py --config claude.toml run   a instância do Claude (ver README)
 """
 
@@ -1141,6 +1142,12 @@ def cmd_reset(args):
     print(f"{args.name}: ativo")
 
 
+def cmd_serve(args):
+    import server  # só o painel precisa dele
+
+    server.serve(HOME, args.port)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--config", help="configuração da instância (padrão: projects.toml)")
@@ -1160,8 +1167,12 @@ def main():
     answer.add_argument("option")
     answer.set_defaults(func=cmd_answer)
     sub.add_parser("test-notify").set_defaults(func=cmd_test_notify)
+    serve = sub.add_parser("serve")
+    serve.add_argument("--port", type=int, default=8765)
+    serve.set_defaults(func=cmd_serve)
     args = parser.parse_args()
-    configure(args.config)
+    if args.cmd != "serve":  # o painel lê todas as instâncias; não escolhe uma
+        configure(args.config)
     try:
         args.func(args)
     except Exception:
