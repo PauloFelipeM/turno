@@ -46,6 +46,7 @@ import backlog
 import coord
 import engines
 import history
+import overrides
 import paths
 import schedule
 
@@ -401,15 +402,31 @@ def next_deadline(project):
     return min(deadlines) if deadlines else time.time() + 300
 
 
+def overrides_mtime():
+    try:
+        return (HOME / overrides.FILE).stat().st_mtime_ns
+    except OSError:
+        return 0
+
+
 def nap(cfg, state, secs):
-    """Sleeps in 1-minute slices reading answers; wakes early when a waiting project is released."""
+    """Sleeps in 5-second steps; wakes early when the overrides file changes or a waiting project is released.
+
+    Answers are read once a minute, and right away when the overrides change.
+    """
     end = time.time() + secs
+    seen = overrides_mtime()
+    last = time.time()
     while (left := end - time.time()) > 0:
-        time.sleep(min(60, left))
+        time.sleep(min(5, left))
+        changed = overrides_mtime() != seen
+        if not changed and time.time() - last < 60:
+            continue
+        last = time.time()
         before = {p["name"]: state[p["name"]]["status"] for p in cfg["project"]}
         process_decisions(cfg, state)
         save_state(state)
-        if any(state[name]["status"] != status for name, status in before.items()):
+        if changed or any(state[name]["status"] != status for name, status in before.items()):
             return
 
 
@@ -681,7 +698,7 @@ def after_unit(cfg, engine, state, project, out, err, code, unit_file):
     return 5
 
 
-def pick(cfg, engine, state, limits):
+def pick(cfg, engine, state, limits, next_project=None):
     """Picks the next project and takes its group lock.
 
     Returns (project, lock, None) or (None, None, seconds until it is worth checking again).
@@ -695,6 +712,8 @@ def pick(cfg, engine, state, limits):
     # This engine's interrupted unit and any engine's baton go first: nothing is left half-done.
     for p in cfg["project"]:
         name = p["name"]
+        if p.get("paused"):
+            continue
         if not (state[name]["interrupted"] or coord.is_handoff(name)) or coord.held_by_other(name, engine.name):
             continue
         lock = coord.try_lock(coord.group_of(p))
@@ -702,9 +721,14 @@ def pick(cfg, engine, state, limits):
             return p, lock, None
         waits.append(60)
 
-    for p in cfg["project"]:
+    queue = list(cfg["project"])
+    first = [p for p in queue if p["name"] == next_project and not p.get("paused")]
+    queue = first + [p for p in queue if p not in first]
+    for p in queue:
         name = p["name"]
         s = state[name]
+        if p.get("paused"):
+            continue
         if s["interrupted"] or coord.is_handoff(name):
             continue  # already handled above (the group was busy)
         if s["status"] == "idle":
@@ -782,6 +806,14 @@ def run_once(cfg, engine, state, win=None, now=None):
     process_decisions(cfg, state)
     started = time.time()
     now = now or datetime.datetime.now()
+    ov = overrides.read(HOME)
+    resets = state.setdefault("_resets", {})
+    for name, ts in overrides.resets(ov).items():
+        if name in state and name in {p["name"] for p in cfg["project"]} and ts > resets.get(name, 0):
+            state[name].update(status="active", blocked_until=0, errors=0)
+            resets[name] = ts
+            log(f"{name}: reset from the panel")
+    cfg = overrides.apply(cfg, engine.name, ov)
     if win:
         active = win.contains(now)
         if not active:
@@ -799,7 +831,8 @@ def run_once(cfg, engine, state, win=None, now=None):
         log("no quota reading; no new unit until it can be read")
         save_state(state)
         return 600
-    project, lock, wait = pick(cfg, engine, state, limits)
+    project, lock, wait = pick(
+        cfg, engine, state, limits, next_project=ov.get("next") if isinstance(ov.get("next"), str) else None)
     save_state(state)
     if project is None:
         if all(state[p["name"]]["status"] == "idle" for p in cfg["project"]):
@@ -829,6 +862,8 @@ def run_project(cfg, engine, state, project, limits, win):
     if not coord.claim(name, engine.name):
         log(f"{name}: claimed by the other engine; skipping")
         return 60
+    if not s["interrupted"] and not handoff:
+        overrides.take_next(HOME, name)
     if handoff:
         log(f"{name}: taking the baton left by {current.get('handoff_from')}")
         engine.close_unit(s)
