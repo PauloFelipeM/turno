@@ -43,15 +43,17 @@ from pathlib import Path
 
 import coord
 import engines
+import paths
 import schedule
 
-BASE = Path(__file__).resolve().parent
-CONFIG = BASE / "projects.toml"
+BASE = Path(__file__).resolve().parent  # código: prompts, papéis, interface
+HOME = paths.home()  # dados: configuração, estado, logs, execuções
+CONFIG = HOME / "projects.toml"
 # O tópico do ntfy é segredo: fica aqui, fora do git, e vale para as duas instâncias.
-SECRETS = BASE / "secrets.toml"
-STATE = BASE / "state.json"
-LOG = BASE / "autopilot.log"
-RUNS = BASE / "runs"
+SECRETS = HOME / "secrets.toml"
+STATE = HOME / "state.json"
+LOG = HOME / "autopilot.log"
+RUNS = HOME / "runs"
 PROMPTS = BASE / "prompts"
 UNIT_FILE = Path(".superpowers") / "autopilot" / "last-unit.json"
 DECISIONS = Path(".superpowers") / "autopilot" / "decisions"
@@ -62,6 +64,7 @@ EMA_ALPHA = 0.3
 def log(msg):
     line = f"{time.strftime('%F %T')} {msg}"
     print(line, flush=True)
+    LOG.parent.mkdir(parents=True, exist_ok=True)
     with LOG.open("a") as f:
         f.write(line + "\n")
 
@@ -70,19 +73,28 @@ engines.log = log
 from engines import window  # noqa: E402  (usada na escolha do projeto e no status)
 
 
+def resolve_config(config_path):
+    """Caminho relativo vale a partir da pasta de dados; sem caminho, projects.toml."""
+    if not config_path:
+        return HOME / "projects.toml"
+    path = Path(config_path).expanduser()
+    return path if path.is_absolute() else HOME / path
+
+
 def configure(config_path=None):
     """Aponta CONFIG, STATE, LOG e RUNS para a instância do arquivo de configuração.
 
     Sem [instance] name valem os nomes de sempre; com name = "claude", state-claude.json,
-    autopilot-claude.log e runs-claude/.
+    autopilot-claude.log e runs-claude/. Tudo dentro da pasta de dados.
     """
     global CONFIG, STATE, LOG, RUNS
-    CONFIG = Path(config_path).expanduser().resolve() if config_path else BASE / "projects.toml"
+    HOME.mkdir(parents=True, exist_ok=True)
+    CONFIG = resolve_config(config_path)
     name = (load_config().get("instance") or {}).get("name")
     suffix = f"-{name}" if name else ""
-    STATE = BASE / f"state{suffix}.json"
-    LOG = BASE / f"autopilot{suffix}.log"
-    RUNS = BASE / f"runs{suffix}"
+    STATE = HOME / f"state{suffix}.json"
+    LOG = HOME / f"autopilot{suffix}.log"
+    RUNS = HOME / f"runs{suffix}"
 
 
 def load_config():
@@ -865,7 +877,7 @@ def status_lines(cfg, engine, state, limits, win, now):
 
 TMUX_SESSION = "autopilot"
 # (janela do tmux e nome do motor, configuração): a do Codex é a padrão.
-LOOPS = (("codex", None), ("claude", BASE / "claude.toml"))
+LOOPS = (("codex", None), ("claude", HOME / "claude.toml"))
 
 
 def instance_lock(name):
@@ -924,7 +936,7 @@ def loop_command(config):
 
 
 def log_file(name, config):
-    return BASE / ("autopilot.log" if config is None else f"autopilot-{name}.log")
+    return HOME / ("autopilot.log" if config is None else f"autopilot-{name}.log")
 
 
 def open_logs_window(has_session, windows):

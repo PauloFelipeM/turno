@@ -1,5 +1,6 @@
 """Carrega o autopilot com todo efeito colateral (estado, log, shared, ntfy) numa pasta temporária."""
 
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -7,10 +8,11 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-MODULES = ("autopilot", "coord", "engines", "schedule")
+MODULES = ("autopilot", "coord", "engines", "schedule", "paths", "history", "backlog", "feed", "panel", "server")
 
 
 def load(tmp):
+    os.environ["TURNO_HOME"] = str(tmp)
     for name in MODULES:
         sys.modules.pop(name, None)
     import autopilot as ap

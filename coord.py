@@ -13,7 +13,9 @@ import json
 import time
 from pathlib import Path
 
-SHARED = Path(__file__).resolve().parent / "shared"
+import paths
+
+SHARED = paths.home() / "shared"
 ANY = "any"
 
 

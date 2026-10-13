@@ -53,7 +53,7 @@ class LauncherTest(unittest.TestCase):
         self.assertTrue(new_session[-1].endswith("autopilot.py run"))
         claude = self.commands("new-window")[0]
         self.assertIn("claude", claude)
-        self.assertIn(f"--config {self.ap.BASE / 'claude.toml'} run", claude[-1])
+        self.assertIn(f"--config {self.ap.HOME / 'claude.toml'} run", claude[-1])
         self.assertTrue(any(c[:2] == ("set-option", "-t") and "remain-on-exit" in c for c in self.calls))
 
     def test_start_skips_a_loop_that_is_already_running(self):
@@ -83,10 +83,10 @@ class LauncherTest(unittest.TestCase):
         self.ap.start_loops()
         logs = [c for c in self.calls if "logs" in c and c[0] in ("new-window", "new-session")]
         self.assertEqual(len(logs), 1)
-        self.assertIn(str(self.ap.BASE / "autopilot.log"), logs[0][-1])
+        self.assertIn(str(self.ap.HOME / "autopilot.log"), logs[0][-1])
         split = self.commands("split-window")
         self.assertEqual(len(split), 1)
-        self.assertIn(str(self.ap.BASE / "autopilot-claude.log"), split[0][-1])
+        self.assertIn(str(self.ap.HOME / "autopilot-claude.log"), split[0][-1])
         self.assertEqual(self.commands("select-window")[-1][-1], "autopilot:logs")
 
     def test_logs_window_is_not_duplicated(self):
@@ -124,7 +124,7 @@ class LauncherTest(unittest.TestCase):
 
     def test_matches_loop_command_lines(self):
         script = str(self.ap.BASE / "autopilot.py")
-        claude = str(self.ap.BASE / "claude.toml")
+        claude = str(self.ap.HOME / "claude.toml")
         self.assertTrue(self.ap.is_loop(["python3", script, "run"], None))
         self.assertFalse(self.ap.is_loop(["python3", script, "run"], claude))
         self.assertTrue(self.ap.is_loop(["python3", script, "--config", "claude.toml", "run"], claude))
