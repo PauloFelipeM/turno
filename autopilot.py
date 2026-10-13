@@ -512,6 +512,8 @@ STOPPED = "stopped"  # "exit code" of a unit interrupted from the panel (SIGUSR1
 CURRENT = None  # process of the running unit, so Ctrl+C can end its group
 CURRENT_UNIT = None  # (engine, project, s) of the running unit, for the history line on stop
 STOP_REQUESTED = False  # set by request_interrupt; read by run_unit once the process ends
+EXIT_REQUESTED = False  # set by the SIGINT/SIGTERM handler while a unit runs; run_unit then exits
+STOP_AT = 0.0  # when the SIGTERM was sent to the group; wait_until escalates to SIGKILL after 30 s
 
 
 def stop_group(proc):
@@ -528,14 +530,43 @@ def stop_group(proc):
         pass
 
 
+def _term_group(proc):
+    """SIGTERM to the group without blocking: safe inside a signal handler (never waits on the Popen)."""
+    global STOP_AT
+    STOP_AT = time.time()
+    try:
+        os.killpg(proc.pid, signal.SIGTERM)
+    except ProcessLookupError:
+        pass
+
+
 def request_interrupt(*_):
-    """SIGUSR1 handler: ends the running unit's group and marks the run as stopped. No unit: nothing."""
+    """SIGUSR1 handler: notes the request and sends SIGTERM to the unit's group. No live unit: nothing.
+
+    It never waits: the main thread is blocked in `proc.wait` holding the Popen lock, and `wait_until`
+    does the rest (SIGKILL after 30 s).
+    """
     global STOP_REQUESTED
     proc = CURRENT
-    if proc is None:
+    if proc is None or proc.poll() is not None:
         return
     STOP_REQUESTED = True
-    stop_group(proc)
+    _term_group(proc)
+
+
+def make_exit_handler(state):
+    """SIGINT/SIGTERM handler. With a unit running it only asks for the exit; run_unit does it."""
+    def on_signal(*_):
+        global EXIT_REQUESTED
+        proc = CURRENT
+        if proc is not None:
+            EXIT_REQUESTED = True
+            _term_group(proc)
+            return
+        save_state(state)
+        log("interrupted; run again to resume")
+        sys.exit(130)
+    return on_signal
 
 
 def record_interrupted_run():
@@ -547,16 +578,23 @@ def record_interrupted_run():
 
 
 def wait_until(proc, deadline):
-    """Espera o processo; passado `deadline` (timestamp), encerra o grupo dele e devolve CUT."""
+    """Espera o processo em fatias de 5 s; passado `deadline` (timestamp), encerra o grupo e devolve CUT.
+
+    Nunca espera sem timeout: os handlers de sinal só mandam SIGTERM, e aqui, 30 s depois, vem o SIGKILL.
+    """
     while True:
         left = None if deadline is None else deadline - time.time()
         if left is not None and left <= 0:
             stop_group(proc)
             return CUT
         try:
-            return proc.wait(timeout=None if left is None else min(left, 60))
+            return proc.wait(timeout=5 if left is None else min(left, 5))
         except subprocess.TimeoutExpired:
-            continue
+            if (STOP_REQUESTED or EXIT_REQUESTED) and time.time() - STOP_AT >= 30:
+                try:
+                    os.killpg(proc.pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
 
 
 def set_phase(state, phase, project=None, until=None):
@@ -569,7 +607,7 @@ def idle_phase(win, now):
 
 
 def run_unit(cfg, engine, state, project, deadline=None):
-    global CURRENT, CURRENT_UNIT, STOP_REQUESTED
+    global CURRENT, CURRENT_UNIT, STOP_REQUESTED, EXIT_REQUESTED
     s = state[project["name"]]
     path = project["path"]
     resume = engine.resumable(s)
@@ -606,20 +644,33 @@ def run_unit(cfg, engine, state, project, deadline=None):
     save_state(state)  # if the loop dies now, the unit stays marked as open
     with open(out, "w") as fo, open(err, "w") as fe:
         # Own process group: the cut and Ctrl+C also end the processes the CLI started.
-        STOP_REQUESTED = False
-        CURRENT_UNIT = (engine, project, s)
-        CURRENT = subprocess.Popen(cmd, cwd=path, stdin=subprocess.PIPE, stdout=fo, stderr=fe, text=True,
-                                   env=env, start_new_session=True)
+        STOP_REQUESTED = EXIT_REQUESTED = False
         try:
-            CURRENT.stdin.write(prompt)
-            CURRENT.stdin.close()
-        except BrokenPipeError:
-            pass
-        code = wait_until(CURRENT, deadline)
-        if STOP_REQUESTED:
-            code, STOP_REQUESTED = STOPPED, False
-        CURRENT = None
+            CURRENT_UNIT = (engine, project, s)
+            CURRENT = subprocess.Popen(cmd, cwd=path, stdin=subprocess.PIPE, stdout=fo, stderr=fe, text=True,
+                                       env=env, start_new_session=True)
+            try:
+                CURRENT.stdin.write(prompt)
+                CURRENT.stdin.close()
+            except BrokenPipeError:
+                pass
+            code = wait_until(CURRENT, deadline)
+        finally:
+            CURRENT = None
+            if not EXIT_REQUESTED:
+                CURRENT_UNIT = None  # a failed Popen must not leave it behind
+            exit_now, stopped = EXIT_REQUESTED, STOP_REQUESTED
+            STOP_REQUESTED = EXIT_REQUESTED = False
+    if exit_now:
+        # Ctrl+C / SIGTERM during the unit: one history line, then out, from the main thread.
+        record_interrupted_run()
         CURRENT_UNIT = None
+        save_state(state)
+        log("interrupted; run again to resume")
+        sys.exit(130)
+    CURRENT_UNIT = None
+    if stopped:
+        code = STOPPED
     engine.after_run(state, s, out, resume)
     for old in sorted(RUNS.iterdir(), key=lambda p: p.stat().st_mtime, reverse=True)[KEEP_RUNS * 3:]:
         old.unlink(missing_ok=True)
@@ -927,13 +978,7 @@ def cmd_run(args):
     state = load_state(cfg)
     win = schedule.from_config(cfg)
 
-    def on_signal(*_):
-        if CURRENT is not None:
-            stop_group(CURRENT)
-        record_interrupted_run()
-        save_state(state)
-        log("interrupted; run again to resume")
-        sys.exit(130)
+    on_signal = make_exit_handler(state)
 
     signal.signal(signal.SIGINT, on_signal)
     signal.signal(signal.SIGTERM, on_signal)
