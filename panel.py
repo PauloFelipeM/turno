@@ -15,6 +15,7 @@ import backlog
 import engines
 import feed
 import history
+import overrides
 import schedule
 
 
@@ -202,16 +203,45 @@ def overview(home, cache, homes=None):
         for name, (p, info) in mine.items():
             entry = projects.setdefault(name, {"name": name, "path": p["path"], "engines": {}})
             entry["engines"][inst["engine"]] = info
+    ov = overrides.read(home)
+    ov_projects = _dict(ov.get("projects"))
+    blocked = None  # read lazily, once: the history of every engine
     out_projects = []
     for entry in projects.values():
+        if blocked is None:
+            blocked = {}
+            for u in units(home, limit=10**9):  # newest first
+                if u["closed"] and u["outcome"] == "blocked":
+                    blocked.setdefault(u["project"], u["summary"])
         claim = read_json(home / "shared" / "claims" / f"{entry['name']}.json")
+        open_list = pending_decisions(entry["path"]) if Path(entry["path"]).is_dir() else []
         out_projects.append({
             "name": entry["name"], "engines": entry["engines"],
             "claim": {"engine": claim.get("engine"), "handoff_from": claim.get("handoff_from")} if claim else None,
             "backlog": _backlog_summary(entry["path"], cache),
-            "decisions": len(pending_decisions(entry["path"])) if Path(entry["path"]).is_dir() else 0})
+            "decisions": len(open_list), "decisions_open": open_list,
+            "paused": _dict(ov_projects.get(entry["name"])).get("paused") is True,
+            "next": ov.get("next") == entry["name"],
+            "blocked_summary": blocked.get(entry["name"])})
     return {"engines": views, "projects": out_projects, "errors": errors, "now": time.time(),
             "live": [{k: v for k, v in r.items() if k not in ("path", "root")} for r in live_runs(home, homes)]}
+
+
+def settings(home):
+    """The effective order and caps (the .toml with the overrides applied) and what is overridden."""
+    ov = overrides.read(home)
+    order, engines_view = [], {}
+    for inst in _ok(home):
+        cfg = overrides.apply(inst["cfg"], inst["engine"], ov)
+        order += [p["name"] for p in cfg["project"] if p["name"] not in order]
+        engines_view[inst["engine"]] = {
+            "primary_cap": _dict(cfg.get("defaults")).get("primary_cap"),
+            "weekly_cap": {p["name"]: p.get("weekly_cap") for p in cfg["project"]}}
+    ov_projects = _dict(ov.get("projects"))
+    caps = any(overrides._cap(c) for per in ov_projects.values() for c in _dict(_dict(per).get("weekly_cap")).values())
+    caps = caps or any(overrides._cap(c) for c in _dict(ov.get("primary_cap")).values())
+    return {"order": order, "engines": engines_view,
+            "overridden": {"order": isinstance(ov.get("order"), list) and bool(ov["order"]), "caps": caps}}
 
 
 def _project_path(home, name):

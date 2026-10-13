@@ -1,7 +1,9 @@
 """The panel server: JSON API, event stream (SSE) and the interface, on 127.0.0.1 only.
 
-It only reads turno's files. It refuses foreign Host and Origin headers so that no page open in the
-browser can read the data through DNS rebinding.
+Reading never writes. The write routes (POST, PUT, DELETE, in `control.py`) need the header `X-Turno: 1` and, with a body,
+`Content-Type: application/json`: a page on another site cannot send them without a CORS preflight, which
+the server never accepts. Foreign Host and Origin headers are refused so that no page open in the browser
+can reach the server through DNS rebinding.
 """
 
 import errno
@@ -14,14 +16,13 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, unquote, urlsplit
 
+import control
 import feed
 import panel
 
 WEB = Path(__file__).resolve().parent / "web"
 TYPES = {".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8",
          ".css": "text/css; charset=utf-8", ".svg": "image/svg+xml"}
-
-
 class Hub:
     """The event stream subscribers and the watcher that announces changes."""
 
@@ -114,6 +115,38 @@ class Handler(BaseHTTPRequestHandler):
         origin = self.headers.get("Origin")
         return self.headers.get("Host", "") in hosts and (origin is None or origin in {f"http://{h}" for h in hosts})
 
+    def _write(self):
+        if not self._allowed() or self.headers.get("X-Turno") != "1":
+            return self._send(403, {"error": "forbidden", "message": "missing or invalid headers"})
+        try:
+            length = int(self.headers.get("Content-Length") or 0)
+        except ValueError:
+            return self._send(400, {"error": "bad_request", "message": "invalid Content-Length"})
+        if length < 0 or length > control.MAX_BODY:
+            return self._send(400, {"error": "bad_request", "message": "body too large"})
+        raw = self.rfile.read(length) if length else b""
+        if raw and not self.headers.get("Content-Type", "").startswith("application/json"):
+            return self._send(403, {"error": "forbidden", "message": "Content-Type must be application/json"})
+        try:
+            try:
+                body = json.loads(raw) if raw.strip() else {}
+            except ValueError:
+                raise control.bad("invalid JSON")
+            if not isinstance(body, dict):
+                raise control.bad("the body must be a JSON object")
+            parts = [unquote(p) for p in urlsplit(self.path).path.split("/") if p]
+            status, out = control.write_route(self.server.hub.home, self.command, parts, body)
+            return self._send(status, out)
+        except control.ApiError as e:
+            return self._send(e.status, {"error": e.code, "message": e.message})
+        except (BrokenPipeError, ConnectionResetError):
+            return None
+        except Exception:
+            traceback.print_exc()
+            return self._send(500, {"error": "internal", "message": "internal error"})
+
+    do_POST = do_PUT = do_DELETE = _write
+
     def do_GET(self):
         if not self._allowed():
             return self._send(403, {"error": "forbidden"})
@@ -140,6 +173,8 @@ class Handler(BaseHTTPRequestHandler):
             if len(parts) == 3 and parts[:2] == ["api", "projects"]:
                 detail = panel.project_detail(hub.home, parts[2], hub.cache)
                 return self._send(200, detail) if detail else self._send(404, {"error": "not_found"})
+            if parts == ["api", "settings"]:
+                return self._send(200, panel.settings(hub.home))
             if parts == ["api", "events"]:
                 return self._events(hub)
             return self._send(404, {"error": "not_found"})

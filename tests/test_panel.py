@@ -104,6 +104,49 @@ class PanelTest(unittest.TestCase):
         self.assertEqual(my-api["engines"]["codex"]["status"], "blocked")
         self.assertEqual(my-api["backlog"], {"error": "missing"})
 
+    def test_overview_control_fields(self):
+        import overrides
+        my-app, my-api, side-project = self.overview()["projects"]
+        self.assertEqual((my-app["paused"], my-app["next"], side-project["paused"]), (False, False, False))
+        self.assertEqual([d["id"] for d in my-app["decisions_open"]], ["pay"])
+        self.assertEqual(my-app["decisions"], 1)
+        self.assertEqual(side-project["decisions_open"], [])
+        overrides.update(self.home, lambda d: d.update(next="side-project", projects={"my-api": {"paused": True}}))
+        my-app, my-api, side-project = self.overview()["projects"]
+        self.assertEqual((my-api["paused"], my-api["next"], side-project["next"]), (True, False, True))
+
+    def test_blocked_summary_is_the_latest_closed_blocked_unit(self):
+        self.assertIsNone(self.overview()["projects"][1]["blocked_summary"])
+        rows = [
+            {"unit_id": "b1", "project": "my-api", "engine": "codex", "outcome": "blocked", "closed": True,
+             "started_at": "2026-10-11T10:00:00-03:00", "ended_at": "2026-10-11T10:05:00-03:00", "summary": "velho"},
+            {"unit_id": "b2", "project": "my-api", "engine": "codex", "outcome": "blocked", "closed": True,
+             "started_at": "2026-10-12T10:00:00-03:00", "ended_at": "2026-10-12T10:05:00-03:00", "summary": "novo"},
+            {"unit_id": "b3", "project": "my-api", "engine": "codex", "outcome": "blocked", "closed": False,
+             "started_at": "2026-10-13T10:00:00-03:00", "ended_at": "2026-10-13T10:05:00-03:00", "summary": "aberto"},
+        ]
+        with (self.home / "history-codex.jsonl").open("a") as f:
+            f.write("".join(json.dumps(r) + "\n" for r in rows))
+        o = self.overview()["projects"]
+        self.assertEqual(o[1]["blocked_summary"], "novo")
+        self.assertIsNone(o[0]["blocked_summary"])
+
+    def test_settings_without_and_with_overrides(self):
+        import overrides
+        s = self.panel.settings(self.home)
+        self.assertEqual(s["order"], ["my-app", "my-api", "side-project"])
+        self.assertEqual(s["engines"]["codex"], {"primary_cap": 100, "weekly_cap": {"my-app": 90, "my-api": 90, "side-project": 90}})
+        self.assertEqual(s["overridden"], {"order": False, "caps": False})
+        overrides.update(self.home, lambda d: d.update(
+            order=["side-project", "my-app"], primary_cap={"claude": 70},
+            projects={"my-api": {"weekly_cap": {"codex": 55}}}))
+        s = self.panel.settings(self.home)
+        self.assertEqual(s["order"], ["side-project", "my-app", "my-api"])
+        self.assertEqual(s["engines"]["codex"]["weekly_cap"]["my-api"], 55)
+        self.assertEqual(s["engines"]["claude"]["weekly_cap"]["my-api"], 90)
+        self.assertEqual((s["engines"]["claude"]["primary_cap"], s["engines"]["codex"]["primary_cap"]), (70, 100))
+        self.assertEqual(s["overridden"], {"order": True, "caps": True})
+
     def test_live_only_while_the_loop_runs(self):
         self.assertEqual(self.overview()["live"], [])
         self.start_loop("codex")

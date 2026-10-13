@@ -36,6 +36,7 @@ holding the pid): two loops of the same engine never run.
 | `feed.py` | Incremental reading of run JSONL files and translation into the live feed |
 | `panel.py` | What the panel shows, assembled from the files (read-only) |
 | `server.py` | The panel's HTTP server on 127.0.0.1: API, events (SSE) and `web/` |
+| `control.py` | What the panel's write routes do (pause, next, interrupt, start/stop, decisions, messages, settings) |
 | `web/` | Interface: `index.html`, `app.js`, `style.css`, `i18n/pt-BR.js` |
 | `prompts/unit.md` | Prompt of every new unit: the protocol the orchestrator follows |
 | `prompts/resume.md` | Prompt to resume an interrupted unit |
