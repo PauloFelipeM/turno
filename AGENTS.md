@@ -1,145 +1,144 @@
 # turno
 
-Agendador que roda o Codex e o Claude Code sem supervisão em vários projetos, dentro da cota das
-assinaturas, e um painel web local para acompanhar. Nasceu do codex-autopilot e vai virar um produto
-aberto. Esta pasta é a ferramenta em si; os projetos ficam em outros lugares, e os dados (configuração,
-estado, logs, execuções) ficam em `~/.turno` (ou `$TURNO_HOME`). Aqui você mantém o agendador, e não
-trabalha nos projetos. Todo caminho de dados citado sem pasta neste arquivo (`shared/`,
-`state*.json`, `secrets.toml`, `claude.toml`, logs, `runs/`) fica em `~/.turno` (ou `$TURNO_HOME`).
+A scheduler that runs the Codex CLI and Claude Code unattended on several projects, inside the quota
+of the subscriptions, plus a local web panel to follow it. It grew out of codex-autopilot and is
+becoming an open product. This folder is the tool itself; the projects live elsewhere, and the data
+(config, state, logs, runs) lives in `~/.turno` (or `$TURNO_HOME`). Here you maintain the scheduler;
+you do not work on the projects. Every data path in this file given without a folder (`shared/`,
+`state*.json`, `secrets.toml`, `claude.toml`, logs, `runs/`) lives in `~/.turno` (or `$TURNO_HOME`).
 
-Código, identificadores e mensagens de commit em inglês; comentários, docstrings, logs e
-documentação em português (pt-BR), como no resto do arquivo.
+Language: everything in this repository is in English (code, comments, docstrings, logs, CLI output,
+docs, commit messages). The exception is what the owner receives at runtime, which stays in
+Brazilian Portuguese until there is a language setting: ntfy notifications, decision texts, the
+`unit`/`summary`/`milestone` the orchestrator writes, and the panel interface (`web/i18n/pt-BR.js`).
 
-## Regra número um
+## Rule number one
 
-**Nunca rode `autopilot.py start`, `autopilot.py run` nem `autopilot.py --config claude.toml run` a
-partir de uma sessão do Codex ou do Claude Code.** O loop dispara outras sessões, gasta a mesma cota que você e morre junto
-com a sua sessão. Quem inicia os loops é o Paulo, com `autopilot.py start` (ver `README.md`). Os comandos
-`status`, `decisions` e `test-notify` são seguros; `check` também, mas lê a cota (no Claude, com uma
-consulta mínima ao Haiku). `serve` também é seguro: o painel só lê. `stop`, `answer` e `reset` alteram estado e só rodam quando o Paulo pedir.
-Cada motor tem uma trava de instância (`~/.turno/shared/instance-<motor>.lock`, com o pid): nunca rodam dois
-loops do mesmo motor.
+**Never run `autopilot.py start`, `autopilot.py run` or `autopilot.py --config claude.toml run` from a
+Codex or Claude Code session.** The loop starts other sessions, spends the same quota you do and dies
+with your session. The owner starts the loops, with `autopilot.py start` (see `README.md`). `status`,
+`decisions`, `test-notify` and `serve` (the panel only reads) are safe; so is `check`, but it reads
+the quota (on Claude, with a minimal Haiku query). `stop`, `answer` and `reset` change state and only
+run when the owner asks. Each engine has an instance lock (`~/.turno/shared/instance-<engine>.lock`,
+holding the pid): two loops of the same engine never run.
 
-## Arquivos
+## Files
 
-| Caminho | O que é |
+| Path | What it is |
 |---|---|
-| `autopilot.py` | CLI, decisões e ntfy, Docker, escolha do projeto e o laço (`run_once`, `run_project`) |
-| `engines.py` | Motores `CodexEngine` e `ClaudeEngine`: comando, leitura da cota, classificação da saída, custo |
-| `coord.py` | Reservas, bastão e travas entre as instâncias, em `shared/` |
-| `schedule.py` | Janela semanal (a do Claude: sexta 19:00 a domingo 03:00) |
-| `~/.turno/projects.toml` | Instância do Codex: projetos em ordem de prioridade, tetos, modelos |
-| `~/.turno/claude.toml` | Instância do Claude: `[instance]`, `[engine]`, `[schedule]`, teto de 90% |
-| `~/.turno/secrets.toml` | Tópico do ntfy, lido pelas duas instâncias (fora do git; ver `secrets.example.toml`) |
-| `prompts/unit.md` | Prompt de toda unidade nova: o protocolo que o orquestrador segue |
-| `prompts/resume.md` | Prompt para retomar uma unidade interrompida |
-| `prompts/engine-*.md` | Nota de motor, anexada ao fim do prompt (o que é próprio do Codex ou do Claude) |
-| `claude-agents.json` | Papéis do Claude (`planner`, `plan-reviewer`, `implementer`, `reviewer`), passados com `--agents` |
-| `~/.turno/state.json`, `~/.turno/state-claude.json` | Estado de cada instância (gerado; não edite com o loop rodando) |
-| `~/.turno/autopilot.log`, `~/.turno/autopilot-claude.log` | Log de cada instância (gerado) |
-| `~/.turno/runs/`, `~/.turno/runs-claude/` | JSONL e stderr das execuções mais recentes (gerado) |
-| `~/.turno/shared/` | Reservas (`claims/`), travas (`*.lock`) e `notify.json` (gerado) |
-| `paths.py` | A pasta de dados (`$TURNO_HOME` ou `~/.turno`) |
-| `history.py` | Registro de unidades (`~/.turno/history-<motor>.jsonl`) |
-| `backlog.py` | Validação e leitura do `backlog.json` de cada projeto |
-| `feed.py` | Leitura incremental dos JSONL e tradução para o fluxo ao vivo |
-| `panel.py` | O que o painel mostra, montado a partir dos arquivos (só lê) |
-| `server.py` | HTTP do painel em 127.0.0.1: API, eventos (SSE) e `web/` |
+| `autopilot.py` | CLI, decisions and ntfy, Docker, project choice and the loop (`run_once`, `run_project`) |
+| `engines.py` | `CodexEngine` and `ClaudeEngine`: command, quota reading, output classification, cost, live feed translation |
+| `coord.py` | Claims, baton and locks between the instances, in `shared/` |
+| `schedule.py` | Weekly window (Claude's: Friday 19:00 to Sunday 03:00) |
+| `paths.py` | The data folder (`$TURNO_HOME` or `~/.turno`) |
+| `history.py` | Unit history (`history-<engine>.jsonl`) |
+| `backlog.py` | Validation and reading of each project's `backlog.json` |
+| `feed.py` | Incremental reading of run JSONL files and translation into the live feed |
+| `panel.py` | What the panel shows, assembled from the files (read-only) |
+| `server.py` | The panel's HTTP server on 127.0.0.1: API, events (SSE) and `web/` |
 | `web/` | Interface: `index.html`, `app.js`, `style.css`, `i18n/pt-BR.js` |
-| `<projeto>/.superpowers/autopilot/backlog.json` | Andamento do backlog, gravado pelo orquestrador no passo 8 |
-| `tests/` | Testes: `python3 -m unittest discover -s tests -v` |
-| `~/.codex/agents/*.toml` | Papéis do Codex: `planner`, `plan-reviewer`, `implementer`, `reviewer` |
-| `<projeto>/docs/autopilot.md` | Regras de cada projeto: backlog, caminhos, verificação, git |
+| `prompts/unit.md` | Prompt of every new unit: the protocol the orchestrator follows |
+| `prompts/resume.md` | Prompt to resume an interrupted unit |
+| `prompts/engine-*.md` | Engine note appended to the prompt (what is specific to Codex or Claude) |
+| `claude-agents.json` | Claude roles (`planner`, `plan-reviewer`, `implementer`, `reviewer`), passed with `--agents` |
+| `*.example.toml` | Config examples; the real `projects.toml`, `claude.toml` and `secrets.toml` live in `~/.turno` |
+| `projects.toml` | Codex instance: projects in priority order, caps, models |
+| `claude.toml` | Claude instance: `[instance]`, `[engine]`, `[schedule]`, 90% cap |
+| `secrets.toml` | ntfy topic, read by both instances (outside git) |
+| `state.json`, `state-claude.json` | State of each instance (generated; do not edit while the loop runs) |
+| `autopilot.log`, `autopilot-claude.log` | Log of each instance (generated) |
+| `runs/`, `runs-claude/` | JSONL and stderr of the latest runs (generated) |
+| `shared/` | Claims (`claims/`), locks (`*.lock`), `notes/` and `notify.json` (generated) |
+| `tests/` | Tests: `python3 -m unittest discover -s tests -v` |
+| `~/.codex/agents/*.toml` | Codex roles: `planner`, `plan-reviewer`, `implementer`, `reviewer` |
+| `<project>/docs/autopilot.md` | Each project's rules: backlog, paths, verification, git |
+| `<project>/.superpowers/autopilot/` | `last-unit.json`, `backlog.json` and `decisions/`, written by the orchestrator |
 
-Os três projetos, em ordem de prioridade:
+The owner's projects, their priority and caps are in `projects.toml` and `claude.toml`. Projects that
+bind the same Docker ports share a `docker_group`.
 
-| Projeto | Caminho | Git | Teto semanal |
-|---|---|---|---|
-| my-app | `~/projects/my-app` | `main`, sem remote | 95% |
-| my-api | `~/projects/my-api` | `main`, sem remote | 85% |
-| side-project | `~/projects/side-project` | `feat/`/`fix/` → merge na `master` → push | 60% |
+## How it works
 
-O my-app e o side-project usam as mesmas portas no Docker (8000, 3306, 5173): `docker_group = "web"`.
+A **unit** is one step of the spec → plan → execution cycle: apply decision answers, recover an
+interrupted task, run a task, finish an item, write a plan, write a spec or propose the backlog. Each
+unit is a short CLI session, and the orchestrator ends it by writing
+`<project>/.superpowers/autopilot/last-unit.json` with the status `worked`, `waiting`, `idle` or
+`blocked`, plus `backlog.json`.
 
-## Como funciona
+Each instance has an engine (`[engine] kind`, `codex` by default). On every turn, `run_once`:
 
-Uma **unidade** é um passo do ciclo spec → plano → execução: aplicar respostas de decisões,
-recuperar um task interrompido, executar um task, finalizar um item, escrever um plano, escrever uma
-spec ou propor o backlog. Cada unidade é uma sessão curta do `codex exec`, e o orquestrador termina
-escrevendo `<projeto>/.superpowers/autopilot/last-unit.json` com o status `worked`, `waiting`,
-`idle` ou `blocked`.
+1. `process_decisions`: under `shared/decisions.lock`, sends new decisions to ntfy, reads the answers
+   and applies the default when the deadline passes (the read position lives in `shared/notify.json`);
+2. with `[schedule]`, outside the window or in its last `start_margin_minutes`, it only sleeps: the
+   quota is not even queried;
+3. `engine.limits`: usage of the 5-hour and weekly windows. Codex: the most recent session log in
+   `~/.codex/sessions`. Claude: the `rate_limit_event` of the last run, or a minimal Haiku query
+   (`--safe-mode`) if the reading is older than 30 min. Without a reading, Claude starts nothing;
+4. `pick`: this engine's interrupted unit and any engine's baton go first. Otherwise, the first
+   project by priority that is not `idle`, `waiting` or in `blocked` cooldown, not claimed by the
+   other engine, with a clean tree, and whose usage plus `safety_factor` × the learned cost fits under
+   `weekly_cap` (week) and `primary_cap` (5 h). A project that does not fit does not hold up the line:
+   the next, cheaper one may run. It takes the group lock (`shared/<docker_group or name>.lock`);
+5. `run_project`: writes the claim, `prepare_docker` (stops the stack of the other project in the
+   group unless it has uncommitted work, and brings this project's up);
+6. `run_unit` (saves the state, including `unit_id`, `run` and the `_loop` phase, before starting
+   the CLI; with a window, cuts at its end) and `after_unit`: classifies the output (`usage_limit`,
+   `error`, `ok` or cut), writes one history line, learns the unit cost (exponential moving average),
+   releases or passes the claim and updates the state;
+7. `nap`: sleeps in 1-minute slices, reading ntfy answers.
 
-Cada instância tem um motor (`[engine] kind`, `codex` por padrão). A cada volta, o `run_once`:
+Invariants a change must not break:
 
-1. `process_decisions`: sob `shared/decisions.lock`, envia decisões novas ao ntfy, lê as respostas e
-   aplica o padrão quando o prazo vence (a posição de leitura fica em `shared/notify.json`);
-2. com `[schedule]`, fora da janela ou nos últimos `start_margin_minutes` dela, só dorme: nem a cota
-   é consultada;
-3. `engine.limits`: o uso das janelas de 5 h e semanal. Codex: o log de sessão mais recente em
-   `~/.codex/sessions`. Claude: o evento `rate_limit_event` da última execução ou de uma consulta
-   mínima ao Haiku (`--safe-mode`) se a leitura tiver mais de 30 min. Sem leitura, o Claude não
-   começa nada;
-4. `pick`: a unidade interrompida deste motor e o bastão de qualquer motor vão primeiro. Senão, o
-   primeiro projeto por prioridade que não esteja `idle`, `waiting` ou em cooldown de `blocked`, não
-   reservado pelo outro motor, com a árvore limpa e cujo uso mais `safety_factor` × o custo
-   aprendido caiba no `weekly_cap` (semana) e no `primary_cap` (5 h). Um projeto que não cabe não
-   segura a fila: o próximo, mais barato, pode rodar. Pega a trava do grupo
-   (`shared/<docker_group ou nome>.lock`);
-5. `run_project`: grava a reserva, `prepare_docker` (para o stack
-   do outro projeto do grupo, salvo se ele tiver trabalho sem commit, e sobe o do projeto);
-6. `run_unit` (grava o estado antes de iniciar a CLI; com janela, corta no fim dela) e `after_unit`:
-   classifica a saída (`usage_limit`, `error`, `ok` ou corte), aprende o custo da unidade (média
-   móvel exponencial), solta ou passa a reserva e atualiza o estado;
-7. `nap`: dorme em fatias de 1 min, lendo respostas do ntfy.
+- **Nothing is left half-done.** `interrupted` only goes back to `False` when the unit closes with
+  `last-unit.json`. An interrupted unit is resumed before any other, even above the cap.
+- **Someone else's work is not touched.** A project with a dirty tree and no interrupted unit is
+  skipped, and its Docker stack is not stopped.
+- **Cost is measured once per unit**, only when it closes: a resume does not count twice.
+- **ntfy answers only for a decision already sent, unanswered, with a listed option.** Both the
+  buttons (`project/decision/option` on the `-reply` topic) and the letter typed in the app on the
+  main topic count (`B`, `B, text…`, `myapp B`; the project is required when more than one is
+  pending). A message with a title comes from the scheduler itself and is ignored.
+- **Free text in the topic is a message from the owner to the agents**, unprotected (the owner's
+  choice: whoever knows the topic can send too). It is stored in `shared/notes/<project>.json`, goes
+  to the projects named in it (none named = all), is appended to the next unit's prompt ("Owner
+  messages") and only counts as delivered when that unit closes. No message overrides step 7
+  ("Never") of `prompts/unit.md`.
+- **A network or Docker failure never brings the loop down.** It logs, warns once and retries.
+- **Never two engines on the same project or Docker group.** The claim (`shared/claims/`) lasts until
+  the unit closes, including while interrupted; the group lock holds while the CLI runs.
+- **The baton goes first.** A unit cut at the end of the window becomes an `any` claim, carrying the
+  `unit_id`: any engine resumes it before starting another, even with a dirty tree, in a new session
+  from the ledger.
+- **Claude only works inside its window and with the quota read.** Outside it, it does not even query
+  the quota.
+- **The panel only reads.** It writes nothing in `~/.turno` or the projects, takes no locks and never
+  loads `secrets.toml`. It listens only on `127.0.0.1` and refuses foreign `Host` and `Origin`.
+- **History per run.** Every finished run becomes one line in `history-<engine>.jsonl`; summary and
+  cost only on the run that closes the unit.
 
-Invariantes que uma mudança não pode quebrar:
+## Decisions from the phone
 
-- **Nada fica pela metade.** `interrupted` só volta a `False` quando a unidade fecha com
-  `last-unit.json`. Uma unidade interrompida é retomada antes de qualquer outra, até acima do teto.
-- **Trabalho de outra pessoa não é tocado.** Projeto com árvore suja e sem unidade interrompida é
-  pulado, e o stack Docker dele não é parado.
-- **Custo medido uma vez por unidade**, só quando ela fecha: uma retomada não conta duas vezes.
-- **Respostas do ntfy só para decisão já enviada, sem resposta, e opção listada.** Valem os botões
-  (`projeto/decisão/opção` no tópico `-reply`) e a letra digitada no app, no tópico principal
-  (`B`, `B, texto…`, `my-app B`; o projeto é obrigatório com mais de uma pendente). Mensagem com
-  título é do próprio agendador e é ignorada.
-- **Texto livre no tópico é mensagem do dono para os agentes**, sem proteção (escolha do Paulo:
-  quem souber o tópico também manda). Fica em `shared/notes/<projeto>.json`, vai para os projetos
-  citados na frase (nenhum citado = todos), entra no fim do prompt da próxima unidade (seção
-  "Owner messages") e só conta como entregue quando essa unidade fecha. Nenhuma mensagem anula o
-  passo 7 ("Never") de `prompts/unit.md`.
-- **Falha de rede ou de Docker nunca derruba o loop.** Registra, avisa uma vez e tenta de novo.
-- **Nunca dois motores no mesmo projeto ou grupo Docker.** A reserva (`shared/claims/`) dura até a
-  unidade fechar, inclusive interrompida; a trava do grupo vale enquanto a CLI roda.
-- **Bastão vai primeiro.** Unidade cortada no fim da janela vira reserva `any`: qualquer motor a
-  retoma antes de começar outra, mesmo com a árvore suja, numa sessão nova a partir do ledger.
-- **O Claude só trabalha dentro da janela e com a cota lida.** Fora dela, nem consulta a cota.
-- **O painel só lê.** Não grava em `~/.turno` nem nos projetos, não pega travas e nunca carrega o
-  `secrets.toml`. Escuta só em `127.0.0.1` e recusa `Host` e `Origin` de fora.
-- **Histórico por execução.** Toda execução encerrada vira uma linha em `history-<motor>.jsonl`; resumo
-  e custo só na que fecha a unidade. O `unit_id` passa pelo bastão.
+The orchestrator writes `<project>/.superpowers/autopilot/decisions/<id>.json`, with 2 or 3 options
+and a `default`, and ends the unit as `waiting`. The scheduler adds `notified_at` and `deadline`, and
+later `answer`, `answered_by` (`owner`, `timeout` or `invalid-format`) and `answered_at`. The next unit
+applies the answer and writes `"applied": true`. The full format is in step 6 of `prompts/unit.md`,
+and the validation in `valid_decision`.
 
-## Decisões pelo celular
+The `topic` in `secrets.toml` is a secret: never print it in logs, commits or messages.
 
-O orquestrador grava `<projeto>/.superpowers/autopilot/decisions/<id>.json`, com 2 ou 3 opções e um
-`default`, e termina a unidade como `waiting`. O agendador acrescenta `notified_at` e `deadline`, e
-depois `answer`, `answered_by` (`owner`, `timeout` ou `invalid-format`) e `answered_at`. A unidade
-seguinte aplica a resposta e grava `"applied": true`. O formato completo está no passo 6 de
-`prompts/unit.md`, e a validação em `valid_decision`.
+## When changing something
 
-O `topic` em `secrets.toml` é segredo: não o imprima em logs, commits ou mensagens.
-
-## Ao mudar algo
-
-- **Mudou o protocolo** (`prompts/`, papéis, `last-unit.json`, arquivos de decisão): mantenha
-  coerentes `prompts/unit.md`, as notas de motor (`prompts/engine-*.md`), os papéis em
-  `~/.codex/agents/` e em `claude-agents.json`, e o `docs/autopilot.md` de cada projeto.
-- **Testes:** `python3 -m unittest discover -s tests -v`. O `tests/helpers.py` carrega o autopilot
-  com estado, log, `shared/` e ntfy numa pasta temporária, e traz um `FakeEngine` e um repositório git
-  de teste. Teste novo segue esse padrão. Nunca teste contra o `state.json` real, nem chamando
-  `codex` ou `claude` de verdade, nem parando containers dos projetos.
-- Depois de editar: os testes, `python3 -m py_compile autopilot.py coord.py engines.py schedule.py paths.py history.py backlog.py feed.py panel.py server.py`,
-  `python3 ~/projects/turno/autopilot.py status` e
-  `python3 ~/projects/turno/autopilot.py --config claude.toml status`.
-- Se o loop estiver rodando, a mudança só vale depois que o Paulo reiniciar o loop. Diga isso a ele.
-- Esta pasta está sob git (`main`, sem remote). Mudança grande vai numa branch.
+- **Protocol changes** (`prompts/`, roles, `last-unit.json`, `backlog.json`, decision files): keep
+  `prompts/unit.md`, the engine notes (`prompts/engine-*.md`), the roles in `~/.codex/agents/` and
+  `claude-agents.json`, and each project's `docs/autopilot.md` consistent.
+- **Tests:** `python3 -m unittest discover -s tests -v`. `tests/helpers.py` loads the autopilot with
+  state, log, `shared/` and ntfy in a temporary folder (`TURNO_HOME`), and provides a `FakeEngine`, a
+  test git repository and a sample data folder (`make_home`). New tests follow that pattern. Never
+  test against the real `state.json`, call the real `codex` or `claude`, or stop the projects'
+  containers. Never run `autopilot.py` commands without `TURNO_HOME` pointing at a temporary folder,
+  except the safe ones above against the real data.
+- After editing: the tests,
+  `python3 -m py_compile autopilot.py coord.py engines.py schedule.py paths.py history.py backlog.py feed.py panel.py server.py`,
+  `python3 autopilot.py status` and `python3 autopilot.py --config claude.toml status`.
+- If the loop is running, a change only applies after the owner restarts it. Tell them.
+- This folder is under git. Large changes go on a branch.
