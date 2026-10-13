@@ -21,6 +21,16 @@ class LimitEngine(helpers.FakeEngine):
         return "usage_limit", time.time() + 600, True
 
 
+class PartialLineTest(unittest.TestCase):
+    def test_append_after_a_partial_last_line_keeps_the_new_entry(self):
+        helpers.load(Path(tempfile.mkdtemp()))
+        import history
+        path = Path(tempfile.mkdtemp()) / "h.jsonl"
+        path.write_text('{"unit_id": "a"')
+        history.append(path, {"unit_id": "b"})
+        self.assertEqual([e["unit_id"] for e in history.read(path)], ["b"])
+
+
 class HistoryTest(unittest.TestCase):
     def setUp(self):
         self.tmp = Path(tempfile.mkdtemp())

@@ -9,5 +9,9 @@ runs-*/
 shared/
 __pycache__/
 
+# Configuração real fica em ~/.turno.
+projects.toml
+claude.toml
+
 # O tópico do ntfy é segredo.
 secrets.toml

@@ -23,8 +23,14 @@ def ts(value):
 def append(path, entry):
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("a", encoding="utf-8") as f:
-        f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+    with path.open("ab+") as f:
+        # Uma queda no meio da escrita deixa a última linha sem quebra; sem isto a próxima grudaria nela.
+        f.seek(0, 2)
+        if f.tell():
+            f.seek(-1, 2)
+            if f.read(1) != b"\n":
+                f.write(b"\n")
+        f.write((json.dumps(entry, ensure_ascii=False) + "\n").encode("utf-8"))
 
 
 def read(path):

@@ -189,6 +189,22 @@ class PanelTest(unittest.TestCase):
         self.assertIn({"config": "claude2.toml", "error": "duplicate"}, o["errors"])
         self.assertEqual(len(o["engines"]), 2)
 
+    def test_non_string_engine_kind_is_a_config_error(self):
+        (self.home / "bad.toml").write_text('[engine]\nkind = ["x"]\n\n[[project]]\nname = "x"\npath = "/tmp/x"\n')
+        o = self.overview()
+        self.assertIn({"config": "bad.toml", "error": "config"}, o["errors"])
+
+    def test_panel_never_queries_the_claude_quota(self):
+        import engines
+        def boom(*a, **k):
+            raise AssertionError("probe")
+        orig = engines.ClaudeEngine.probe
+        engines.ClaudeEngine.probe = boom
+        self.addCleanup(setattr, engines.ClaudeEngine, "probe", orig)
+        self.overview()
+        self.panel.live(self.home, self.homes)
+        self.panel.unit_detail(self.home, "u1")
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -59,8 +59,9 @@ def translate(engine_name, event, root=None):
     if root:
         prefix = str(root).rstrip("/") + "/"
         for item in items:
-            if item["kind"] == "file" and item["text"].startswith(prefix):
-                item["text"] = item["text"][len(prefix):]
+            text = item.get("text")
+            if item["kind"] == "file" and isinstance(text, str) and text.startswith(prefix):
+                item["text"] = text[len(prefix):]
     return items
 
 

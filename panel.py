@@ -50,7 +50,7 @@ def instances(home):
         except (OSError, tomllib.TOMLDecodeError):
             cfg = None
         kind = _dict((cfg or {}).get("engine")).get("kind", "codex")
-        if not cfg or not _valid_projects(cfg) or kind not in engines.ENGINES:
+        if not cfg or not _valid_projects(cfg) or not isinstance(kind, str) or kind not in engines.ENGINES:
             out.append({"config": path.name, "error": "config"})
             continue
         if kind in seen:  # dois arquivos para o mesmo motor misturariam histórico e trava

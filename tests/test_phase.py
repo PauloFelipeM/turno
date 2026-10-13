@@ -14,9 +14,24 @@ class Closed:
     def can_start(self, now):
         return False
 
+    def contains(self, now):
+        return False
+
 
 class Open:
     def can_start(self, now):
+        return True
+
+    def contains(self, now):
+        return True
+
+
+class PastMargin:
+    """Dentro da janela, mas já na margem final: não começa nada."""
+    def can_start(self, now):
+        return False
+
+    def contains(self, now):
         return True
 
 
@@ -41,6 +56,7 @@ class PhaseTest(unittest.TestCase):
         self.assertEqual(self.ap.idle_phase(None, now), "sleeping")
         self.assertEqual(self.ap.idle_phase(Open(), now), "sleeping")
         self.assertEqual(self.ap.idle_phase(Closed(), now), "outside_window")
+        self.assertEqual(self.ap.idle_phase(PastMargin(), now), "sleeping")
 
     def test_set_phase(self):
         self.ap.set_phase(self.state, "sleeping", until=123.0)

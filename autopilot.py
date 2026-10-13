@@ -524,7 +524,7 @@ def set_phase(state, phase, project=None, until=None):
 
 
 def idle_phase(win, now):
-    return "outside_window" if win and not win.can_start(now) else "sleeping"
+    return "outside_window" if win and not win.contains(now) else "sleeping"
 
 
 def run_unit(cfg, engine, state, project, deadline=None):
@@ -1176,6 +1176,8 @@ def main():
     try:
         args.func(args)
     except Exception:
+        if args.cmd == "serve":  # o painel não tem log próprio; não suja o log do loop do Codex
+            raise
         # Sem isto o traceback some junto com a janela do tmux.
         import traceback
         log("erro inesperado; o loop parou:\n" + traceback.format_exc())

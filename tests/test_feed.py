@@ -17,6 +17,10 @@ class TranslateTest(unittest.TestCase):
         import feed
         self.feed = feed
 
+    def test_non_text_file_path_does_not_raise(self):
+        event = {"type": "item.completed", "item": {"type": "file_change", "changes": [{"path": 3}]}}
+        self.assertIsInstance(self.feed.translate("codex", event, root="/tmp/proj"), list)
+
     def test_codex_run(self):
         items = strip(self.feed.read_run("codex", FIXTURES / "codex-run.jsonl", root="/tmp/proj"))
         self.assertEqual(items, [
