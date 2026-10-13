@@ -3,7 +3,13 @@ import T from "./i18n/pt-BR.js";
 
 const $ = (sel) => document.querySelector(sel);
 const PAGE = 30;
-const view = { overview: null, filter: null, feeds: new Map(), units: [], exhausted: false, liveEls: new Map() };
+const view = {
+  overview: null, filter: null, feeds: new Map(), units: [], exhausted: false, liveEls: new Map(),
+  confirm: null, // key of the confirmation row that is open: "engine:<name>" or "project:<name>"
+  drafts: new Map(), // comment texts typed in the attention strip, kept across redraws
+  attentionSig: null, // what the attention strip shows now, to redraw it only when that changes
+  draft: null, // the settings dialog's working copy
+};
 
 function t(path, vars = {}) {
   const raw = path.split(".").reduce((o, k) => (o == null ? o : o[k]), T);
@@ -42,6 +48,59 @@ async function getJSON(url) {
   return r.json();
 }
 
+// Sends a write request; resolves to the parsed JSON and throws an Error with the server's message otherwise.
+async function post(url, body, method = "POST") {
+  let r;
+  try {
+    r = await fetch(url, {
+      method,
+      headers: { "Content-Type": "application/json", "X-Turno": "1" },
+      body: body === undefined ? undefined : JSON.stringify(body),
+    });
+  } catch {
+    throw new Error(t("requestError"));
+  }
+  let data = null;
+  try { data = await r.json(); } catch { /* no body */ }
+  if (!r.ok) throw new Error((data && data.message) || t("requestError"));
+  return data;
+}
+
+let toastTimer = null;
+function toast(text, kind = "ok") {
+  const el = $("#toast");
+  el.textContent = text;
+  el.className = `toast ${kind}`;
+  el.hidden = false;
+  try { el.showPopover(); } catch { /* already open, or no popover support */ } // the top layer keeps it above open dialogs
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => {
+    el.hidden = true;
+    try { el.hidePopover(); } catch { /* already closed */ }
+  }, 4000);
+}
+
+// Runs an action with its button disabled until the server answers; errors become a toast.
+async function act(btn, fn, okText) {
+  btn.disabled = true;
+  try {
+    await fn();
+    if (okText) toast(okText);
+    return true;
+  } catch (e) {
+    toast(e.message, "error");
+    return false;
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+const enc = encodeURIComponent;
+
+function actionBtn(label, onclick, attrs = {}) {
+  return h("button", { type: "button", class: "icon-btn", ...attrs, onclick }, label);
+}
+
 // Keeps and restores keyboard focus when the list is redrawn.
 function keepFocus(attr, render) {
   const key = document.activeElement && document.activeElement.dataset ? document.activeElement.dataset[attr] : null;
@@ -70,7 +129,32 @@ function meter(label, w, cap) {
     h("span", { class: "muted" }, w.resets_at ? t("reset", { when: when(w.resets_at) }) : ""));
 }
 
+function engineControls(e) {
+  const running = e.loop.phase !== "stopped";
+  const key = `engine:${e.engine}`;
+  const name = engineName(e.engine);
+  if (!running) {
+    return h("button", { type: "button", class: "btn", "data-action": `start:${e.engine}`, onclick: (ev) =>
+      act(ev.currentTarget, () => post(`/api/engines/${enc(e.engine)}/start`), t("engineRequested", { engine: name })) }, t("start"));
+  }
+  if (view.confirm !== key) {
+    return h("button", { type: "button", class: "btn", "data-action": `stop:${e.engine}`, onclick: () => { view.confirm = key; renderEngines(); } }, t("stop"));
+  }
+  const unit = e.loop.phase === "running" && e.loop.project ? t("stopConfirmUnit", { project: e.loop.project }) : "";
+  return h("div", { class: "confirm", role: "group" },
+    h("span", {}, t("stopConfirm", { engine: name, unit })),
+    h("button", { type: "button", class: "btn danger", "data-action": `stop:${e.engine}`, onclick: async (ev) => {
+      if (await act(ev.currentTarget, () => post(`/api/engines/${enc(e.engine)}/stop`), t("engineRequested", { engine: name }))) view.confirm = null;
+      renderEngines();
+    } }, t("stop")),
+    h("button", { type: "button", class: "btn", onclick: () => { view.confirm = null; renderEngines(); } }, t("cancel")));
+}
+
 function renderEngines() {
+  keepFocus("action", drawEngines);
+}
+
+function drawEngines() {
   const o = view.overview;
   fill($("#engines"),
     ...o.engines.map((e) => h("section", { class: `engine phase-${e.loop.phase}` },
@@ -78,8 +162,62 @@ function renderEngines() {
       e.limits.known
         ? [meter(t("window5h"), e.limits.primary, e.primary_cap), meter(t("weekly"), e.limits.secondary, e.weekly_cap)]
         : h("p", { class: "muted" }, t("noLimits")),
-      e.window ? h("p", { class: "muted small" }, e.window.label) : null)),
+      e.window ? h("p", { class: "muted small" }, e.window.label) : null,
+      h("div", { class: "controls" }, engineControls(e)))),
     ...o.errors.map((err) => h("p", { class: "error" }, t("configError", { config: err.config }))));
+}
+
+// --- attention strip -----------------------------------------------------------------------
+
+function attentionItems() {
+  const items = [];
+  for (const p of view.overview.projects) {
+    for (const d of p.decisions_open || []) items.push({ kind: "decision", project: p.name, d });
+    if (Object.values(p.engines).some((e) => e.status === "blocked")) items.push({ kind: "blocked", project: p.name, summary: p.blocked_summary });
+  }
+  return items;
+}
+
+function decisionItem(project, d) {
+  const dkey = `${project}/${d.id}`;
+  const comment = h("input", { type: "text", maxlength: "2000", class: "comment", "aria-label": t("attention.comment"), placeholder: t("attention.comment"),
+    value: view.drafts.get(dkey) || "", oninput: (ev) => view.drafts.set(dkey, ev.target.value) });
+  const buttons = d.options.map((o) => h("button", { type: "button", class: "btn", onclick: async (ev) => {
+    const group = ev.currentTarget.closest("article").querySelectorAll("button");
+    group.forEach((b) => { b.disabled = true; });
+    const ok = await act(ev.currentTarget, () => post(`/api/decisions/${enc(project)}/${enc(d.id)}`, { option: o.id, comment: comment.value.trim() || undefined }), t("attention.answered"));
+    if (ok) view.drafts.delete(dkey);
+    else group.forEach((b) => { b.disabled = false; });
+  } }, `${o.id.toUpperCase()}. ${o.label}`, o.id === d.default ? ` (${t("project.default")})` : ""));
+  return h("article", { class: "attn-item" },
+    h("p", {}, h("b", {}, project), " · ", d.question),
+    d.context ? h("p", { class: "muted small" }, d.context) : null,
+    d.deadline ? h("p", { class: "muted small" }, t("project.deadline", { when: when(d.deadline) })) : null,
+    comment,
+    h("div", { class: "btn-row" }, buttons));
+}
+
+function blockedItem(project, summary) {
+  return h("article", { class: "attn-item" },
+    h("p", {}, h("b", {}, project), " · ", t("attention.blocked")),
+    h("p", { class: "muted small" }, summary || t("attention.noSummary")),
+    h("div", { class: "btn-row" },
+      h("button", { type: "button", class: "btn", onclick: (ev) =>
+        act(ev.currentTarget, () => post(`/api/projects/${enc(project)}/reset`, {}), t("attention.reactivated", { project })) }, t("attention.reactivate"))));
+}
+
+// Redrawn only when its content changes, so a typed comment and the focus survive the events.
+function renderAttention() {
+  const items = attentionItems();
+  const sig = JSON.stringify(items);
+  if (sig === view.attentionSig) return;
+  view.attentionSig = sig;
+  const box = $("#attention");
+  box.hidden = !items.length;
+  const live = new Set(items.filter((i) => i.kind === "decision").map((i) => `${i.project}/${i.d.id}`));
+  for (const k of [...view.drafts.keys()]) if (!live.has(k)) view.drafts.delete(k);
+  fill(box, h("h2", {}, t("attention.title")),
+    ...items.map((i) => (i.kind === "decision" ? decisionItem(i.project, i.d) : blockedItem(i.project, i.summary))));
 }
 
 // --- projects ------------------------------------------------------------------------------
@@ -112,23 +250,48 @@ function progress(b) {
 }
 
 function renderProjects() {
-  keepFocus("project", drawProjects);
+  keepFocus("project", () => keepFocus("action", drawProjects));
+}
+
+function projectActions(p, running) {
+  const key = `project:${p.name}`;
+  const label = (k) => t(`card.${k}`, { project: p.name });
+  const btn = (k, glyph, path, okKey) => actionBtn(glyph, (ev) =>
+    act(ev.currentTarget, () => post(`/api/projects/${enc(p.name)}/${path}`), t(`card.${okKey}`, { project: p.name })),
+  { title: label(k), "aria-label": label(k), "data-action": `${path}:${p.name}` });
+  if (view.confirm === key) {
+    return h("div", { class: "confirm", role: "group" },
+      h("span", {}, t("card.interruptConfirm", { project: p.name })),
+      h("button", { type: "button", class: "btn danger", "data-action": `interrupt:${p.name}`, onclick: async (ev) => {
+        if (await act(ev.currentTarget, () => post(`/api/projects/${enc(p.name)}/interrupt`), t("card.interrupted", { project: p.name }))) view.confirm = null;
+        renderProjects();
+      } }, t("card.interrupt")),
+      h("button", { type: "button", class: "btn", onclick: () => { view.confirm = null; renderProjects(); } }, t("cancel")));
+  }
+  return h("div", { class: "card-actions" },
+    p.paused ? btn("resume", "▶", "resume", "resumed") : btn("pause", "⏸", "pause", "paused"),
+    p.next ? null : btn("next", "⏭", "next", "nextSet"),
+    running ? actionBtn("⏹", () => { view.confirm = key; renderProjects(); },
+      { title: label("interrupt"), "aria-label": label("interrupt"), "data-action": `interrupt:${p.name}` }) : null);
 }
 
 function drawProjects() {
   const running = new Set(view.overview.live.map((l) => l.project));
   fill($("#project-list"), ...view.overview.projects.map((p) => {
-    const extra = [claimText(p.claim), p.decisions ? (p.decisions === 1 ? t("decisionsOne") : t("decisionsMany", { n: p.decisions })) : null];
-    return h("button", {
-      type: "button",
-      "data-project": p.name,
-      class: "project" + (running.has(p.name) ? " on" : "") + (view.filter === p.name ? " sel" : ""),
-      "aria-pressed": String(view.filter === p.name),
-      onclick: () => selectProject(p.name),
-    },
-    h("span", { class: "row" }, h("b", {}, p.name), statusChip(projectState(p))),
-    h("span", { class: "muted small" }, extra.filter(Boolean).join(" · ")),
-    progress(p.backlog));
+    const extra = [claimText(p.claim), p.next ? t("card.nextBadge") : null,
+      p.decisions ? (p.decisions === 1 ? t("decisionsOne") : t("decisionsMany", { n: p.decisions })) : null];
+    return h("div", { class: "card" + (running.has(p.name) ? " on" : "") + (view.filter === p.name ? " sel" : "") + (p.paused ? " paused" : "") },
+      h("button", {
+        type: "button",
+        "data-project": p.name,
+        class: "project",
+        "aria-pressed": String(view.filter === p.name),
+        onclick: () => selectProject(p.name),
+      },
+      h("span", { class: "row" }, h("b", {}, p.name), h("span", {}, p.paused ? h("span", { class: "chip paused-chip" }, t("card.pausedChip")) : null, statusChip(projectState(p)))),
+      h("span", { class: "muted small" }, extra.filter(Boolean).join(" · ")),
+      progress(p.backlog)),
+      projectActions(p, running.has(p.name)));
   }));
 }
 
@@ -141,8 +304,10 @@ async function selectProject(name) {
   await loadUnits("reset");
   if (!view.filter) return;
   let d;
+  let settings = null;
   try {
     d = await getJSON(`/api/projects/${encodeURIComponent(name)}`);
+    settings = await getJSON("/api/settings").catch(() => null);
   } catch {
     if (view.filter === name) {
       box.hidden = false;
@@ -164,7 +329,126 @@ async function selectProject(name) {
       h("p", {}, h("b", {}, x.question)),
       x.context ? h("p", { class: "muted small" }, x.context) : null,
       h("ul", {}, x.options.map((o) => h("li", {}, `${o.id.toUpperCase()}. ${o.label}`, o.id === x.default ? ` (${t("project.default")})` : ""))),
-      h("p", { class: "muted small" }, x.deadline ? `${t("project.deadline", { when: when(x.deadline) })}. ` : "", t("project.answerByPhone")))));
+      h("p", { class: "muted small" }, x.deadline ? `${t("project.deadline", { when: when(x.deadline) })}. ` : "", t("project.answerByPhone"))),
+    messageForm(name),
+    settings ? capsForm(name, settings) : null);
+}
+
+function messageForm(name) {
+  const text = h("textarea", { rows: "3", maxlength: "2000", "aria-label": t("message.title"), placeholder: t("message.placeholder") });
+  return h("section", { class: "form" },
+    h("h3", {}, t("message.title")),
+    text,
+    h("div", { class: "btn-row" }, h("button", { type: "button", class: "btn", onclick: async (ev) => {
+      if (!text.value.trim()) { toast(t("message.empty"), "error"); return; }
+      if (await act(ev.currentTarget, () => post("/api/messages", { text: text.value, projects: [name] }), t("message.sent"))) text.value = "";
+    } }, t("message.send"))));
+}
+
+function capInput(label, value, onChange) {
+  return h("label", { class: "cap-field" }, h("span", {}, label),
+    h("input", { type: "number", min: "0", max: "100", step: "any", value: value ?? "", oninput: (ev) => onChange(ev.target.value) }));
+}
+
+// Parses a cap field: a number from 0 to 100, or null.
+function parseCap(v) {
+  if (String(v).trim() === "") return null;
+  const n = Number(v);
+  return Number.isFinite(n) && n >= 0 && n <= 100 ? n : null;
+}
+
+function capsForm(name, settings) {
+  const values = {};
+  const engs = Object.keys(settings.engines);
+  const fields = engs.map((e) => {
+    values[e] = settings.engines[e].weekly_cap[name];
+    return capInput(`${engineName(e)} (%)`, values[e], (v) => { values[e] = v; });
+  });
+  return h("section", { class: "form" },
+    h("h3", {}, t("caps.title")),
+    h("div", { class: "cap-row" }, fields),
+    h("div", { class: "btn-row" }, h("button", { type: "button", class: "btn", onclick: (ev) => {
+      const body = {};
+      for (const e of engs) {
+        const n = parseCap(values[e]);
+        if (n == null) { toast(t("caps.invalid"), "error"); return; }
+        body[e] = n;
+      }
+      return act(ev.currentTarget, () => post("/api/settings", { weekly_cap: { [name]: body } }, "PUT"), t("caps.saved"));
+    } }, t("caps.save"))));
+}
+
+// --- settings dialog -----------------------------------------------------------------------
+
+function loadDraft(s) {
+  view.draft = {
+    order: [...s.order],
+    engines: Object.keys(s.engines),
+    weekly: Object.fromEntries(s.order.map((n) => [n, Object.fromEntries(Object.entries(s.engines).map(([e, v]) => [e, v.weekly_cap[n] ?? ""]))])),
+    primary: Object.fromEntries(Object.entries(s.engines).map(([e, v]) => [e, v.primary_cap ?? ""])),
+  };
+}
+
+function renderSettings() {
+  keepFocus("mv", drawSettings);
+}
+
+function move(i, delta) {
+  const o = view.draft.order;
+  [o[i], o[i + delta]] = [o[i + delta], o[i]];
+  renderSettings();
+}
+
+function saveBody() {
+  const d = view.draft;
+  const weekly = {};
+  for (const n of d.order) {
+    weekly[n] = {};
+    for (const e of d.engines) {
+      const v = parseCap(d.weekly[n][e]);
+      if (v == null) return null;
+      weekly[n][e] = v;
+    }
+  }
+  const primary = {};
+  for (const e of d.engines) {
+    const v = parseCap(d.primary[e]);
+    if (v == null) return null;
+    primary[e] = v;
+  }
+  return { order: d.order, weekly_cap: weekly, primary_cap: primary };
+}
+
+function drawSettings() {
+  const d = view.draft;
+  fill($("#settings-body"),
+    h("h2", {}, t("settings.title")),
+    h("p", { class: "muted small" }, t("settings.hint")),
+    h("ol", { class: "order" }, d.order.map((n, i) => h("li", {},
+      h("span", { class: "order-name" }, h("b", {}, n)),
+      h("span", { class: "cap-row" }, d.engines.map((e) => capInput(`${engineName(e)} (%)`, d.weekly[n][e], (v) => { d.weekly[n][e] = v; }))),
+      h("span", { class: "btn-row" },
+        actionBtn("↑", () => move(i, -1), { disabled: i === 0, title: t("settings.up", { project: n }), "aria-label": t("settings.up", { project: n }), "data-mv": `up:${n}` }),
+        actionBtn("↓", () => move(i, 1), { disabled: i === d.order.length - 1, title: t("settings.down", { project: n }), "aria-label": t("settings.down", { project: n }), "data-mv": `down:${n}` }))))),
+    h("h3", {}, t("settings.primary")),
+    h("div", { class: "cap-row" }, d.engines.map((e) => capInput(`${engineName(e)} (%)`, d.primary[e], (v) => { d.primary[e] = v; }))),
+    h("div", { class: "btn-row" },
+      h("button", { type: "button", class: "btn", onclick: (ev) => {
+        const body = saveBody();
+        if (!body) { toast(t("caps.invalid"), "error"); return; }
+        return act(ev.currentTarget, async () => { loadDraft(await post("/api/settings", body, "PUT")); drawSettings(); }, t("settings.saved"));
+      } }, t("settings.save")),
+      h("button", { type: "button", class: "btn", onclick: (ev) =>
+        act(ev.currentTarget, async () => { loadDraft(await post("/api/settings", undefined, "DELETE")); drawSettings(); }, t("settings.resetDone")) }, t("settings.reset")),
+      h("button", { type: "button", class: "btn", onclick: () => $("#settings").close() }, t("settings.close"))));
+}
+
+async function openSettings(ev) {
+  await act(ev.currentTarget, async () => {
+    loadDraft(await getJSON("/api/settings"));
+    drawSettings();
+    $("#settings").showModal();
+  });
 }
 
 // --- live ----------------------------------------------------------------------------------
@@ -329,6 +613,7 @@ function connect() {
     const runs = new Set(view.overview.live.map((l) => l.run));
     for (const run of [...view.feeds.keys()]) if (!runs.has(run)) view.feeds.delete(run);
     renderEngines();
+    renderAttention();
     renderProjects();
     renderLive();
     document.body.classList.remove("loading");
@@ -349,6 +634,8 @@ function connect() {
 $("#live-h").textContent = t("live.title");
 $("#projects-h").textContent = t("projects.title");
 $("#history-h").textContent = t("history.title");
+$("#settings-open").textContent = t("settings.open");
+$("#settings-open").addEventListener("click", openSettings);
 $("#more").textContent = t("history.more");
 $("#more").addEventListener("click", () => loadUnits("more"));
 $("#unit-close").textContent = t("unit.close");

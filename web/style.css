@@ -42,9 +42,34 @@ button { font: inherit; color: inherit; }
 .live, .projects, .history { min-width: 0; }
 
 .project-list { display: grid; gap: 8px; }
-.project { display: grid; gap: 4px; text-align: left; width: 100%; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; cursor: pointer; }
-.project.on { border-color: var(--live); }
-.project.sel { outline: 2px solid var(--accent); }
+.card { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; }
+.card.on { border-color: var(--live); }
+.card.sel { outline: 2px solid var(--accent); }
+.card.paused .project { opacity: .6; }
+.project { display: grid; gap: 4px; text-align: left; width: 100%; background: none; border: 0; border-radius: 10px; padding: 10px 12px 4px; cursor: pointer; }
+.card-actions, .card .confirm { display: flex; gap: 6px; padding: 4px 12px 8px; align-items: center; flex-wrap: wrap; }
+.icon-btn { min-width: 2.2em; min-height: 2.2em; background: var(--track); border: 1px solid var(--line); border-radius: 8px; cursor: pointer; }
+.icon-btn:disabled, .btn:disabled { opacity: .5; cursor: default; }
+.btn { background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 4px 12px; cursor: pointer; }
+.btn.danger { border-color: var(--bad); color: var(--bad); }
+.btn-row { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 6px; }
+.controls { margin-top: 8px; }
+.confirm { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.paused-chip { color: var(--warn); margin-right: 4px; }
+.attention { margin: 0 16px 16px; padding: 4px 12px 12px; background: var(--surface); border: 2px solid var(--warn); border-radius: 10px; }
+.attention h2 { margin-top: 8px; }
+.attn-item { border-top: 1px solid var(--line); padding-top: 6px; margin-top: 6px; }
+.attn-item p { margin: 4px 0; }
+.comment, .form textarea { width: 100%; font: inherit; color: inherit; background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 4px 8px; }
+.form { border-top: 1px solid var(--line); margin-top: 8px; }
+.cap-row { display: flex; gap: 12px; flex-wrap: wrap; }
+.cap-field { display: grid; gap: 2px; font-size: .85rem; }
+.cap-field input { width: 6em; font: inherit; color: inherit; background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 2px 6px; }
+.order { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.order li { display: grid; gap: 4px; border-top: 1px solid var(--line); padding-top: 6px; }
+#settings-open { width: 100%; margin-top: 8px; }
+.toast { position: fixed; inset: auto auto 16px 50%; margin: 0; border: 0; transform: translateX(-50%); max-width: min(90vw, 520px); padding: 8px 16px; border-radius: 8px; background: var(--fg); color: var(--bg); z-index: 10; }
+.toast.error { background: var(--bad); color: #fff; }
 .project .row { display: flex; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
 .project span { display: block; }
 .bar { position: relative; height: 5px; border-radius: 3px; background: var(--track); margin-top: 4px; }
