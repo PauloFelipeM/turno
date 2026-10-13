@@ -32,6 +32,14 @@ class PromptsTest(unittest.TestCase):
         for role in roles.values():
             self.assertTrue(role["description"] and role["prompt"])
 
+    def test_prompts_ask_for_backlog_json(self):
+        unit = (ROOT / "prompts" / "unit.md").read_text()
+        resume = (ROOT / "prompts" / "resume.md").read_text()
+        self.assertIn(".superpowers/autopilot/backlog.json", unit)
+        self.assertIn("backlog.json", resume)
+        for state in ('"todo"', '"spec"', '"plan"', '"doing"', '"done"'):
+            self.assertIn(state, unit)
+
 
 if __name__ == "__main__":
     unittest.main()

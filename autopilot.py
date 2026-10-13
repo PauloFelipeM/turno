@@ -41,6 +41,7 @@ import urllib.parse
 import urllib.request
 from pathlib import Path
 
+import backlog
 import coord
 import engines
 import history
@@ -655,6 +656,8 @@ def after_unit(cfg, engine, state, project, out, err, code, unit_file):
     unit_status = result.get("status", "worked")
     summary = result.get("summary", "")
     log(f"{project['name']}: {unit_status} — {result.get('unit', '?')}")
+    if not backlog.valid_backlog(read_json(Path(project["path"]) / backlog.FILE)):
+        log(f"{project['name']}: backlog.json ausente ou inválido; o painel fica sem o andamento")
     if unit_status == "idle":
         s["status"] = "idle"
         ntfy(cfg, f"{project['name']}: sem trabalho", summary or "Backlog concluído.", tags=["checkered_flag"])

@@ -6,5 +6,5 @@ subagents that may still be alive (see the engine notes). A task that was mid-wa
 before dispatching anyone again.
 
 Then finish the SAME unit you were doing, following the original autopilot instructions (steps 3 to
-8), write `.superpowers/autopilot/last-unit.json`, and end your turn. Everything the owner reads
+8), write `.superpowers/autopilot/last-unit.json` and `.superpowers/autopilot/backlog.json`, and end your turn. Everything the owner reads
 (decision texts, and `unit`, `summary` and `milestone` in last-unit.json) is written in pt-BR.
