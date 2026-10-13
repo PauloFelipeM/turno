@@ -4,7 +4,8 @@ Agendador que roda o Codex e o Claude Code sem supervisão em vários projetos, 
 assinaturas, e um painel web local para acompanhar. Nasceu do codex-autopilot e vai virar um produto
 aberto. Esta pasta é a ferramenta em si; os projetos ficam em outros lugares, e os dados (configuração,
 estado, logs, execuções) ficam em `~/.turno` (ou `$TURNO_HOME`). Aqui você mantém o agendador, e não
-trabalha nos projetos.
+trabalha nos projetos. Todo caminho de dados citado sem pasta neste arquivo (`shared/`,
+`state*.json`, `secrets.toml`, `claude.toml`, logs, `runs/`) fica em `~/.turno` (ou `$TURNO_HOME`).
 
 Código, identificadores e mensagens de commit em inglês; comentários, docstrings, logs e
 documentação em português (pt-BR), como no resto do arquivo.
@@ -138,6 +139,7 @@ O `topic` em `secrets.toml` é segredo: não o imprima em logs, commits ou mensa
   de teste. Teste novo segue esse padrão. Nunca teste contra o `state.json` real, nem chamando
   `codex` ou `claude` de verdade, nem parando containers dos projetos.
 - Depois de editar: os testes, `python3 -m py_compile autopilot.py coord.py engines.py schedule.py paths.py history.py backlog.py feed.py panel.py server.py`,
-  `python3 autopilot.py status` e `python3 autopilot.py --config claude.toml status`.
+  `python3 ~/projects/turno/autopilot.py status` e
+  `python3 ~/projects/turno/autopilot.py --config claude.toml status`.
 - Se o loop estiver rodando, a mudança só vale depois que o Paulo reiniciar o loop. Diga isso a ele.
 - Esta pasta está sob git (`main`, sem remote). Mudança grande vai numa branch.

@@ -8,10 +8,13 @@ Uma segunda instância roda o Claude Code nos mesmos projetos, só nos fins de s
 nos fins de semana"). As duas revezam: nunca trabalham no mesmo projeto nem no mesmo grupo Docker
 ao mesmo tempo.
 
+Configuração, estado e logs ficam em `~/.turno` (ou na pasta de `$TURNO_HOME`); os nomes de arquivo
+citados sem pasta abaixo ficam lá.
+
 ## Iniciar
 
 Na primeira vez, crie a pasta de dados a partir dos exemplos e troque o `topic` do ntfy, no
-`secrets.toml`, por um nome aleatório só seu:
+`~/.turno/secrets.toml`, por um nome aleatório só seu:
 
 ```bash
 mkdir -p ~/.turno
