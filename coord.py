@@ -90,13 +90,16 @@ def release(project, engine):
             _claim_path(project).unlink(missing_ok=True)
 
 
-def hand_off(project, engine):
-    """Troca a reserva de `engine` por um bastão que qualquer motor pode pegar."""
+def hand_off(project, engine, unit_id=None):
+    """Troca a reserva de `engine` por um bastão que qualquer motor pode pegar.
+
+    O bastão leva o identificador da unidade, para o histórico juntar as execuções dos dois motores.
+    """
     with _claims_mutex():
         current = read_claim(project)
         if current and current.get("engine") not in (engine, ANY):
             return
-        _write_claim(project, {"engine": ANY, "handoff_from": engine, "since": time.time()})
+        _write_claim(project, {"engine": ANY, "handoff_from": engine, "unit_id": unit_id, "since": time.time()})
 
 
 def is_handoff(project):

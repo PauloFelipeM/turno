@@ -43,6 +43,7 @@ from pathlib import Path
 
 import coord
 import engines
+import history
 import paths
 import schedule
 
@@ -54,6 +55,7 @@ SECRETS = HOME / "secrets.toml"
 STATE = HOME / "state.json"
 LOG = HOME / "autopilot.log"
 RUNS = HOME / "runs"
+HISTORY = HOME / "history-codex.jsonl"
 PROMPTS = BASE / "prompts"
 UNIT_FILE = Path(".superpowers") / "autopilot" / "last-unit.json"
 DECISIONS = Path(".superpowers") / "autopilot" / "decisions"
@@ -87,14 +89,16 @@ def configure(config_path=None):
     Sem [instance] name valem os nomes de sempre; com name = "claude", state-claude.json,
     autopilot-claude.log e runs-claude/. Tudo dentro da pasta de dados.
     """
-    global CONFIG, STATE, LOG, RUNS
+    global CONFIG, STATE, LOG, RUNS, HISTORY
     HOME.mkdir(parents=True, exist_ok=True)
     CONFIG = resolve_config(config_path)
-    name = (load_config().get("instance") or {}).get("name")
+    cfg = load_config()
+    name = (cfg.get("instance") or {}).get("name")
     suffix = f"-{name}" if name else ""
     STATE = HOME / f"state{suffix}.json"
     LOG = HOME / f"autopilot{suffix}.log"
     RUNS = HOME / f"runs{suffix}"
+    HISTORY = HOME / f"history-{(cfg.get('engine') or {}).get('kind', 'codex')}.jsonl"
 
 
 def load_config():
@@ -126,6 +130,8 @@ def load_state(cfg):
         s.setdefault("dirty_logged", False)
         s.setdefault("unit_start_limits", None)
         s.setdefault("notes_sent", [])
+        s.setdefault("unit_id", None)
+        s.setdefault("run", None)
     return state
 
 
@@ -532,6 +538,9 @@ def run_unit(cfg, engine, state, project, deadline=None):
     RUNS.mkdir(exist_ok=True)
     stem = RUNS / f"{time.strftime('%Y%m%d-%H%M%S')}-{project['name']}"
     out, err = f"{stem}.jsonl", f"{stem}.err"
+    if not s.get("unit_id"):
+        s["unit_id"] = stem.name  # a primeira execução dá nome à unidade; retomadas e bastão o mantêm
+    s["run"] = {"id": stem.name, "started": time.time()}
     engine.begin(s, resume)
     cmd, env = engine.command(state, project, s, resume, stem)
     log(f"{project['name']}: {'retomando sessão ' + s['session'] if resume else 'unidade nova'}")
@@ -554,17 +563,35 @@ def run_unit(cfg, engine, state, project, deadline=None):
     return out, err, code, unit_file
 
 
+def record_run(engine, project, s, outcome, result=None, cost=None):
+    """Uma linha no histórico por execução encerrada. Resumo e custo só na que fecha a unidade."""
+    run = s.get("run") or {}
+    entry = {"unit_id": s.get("unit_id") or run.get("id"), "run": run.get("id"), "project": project["name"],
+             "engine": engine.name, "started_at": history.iso(run.get("started") or time.time()),
+             "ended_at": history.iso(time.time()), "outcome": outcome, "closed": result is not None}
+    if result is not None:
+        entry.update(unit=result.get("unit"), summary=result.get("summary"),
+                     milestone=result.get("milestone"), cost=cost)
+    try:
+        history.append(HISTORY, entry)
+    except OSError as e:
+        log(f"histórico não gravado: {e}")
+    s["run"] = None
+
+
 def after_unit(cfg, engine, state, project, out, err, code, unit_file):
     """Atualiza o estado do projeto e devolve quantos segundos dormir antes da próxima unidade."""
     d = cfg["defaults"]
     s = state[project["name"]]
     if code == CUT:
+        record_run(engine, project, s, "cut")
         pass_baton(engine, project["name"], s)
         log(f"{project['name']}: unidade cortada no fim da janela; bastão passado")
         return 5
     status, reset, hard = engine.classify(out, err, code)
 
     if status == "usage_limit":
+        record_run(engine, project, s, "usage_limit")
         s["errors"] = 0
         wait = (reset - time.time() + 120) if reset else (1800 if hard else 300)
         wait = max(wait, 300)
@@ -573,6 +600,7 @@ def after_unit(cfg, engine, state, project, out, err, code, unit_file):
         return wait
 
     if status == "error":
+        record_run(engine, project, s, "error")
         s["errors"] += 1
         log(f"{project['name']}: erro (exit={code}, tentativa {s['errors']}; ver {err})")
         if s["errors"] % 3 == 0:
@@ -589,6 +617,7 @@ def after_unit(cfg, engine, state, project, out, err, code, unit_file):
     except (OSError, ValueError):
         result = None
     if not result:
+        record_run(engine, project, s, "unfinished")
         # Resposta terminou sem fechar a unidade: retoma a mesma sessão, até duas vezes.
         s["early_ends"] += 1
         if s["early_ends"] >= 3:
@@ -603,8 +632,9 @@ def after_unit(cfg, engine, state, project, out, err, code, unit_file):
     if cost:
         for key in ("primary", "secondary"):
             s["cost"][key] = round((1 - EMA_ALPHA) * s["cost"][key] + EMA_ALPHA * cost[key], 3)
+    record_run(engine, project, s, result.get("status", "worked"), result=result, cost=cost)
     engine.close_unit(s)
-    s.update(session=None, interrupted=False, early_ends=0)
+    s.update(session=None, interrupted=False, early_ends=0, unit_id=None)
     coord.release(project["name"], engine.name)
     if s["notes_sent"]:
         coord.mark_delivered(project["name"], s["notes_sent"])
@@ -694,8 +724,8 @@ def pick(cfg, engine, state, limits):
 def pass_baton(engine, name, s):
     """Fim da janela: o trabalho fica no repositório e no ledger, e qualquer motor pode retomar."""
     engine.close_unit(s)
-    s.update(interrupted=False, session=None, early_ends=0, errors=0)
-    coord.hand_off(name, engine.name)
+    coord.hand_off(name, engine.name, s.get("unit_id"))
+    s.update(interrupted=False, session=None, early_ends=0, errors=0, unit_id=None)
 
 
 def hand_off_open_units(cfg, engine, state):
@@ -780,7 +810,7 @@ def run_project(cfg, engine, state, project, limits, win):
     if handoff:
         log(f"{name}: pegando o bastão deixado por {current.get('handoff_from')}")
         engine.close_unit(s)
-        s.update(interrupted=True, session=None, early_ends=0)
+        s.update(interrupted=True, session=None, early_ends=0, unit_id=current.get("unit_id"))
 
     docker = prepare_docker(cfg, project)
     if docker != "ok":

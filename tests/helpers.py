@@ -17,6 +17,7 @@ def load(tmp):
         sys.modules.pop(name, None)
     import autopilot as ap
     ap.STATE, ap.LOG, ap.RUNS = tmp / "state.json", tmp / "log", tmp / "runs"
+    ap.HISTORY = tmp / "history-codex.jsonl"
     ap.SECRETS = tmp / "secrets.toml"
     if "coord" in sys.modules:
         sys.modules["coord"].SHARED = tmp / "shared"
