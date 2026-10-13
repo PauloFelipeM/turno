@@ -25,6 +25,11 @@ function h(tag, attrs = {}, ...kids) {
   return node;
 }
 
+// replaceChildren writes null as "null" and arrays as text: drop empty values and flatten first.
+function fill(el, ...kids) {
+  el.replaceChildren(...kids.flat(Infinity).filter((k) => k != null && k !== false));
+}
+
 const engineName = (e) => T.engine[e] || e;
 const when = (ts) => (ts ? new Date(ts * 1000).toLocaleString("pt-BR", { weekday: "short", day: "2-digit", hour: "2-digit", minute: "2-digit" }) : "-");
 const clock = (iso) => (iso ? new Date(iso).toLocaleString("pt-BR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" }) : "-");
@@ -67,7 +72,7 @@ function meter(label, w, cap) {
 
 function renderEngines() {
   const o = view.overview;
-  $("#engines").replaceChildren(
+  fill($("#engines"),
     ...o.engines.map((e) => h("section", { class: `engine phase-${e.loop.phase}` },
       h("h2", {}, e.label, " ", h("span", { class: "phase" }, phaseText(e))),
       e.limits.known
@@ -112,7 +117,7 @@ function renderProjects() {
 
 function drawProjects() {
   const running = new Set(view.overview.live.map((l) => l.project));
-  $("#project-list").replaceChildren(...view.overview.projects.map((p) => {
+  fill($("#project-list"), ...view.overview.projects.map((p) => {
     const extra = [claimText(p.claim), p.decisions ? (p.decisions === 1 ? t("decisionsOne") : t("decisionsMany", { n: p.decisions })) : null];
     return h("button", {
       type: "button",
@@ -141,14 +146,14 @@ async function selectProject(name) {
   } catch {
     if (view.filter === name) {
       box.hidden = false;
-      box.replaceChildren(h("p", { class: "error" }, t("loadError")));
+      fill(box, h("p", { class: "error" }, t("loadError")));
     }
     return;
   }
   if (view.filter !== name) return;
   box.hidden = false;
-  box.replaceChildren(
-    h("h3", {}, t("project.backlog")),
+  fill(box,
+    h("h3", {}, `${t("project.backlog")} · ${name}`),
     d.backlog.error
       ? h("p", { class: "muted" }, t(`backlog.${d.backlog.error}`))
       : h("ol", { class: "backlog" }, d.backlog.items.map((i) => h("li", { class: `bl-${i.state}` },
@@ -192,11 +197,11 @@ function renderLive() {
   const body = $("#live-body");
   view.liveEls = new Map();
   if (!runs.length) {
-    body.replaceChildren(h("p", { class: "muted" }, t("live.none")),
+    fill(body, h("p", { class: "muted" }, t("live.none")),
       ...view.overview.engines.map((e) => h("p", { class: "muted small" }, `${e.label}: ${phaseText(e)}`)));
     return;
   }
-  body.replaceChildren(...runs.map((l) => {
+  fill(body, ...runs.map((l) => {
     const items = view.feeds.get(l.run) || [];
     const step = currentStep(items);
     const chip = h("span", { class: "chip", hidden: !step }, step || "");
@@ -251,7 +256,7 @@ async function loadUnits(mode = "reset") {
   try {
     page = await getJSON(`/api/units?${params}`);
   } catch {
-    $("#history-list").replaceChildren(h("li", { class: "error" }, t("loadError")));
+    fill($("#history-list"), h("li", { class: "error" }, t("loadError")));
     return;
   }
   if (mode === "more") {
@@ -278,10 +283,10 @@ function drawHistory() {
   const list = $("#history-list");
   $("#more").hidden = view.exhausted || !view.units.length;
   if (!view.units.length) {
-    list.replaceChildren(h("li", { class: "muted" }, t("history.empty")));
+    fill(list, h("li", { class: "muted" }, t("history.empty")));
     return;
   }
-  list.replaceChildren(...view.units.map((u) => h("li", {},
+  fill(list, ...view.units.map((u) => h("li", {},
     h("button", { type: "button", class: "unit", "data-unit": u.unit_id, onclick: () => openUnit(u.unit_id) },
       h("span", { class: "num muted" }, clock(u.started_at)),
       h("b", {}, u.project),
@@ -296,11 +301,11 @@ async function openUnit(id) {
   try {
     u = await getJSON(`/api/units/${encodeURIComponent(id)}`);
   } catch {
-    $("#unit-body").replaceChildren(h("p", { class: "error" }, t("loadError")));
+    fill($("#unit-body"), h("p", { class: "error" }, t("loadError")));
     $("#unit").showModal();
     return;
   }
-  $("#unit-body").replaceChildren(
+  fill($("#unit-body"),
     h("h2", {}, `${u.project} · ${u.unit || t(`outcome.${u.outcome}`)}`),
     u.milestone ? h("p", {}, h("b", {}, `${t("unit.milestone")}: `), u.milestone) : null,
     u.summary ? h("p", {}, u.summary) : null,
