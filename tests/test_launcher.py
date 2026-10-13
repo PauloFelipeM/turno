@@ -3,6 +3,7 @@ import os
 import tempfile
 import time
 import unittest
+from unittest import mock
 from pathlib import Path
 
 import helpers
@@ -121,6 +122,44 @@ class LauncherTest(unittest.TestCase):
         child.join(10)
         self.assertFalse(child.is_alive())
         self.assertIsNone(self.ap.running_pid("codex"))
+
+    def test_loop_command_carries_turno_home(self):
+        for config in (None, self.ap.HOME / "claude.toml"):
+            cmd = self.ap.loop_command(config)
+            self.assertTrue(cmd.startswith(f"TURNO_HOME={self.ap.shlex.quote(str(self.ap.HOME))} python3 "))
+            self.assertTrue(cmd.endswith(" run"))
+
+    def test_start_only_claude_creates_only_its_window_and_logs(self):
+        self.windows = None
+        result = self.ap.start_loops(["claude"])
+        self.assertEqual(result, {"claude": "started"})
+        launched = self.loop_launches()
+        self.assertEqual(len(launched), 1)
+        self.assertIn("claude", launched[0])
+        self.assertEqual(len(self.commands("split-window")), 1)
+
+    def test_start_returns_already_running(self):
+        self.windows = {"codex": "0"}
+        held = self.ap.instance_lock("codex")
+        result = self.ap.start_loops()
+        self.ap.coord.unlock(held)
+        self.assertEqual(result, {"codex": "already running", "claude": "started"})
+
+    def test_stop_only_codex_signals_only_codex_pids(self):
+        killed = []
+        self.ap.running_pid = lambda name: None if killed else {"codex": 111, "claude": 222}[name]
+        self.ap.loop_pids = lambda config: [] if killed else ([333] if config is None else [444])
+        with mock.patch("os.kill", lambda pid, sig: killed.append(pid)), mock.patch("time.sleep"):
+            result = self.ap.stop_loops(["codex"])
+        self.assertEqual(sorted(killed), [111, 333])
+        self.assertEqual(result, {"codex": "stopped"})
+
+    def test_stop_reports_not_running_and_still_stopping(self):
+        self.ap.running_pid = lambda name: None
+        self.assertEqual(self.ap.stop_loops(["claude"]), {"claude": "not running"})
+        self.ap.running_pid = lambda name: 555
+        with mock.patch("os.kill"), mock.patch("time.sleep"):
+            self.assertEqual(self.ap.stop_loops(["claude"]), {"claude": "still stopping"})
 
     def test_matches_loop_command_lines(self):
         script = str(self.ap.BASE / "autopilot.py")

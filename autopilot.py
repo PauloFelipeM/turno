@@ -1099,7 +1099,7 @@ def tmux(*args):
 
 def loop_command(config):
     script = shlex.quote(str(Path(__file__).resolve()))
-    return f"python3 {script}" + (f" --config {shlex.quote(str(config))}" if config else "") + " run"
+    return f"TURNO_HOME={shlex.quote(str(HOME))} python3 {script}" + (f" --config {shlex.quote(str(config))}" if config else "") + " run"
 
 
 def log_file(name, config):
@@ -1125,8 +1125,11 @@ def open_logs_window(has_session, windows):
     tmux("select-window", "-t", target)
 
 
-def start_loops():
-    """Both loops in a tmux session, one window each; never duplicates a loop that is already running."""
+def start_loops(names=None):
+    """The loops (all, or those in `names`) in a tmux session, one window each; never duplicates a running one.
+
+    Returns {name: "started" | "already running"}."""
+    result = {}
     has_session = tmux("has-session", "-t", TMUX_SESSION)[0] == 0
     windows = {}
     if has_session:
@@ -1134,8 +1137,11 @@ def start_loops():
             name, _, dead = line.partition(" ")
             windows[name] = dead
     for name, config in LOOPS:
+        if names is not None and name not in names:
+            continue
         if running_pid(name) is not None or loop_pids(config):
             print(f"{name}: already running")
+            result[name] = "already running"
             continue
         cmd = loop_command(config)
         if not has_session:
@@ -1147,16 +1153,24 @@ def start_loops():
             tmux("respawn-window", "-k", "-t", f"{TMUX_SESSION}:{name}", cmd)
         else:
             tmux("new-window", "-d", "-t", TMUX_SESSION, "-n", name, cmd)
-        print(f"{name}: iniciado")
+        print(f"{name}: started")
+        result[name] = "started"
     open_logs_window(has_session, windows)
+    return result
 
 
-def stop_loops():
-    """Ctrl+C on both loops: each ends the running unit and saves its state."""
+def stop_loops(names=None):
+    """Ctrl+C on the loops (all, or those in `names`): each ends the running unit and saves its state.
+
+    Returns {name: "stopped" | "not running" | "still stopping"}."""
+    result = {}
     for name, config in LOOPS:
+        if names is not None and name not in names:
+            continue
         pids = {pid for pid in [running_pid(name), *loop_pids(config)] if pid}
         if not pids:
             print(f"{name}: not running")
+            result[name] = "not running"
             continue
         for pid in pids:
             try:
@@ -1167,7 +1181,13 @@ def stop_loops():
             if running_pid(name) is None and not loop_pids(config):
                 break
             time.sleep(1)
-        print(f"{name}: parado" if running_pid(name) is None else f"{name}: ainda encerrando (veja o log)")
+        if running_pid(name) is None:
+            print(f"{name}: stopped")
+            result[name] = "stopped"
+        else:
+            print(f"{name}: still stopping (see the log)")
+            result[name] = "still stopping"
+    return result
 
 
 def cmd_start(args):
@@ -1260,7 +1280,7 @@ def cmd_reset(args):
         sys.exit(f"unknown project: {args.name}")
     state[args.name].update(status="active", blocked_until=0, errors=0)
     save_state(state)
-    print(f"{args.name}: ativo")
+    print(f"{args.name}: active")
 
 
 def cmd_serve(args):
