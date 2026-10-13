@@ -516,6 +516,15 @@ def wait_until(proc, deadline):
             continue
 
 
+def set_phase(state, phase, project=None, until=None):
+    """O que o loop está fazendo, para o painel: running, sleeping ou outside_window."""
+    state["_loop"] = {"phase": phase, "project": project, "until": until}
+
+
+def idle_phase(win, now):
+    return "outside_window" if win and not win.can_start(now) else "sleeping"
+
+
 def run_unit(cfg, engine, state, project, deadline=None):
     global CURRENT
     s = state[project["name"]]
@@ -544,6 +553,7 @@ def run_unit(cfg, engine, state, project, deadline=None):
     engine.begin(s, resume)
     cmd, env = engine.command(state, project, s, resume, stem)
     log(f"{project['name']}: {'retomando sessão ' + s['session'] if resume else 'unidade nova'}")
+    set_phase(state, "running", project["name"])
     s["interrupted"] = True  # só volta a False quando a unidade termina de fato
     save_state(state)  # se o loop morrer agora, a unidade continua marcada como aberta
     with open(out, "w") as fo, open(err, "w") as fe:
@@ -859,6 +869,8 @@ def cmd_run(args):
         wait = run_once(cfg, engine, state, win)
         if wait is None:
             return
+        set_phase(state, idle_phase(win, datetime.datetime.now()), until=time.time() + wait)
+        save_state(state)
         nap(cfg, state, wait)
 
 
