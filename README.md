@@ -236,7 +236,7 @@ afeta nada. Só abre no próprio PC. `--port` troca a porta.
 
 ## Ajustes
 
-Tudo em `projects.toml` (Codex) e `claude.toml` (Claude): a ordem e os tetos semanais dos projetos,
+Tudo em `~/.turno/projects.toml` (Codex) e `~/.turno/claude.toml` (Claude): a ordem e os tetos semanais dos projetos,
 os modelos do orquestrador, o número de sub-agents, a janela do Claude e o prazo das decisões
 (`decision_timeout_hours`). Os modelos dos sub-agents ficam em `~/.codex/agents/` (Codex) e em
 `claude-agents.json` (Claude). Mudanças valem quando você reinicia o loop.
