@@ -1,4 +1,4 @@
-# codex-autopilot
+# turno
 
 Roda o Codex sozinho no my-app, no my-api e no side-project, nessa ordem de prioridade. Ele divide a
 cota da conta entre os três, espera o reset quando ela acaba e te pergunta pelo celular (ntfy) as
@@ -10,29 +10,29 @@ ao mesmo tempo.
 
 ## Iniciar
 
-Na primeira vez, crie a configuração a partir dos exemplos e troque o `topic` do ntfy, no
-`secrets.toml`, por um nome aleatório só seu (o `secrets.toml` fica fora do git porque guarda esse
-segredo):
+Na primeira vez, crie a pasta de dados a partir dos exemplos e troque o `topic` do ntfy, no
+`secrets.toml`, por um nome aleatório só seu:
 
 ```bash
-cd ~/.turno
-cp projects.example.toml projects.toml
-cp secrets.example.toml secrets.toml
+mkdir -p ~/.turno
+cp projects.example.toml ~/.turno/projects.toml
+cp claude.example.toml ~/.turno/claude.toml
+cp secrets.example.toml ~/.turno/secrets.toml
 ```
 
 1. Confira o estado:
    ```bash
-   python3 ~/.turno/autopilot.py status
+   python3 ~/projects/turno/autopilot.py status
    ```
 2. Inicie os dois loops, Codex e Claude, com um comando só:
    ```bash
-   python3 ~/.turno/autopilot.py start
+   python3 ~/projects/turno/autopilot.py start
    ```
    Eles ficam numa sessão tmux `autopilot`, uma janela cada (`codex` e `claude`), e uma terceira
    janela, `logs`, mostra os dois logs ao vivo, um em cima do outro. Pode fechar o
    terminal e o VS Code. O do Claude dorme fora do fim de semana, sem gastar cota, então pode deixar
    os dois rodando a semana toda.
-3. Para parar os dois: `python3 ~/.turno/autopilot.py stop`. É como um `Ctrl+C` em cada
+3. Para parar os dois: `python3 ~/projects/turno/autopilot.py stop`. É como um `Ctrl+C` em cada
    um: a unidade em andamento é encerrada, o estado é gravado e o `start` seguinte continua dali.
 
 O `start` nunca duplica um loop: o que já estiver rodando, inclusive um iniciado à mão, fica como
@@ -44,11 +44,11 @@ projeto antes de cada unidade.
 
 ## Comandos
 
-Todos começam com `python3 ~/.turno/autopilot.py`. Para encurtar, você pode criar um
+Todos começam com `python3 ~/projects/turno/autopilot.py`. Para encurtar, você pode criar um
 alias no `~/.bashrc`:
 
 ```bash
-alias autopilot='python3 ~/.turno/autopilot.py'
+alias autopilot='python3 ~/projects/turno/autopilot.py'
 ```
 
 Os exemplos abaixo usam o alias. `autopilot --help` lista todos os comandos.
@@ -174,8 +174,8 @@ suspeita que as notificações pararam.
 | Ver os dois logs ao vivo | `tmux attach -t autopilot` (abre na janela `logs`: Codex em cima, Claude embaixo) |
 | Trocar de janela | `Ctrl+B`, depois `N` (no terminal do VS Code o `Ctrl+B` é da barra lateral; ver abaixo) |
 | Soltar a tela sem parar | `Ctrl+B`, depois `D` |
-| Parar os dois | `python3 ~/.turno/autopilot.py stop` |
-| Ver se estão rodando | `python3 ~/.turno/autopilot.py start` (diz "já está rodando") |
+| Parar os dois | `python3 ~/projects/turno/autopilot.py stop` |
+| Ver se estão rodando | `python3 ~/projects/turno/autopilot.py start` (diz "já está rodando") |
 
 No terminal do VS Code, o `Ctrl+B` abre e fecha a barra lateral e não chega ao tmux. Para liberá-lo,
 acrescente ao `settings.json` do VS Code:
@@ -194,7 +194,7 @@ Ela já sobe junto com o Codex no `start` (ver "Iniciar"). Para conferir o que e
 (lê a cota com uma consulta mínima ao Haiku):
 
 ```bash
-python3 ~/.turno/autopilot.py --config claude.toml check
+python3 ~/projects/turno/autopilot.py --config claude.toml check
 ```
 
 Como funciona:
@@ -215,6 +215,17 @@ Como funciona:
 
 O Codex precisa estar com o código atual antes de o Claude começar; senão ele não respeita as
 reservas. Os comandos `status`, `check`, `decisions` e os outros aceitam `--config claude.toml`.
+
+## Painel
+
+```bash
+python3 ~/projects/turno/autopilot.py serve
+```
+
+Abra `http://localhost:8765` (no WSL, pelo navegador do Windows). O painel mostra a cota dos dois
+motores, o estado e o andamento do backlog de cada projeto, a unidade em andamento ao vivo e o
+histórico de unidades. Ele só lê: pode ficar aberto com os loops rodando, e cair ou ser fechado não
+afeta nada. Só abre no próprio PC. `--port` troca a porta.
 
 ## O que interrompe o loop
 

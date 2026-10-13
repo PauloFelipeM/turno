@@ -1,8 +1,9 @@
-# codex-autopilot
+# turno
 
-Agendador que roda o Codex sem supervisão em três projetos que dividem a mesma cota da conta do
-ChatGPT, e uma segunda instância que roda o Claude Code nos mesmos projetos nos fins de semana. Esta
-pasta é a ferramenta em si; os projetos ficam em outros lugares. Aqui você mantém o agendador, e não
+Agendador que roda o Codex e o Claude Code sem supervisão em vários projetos, dentro da cota das
+assinaturas, e um painel web local para acompanhar. Nasceu do codex-autopilot e vai virar um produto
+aberto. Esta pasta é a ferramenta em si; os projetos ficam em outros lugares, e os dados (configuração,
+estado, logs, execuções) ficam em `~/.turno` (ou `$TURNO_HOME`). Aqui você mantém o agendador, e não
 trabalha nos projetos.
 
 Código, identificadores e mensagens de commit em inglês; comentários, docstrings, logs e
@@ -14,7 +15,7 @@ documentação em português (pt-BR), como no resto do arquivo.
 partir de uma sessão do Codex ou do Claude Code.** O loop dispara outras sessões, gasta a mesma cota que você e morre junto
 com a sua sessão. Quem inicia os loops é o Paulo, com `autopilot.py start` (ver `README.md`). Os comandos
 `status`, `decisions` e `test-notify` são seguros; `check` também, mas lê a cota (no Claude, com uma
-consulta mínima ao Haiku). `stop`, `answer` e `reset` alteram estado e só rodam quando o Paulo pedir.
+consulta mínima ao Haiku). `serve` também é seguro: o painel só lê. `stop`, `answer` e `reset` alteram estado e só rodam quando o Paulo pedir.
 Cada motor tem uma trava de instância (`shared/instance-<motor>.lock`, com o pid): nunca rodam dois
 loops do mesmo motor.
 
@@ -26,17 +27,25 @@ loops do mesmo motor.
 | `engines.py` | Motores `CodexEngine` e `ClaudeEngine`: comando, leitura da cota, classificação da saída, custo |
 | `coord.py` | Reservas, bastão e travas entre as instâncias, em `shared/` |
 | `schedule.py` | Janela semanal (a do Claude: sexta 19:00 a domingo 03:00) |
-| `projects.toml` | Instância do Codex: projetos em ordem de prioridade, tetos, modelos |
-| `claude.toml` | Instância do Claude: `[instance]`, `[engine]`, `[schedule]`, teto de 90% |
-| `secrets.toml` | Tópico do ntfy, lido pelas duas instâncias (fora do git; ver `secrets.example.toml`) |
+| `~/.turno/projects.toml` | Instância do Codex: projetos em ordem de prioridade, tetos, modelos |
+| `~/.turno/claude.toml` | Instância do Claude: `[instance]`, `[engine]`, `[schedule]`, teto de 90% |
+| `~/.turno/secrets.toml` | Tópico do ntfy, lido pelas duas instâncias (fora do git; ver `secrets.example.toml`) |
 | `prompts/unit.md` | Prompt de toda unidade nova: o protocolo que o orquestrador segue |
 | `prompts/resume.md` | Prompt para retomar uma unidade interrompida |
 | `prompts/engine-*.md` | Nota de motor, anexada ao fim do prompt (o que é próprio do Codex ou do Claude) |
 | `claude-agents.json` | Papéis do Claude (`planner`, `plan-reviewer`, `implementer`, `reviewer`), passados com `--agents` |
-| `state.json`, `state-claude.json` | Estado de cada instância (gerado; não edite com o loop rodando) |
-| `autopilot.log`, `autopilot-claude.log` | Log de cada instância (gerado) |
-| `runs/`, `runs-claude/` | JSONL e stderr das execuções mais recentes (gerado) |
-| `shared/` | Reservas (`claims/`), travas (`*.lock`) e `notify.json` (gerado) |
+| `~/.turno/state.json`, `~/.turno/state-claude.json` | Estado de cada instância (gerado; não edite com o loop rodando) |
+| `~/.turno/autopilot.log`, `~/.turno/autopilot-claude.log` | Log de cada instância (gerado) |
+| `~/.turno/runs/`, `~/.turno/runs-claude/` | JSONL e stderr das execuções mais recentes (gerado) |
+| `~/.turno/shared/` | Reservas (`claims/`), travas (`*.lock`) e `notify.json` (gerado) |
+| `paths.py` | A pasta de dados (`$TURNO_HOME` ou `~/.turno`) |
+| `history.py` | Registro de unidades (`~/.turno/history-<motor>.jsonl`) |
+| `backlog.py` | Validação e leitura do `backlog.json` de cada projeto |
+| `feed.py` | Leitura incremental dos JSONL e tradução para o fluxo ao vivo |
+| `panel.py` | O que o painel mostra, montado a partir dos arquivos (só lê) |
+| `server.py` | HTTP do painel em 127.0.0.1: API, eventos (SSE) e `web/` |
+| `web/` | Interface: `index.html`, `app.js`, `style.css`, `i18n/pt-BR.js` |
+| `<projeto>/.superpowers/autopilot/backlog.json` | Andamento do backlog, gravado pelo orquestrador no passo 8 |
 | `tests/` | Testes: `python3 -m unittest discover -s tests -v` |
 | `~/.codex/agents/*.toml` | Papéis do Codex: `planner`, `plan-reviewer`, `implementer`, `reviewer` |
 | `<projeto>/docs/autopilot.md` | Regras de cada projeto: backlog, caminhos, verificação, git |
@@ -104,6 +113,10 @@ Invariantes que uma mudança não pode quebrar:
 - **Bastão vai primeiro.** Unidade cortada no fim da janela vira reserva `any`: qualquer motor a
   retoma antes de começar outra, mesmo com a árvore suja, numa sessão nova a partir do ledger.
 - **O Claude só trabalha dentro da janela e com a cota lida.** Fora dela, nem consulta a cota.
+- **O painel só lê.** Não grava em `~/.turno` nem nos projetos, não pega travas e nunca carrega o
+  `secrets.toml`. Escuta só em `127.0.0.1` e recusa `Host` e `Origin` de fora.
+- **Histórico por execução.** Toda execução encerrada vira uma linha em `history-<motor>.jsonl`; resumo
+  e custo só na que fecha a unidade. O `unit_id` passa pelo bastão.
 
 ## Decisões pelo celular
 
@@ -124,7 +137,7 @@ O `topic` em `secrets.toml` é segredo: não o imprima em logs, commits ou mensa
   com estado, log, `shared/` e ntfy numa pasta temporária, e traz um `FakeEngine` e um repositório git
   de teste. Teste novo segue esse padrão. Nunca teste contra o `state.json` real, nem chamando
   `codex` ou `claude` de verdade, nem parando containers dos projetos.
-- Depois de editar: os testes, `python3 -m py_compile autopilot.py coord.py engines.py schedule.py`,
+- Depois de editar: os testes, `python3 -m py_compile autopilot.py coord.py engines.py schedule.py paths.py history.py backlog.py feed.py panel.py server.py`,
   `python3 autopilot.py status` e `python3 autopilot.py --config claude.toml status`.
 - Se o loop estiver rodando, a mudança só vale depois que o Paulo reiniciar o loop. Diga isso a ele.
 - Esta pasta está sob git (`main`, sem remote). Mudança grande vai numa branch.
