@@ -241,5 +241,5 @@ os modelos do orquestrador, o número de sub-agents, a janela do Claude e o praz
 (`decision_timeout_hours`). Os modelos dos sub-agents ficam em `~/.codex/agents/` (Codex) e em
 `claude-agents.json` (Claude). Mudanças valem quando você reinicia o loop.
 
-Onde procurar quando algo der errado: `autopilot.log` e os arquivos `.err` e `.jsonl` em `runs/`
-(no Claude, `autopilot-claude.log` e `runs-claude/`).
+Onde procurar quando algo der errado: `~/.turno/autopilot.log` e os arquivos `.err` e `.jsonl` em `~/.turno/runs/`
+(no Claude, `~/.turno/autopilot-claude.log` e `~/.turno/runs-claude/`).

@@ -16,7 +16,7 @@ partir de uma sessão do Codex ou do Claude Code.** O loop dispara outras sessõ
 com a sua sessão. Quem inicia os loops é o Paulo, com `autopilot.py start` (ver `README.md`). Os comandos
 `status`, `decisions` e `test-notify` são seguros; `check` também, mas lê a cota (no Claude, com uma
 consulta mínima ao Haiku). `serve` também é seguro: o painel só lê. `stop`, `answer` e `reset` alteram estado e só rodam quando o Paulo pedir.
-Cada motor tem uma trava de instância (`shared/instance-<motor>.lock`, com o pid): nunca rodam dois
+Cada motor tem uma trava de instância (`~/.turno/shared/instance-<motor>.lock`, com o pid): nunca rodam dois
 loops do mesmo motor.
 
 ## Arquivos
