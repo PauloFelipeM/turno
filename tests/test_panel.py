@@ -167,6 +167,28 @@ class PanelTest(unittest.TestCase):
         self.assertIn(str(self.home / "history-codex.jsonl"), files)
         self.assertIn(str(self.projects["my-app"] / ".superpowers" / "autopilot" / "backlog.json"), files)
 
+    def test_project_without_path_is_a_config_error(self):
+        with open(self.home / "projects.toml", "a") as f:
+            f.write('\n[[project]]\nname = "x"\n')
+        o = self.overview()
+        self.assertIn({"config": "projects.toml", "error": "config"}, o["errors"])
+        self.assertEqual([e["engine"] for e in o["engines"]], ["claude"])
+
+    def test_unexpected_json_types_are_tolerated(self):
+        (self.home / "state.json").write_text("[]")
+        (self.home / "shared" / "claims" / "my-app.json").write_text("[]")
+        (self.projects["my-app"] / ".superpowers" / "autopilot" / "decisions" / "bad.json").write_text('"x"')
+        o = self.overview()
+        self.assertEqual(len(o["engines"]), 2)
+        self.assertIsNone(o["projects"][0]["claim"])
+        self.assertEqual(o["projects"][0]["decisions"], 1)
+
+    def test_duplicate_engine_kind_is_reported(self):
+        shutil.copy(self.home / "claude.toml", self.home / "claude2.toml")
+        o = self.overview()
+        self.assertIn({"config": "claude2.toml", "error": "duplicate"}, o["errors"])
+        self.assertEqual(len(o["engines"]), 2)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -19,16 +19,28 @@ import schedule
 
 
 def read_json(path):
+    """Lê um JSON e devolve só objetos (dict); arquivo ausente, inválido ou de outro tipo vira None."""
     try:
-        return json.loads(Path(path).read_text(encoding="utf-8"))
+        data = json.loads(Path(path).read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return None
+    return data if isinstance(data, dict) else None
+
+
+def _dict(x):
+    return x if isinstance(x, dict) else {}
+
+
+def _valid_projects(cfg):
+    ps = cfg.get("project")
+    return (isinstance(ps, list) and bool(ps)
+            and all(isinstance(p, dict) and isinstance(p.get("name"), str) and isinstance(p.get("path"), str) for p in ps))
 
 
 def instances(home):
     """Cada *.toml da pasta de dados, menos o secrets.toml, é uma instância (projects.toml primeiro)."""
     home = Path(home)
-    out = []
+    out, seen = [], set()
     for path in sorted(home.glob("*.toml"), key=lambda p: (p.name != "projects.toml", p.name)):
         if path.name == "secrets.toml":
             continue
@@ -37,11 +49,15 @@ def instances(home):
                 cfg = tomllib.load(f)
         except (OSError, tomllib.TOMLDecodeError):
             cfg = None
-        kind = ((cfg or {}).get("engine") or {}).get("kind", "codex")
-        if not cfg or not cfg.get("project") or kind not in engines.ENGINES:
+        kind = _dict((cfg or {}).get("engine")).get("kind", "codex")
+        if not cfg or not _valid_projects(cfg) or kind not in engines.ENGINES:
             out.append({"config": path.name, "error": "config"})
             continue
-        name = (cfg.get("instance") or {}).get("name")
+        if kind in seen:  # dois arquivos para o mesmo motor misturariam histórico e trava
+            out.append({"config": path.name, "error": "duplicate"})
+            continue
+        seen.add(kind)
+        name = _dict(cfg.get("instance")).get("name")
         suffix = f"-{name}" if name else ""
         out.append({"config": path.name, "cfg": cfg, "engine": kind,
                     "state": home / f"state{suffix}.json", "runs": home / f"runs{suffix}",
@@ -90,7 +106,7 @@ def _engine_view(home, inst, state, homes):
     except Exception:
         limits = {}
     pid = loop_pid(home, inst["engine"])
-    loop = dict(state.get("_loop") or {"phase": "unknown"}) if pid else {"phase": "stopped"}
+    loop = dict(_dict(state.get("_loop")) or {"phase": "unknown"}) if pid else {"phase": "stopped"}
     window = None
     win = schedule.from_config(cfg)
     if win:
@@ -106,8 +122,9 @@ def _engine_view(home, inst, state, homes):
     return {"engine": inst["engine"], "label": eng.label, "config": inst["config"], "pid": pid, "loop": loop,
             "limits": {"known": bool(limits.get("primary") or limits.get("secondary")),
                        "primary": usage("primary"), "secondary": usage("secondary")},
-            "primary_cap": (cfg.get("defaults") or {}).get("primary_cap"),
-            "weekly_cap": max((p.get("weekly_cap") or 0) for p in cfg["project"]),
+            "primary_cap": _dict(cfg.get("defaults")).get("primary_cap"),
+            "weekly_cap": max([v for p in cfg["project"] for v in [p.get("weekly_cap")]
+                              if isinstance(v, (int, float)) and not isinstance(v, bool)], default=0),
             "window": window}
 
 
@@ -138,12 +155,12 @@ def live_runs(home, homes=None):
     out = []
     for inst in _ok(home):
         state = read_json(inst["state"]) or {}
-        phase = state.get("_loop") or {}
+        phase = _dict(state.get("_loop"))
         if phase.get("phase") != "running" or not loop_pid(home, inst["engine"]):
             continue
         name = phase.get("project")
-        s = state.get(name) or {}
-        run = s.get("run") or {}
+        s = _dict(state.get(name))
+        run = _dict(s.get("run"))
         if not run.get("id"):
             continue
         root = next((p["path"] for p in inst["cfg"]["project"] if p["name"] == name), None)
@@ -169,14 +186,22 @@ def overview(home, cache, homes=None):
         if "error" in inst:
             errors.append({"config": inst["config"], "error": inst["error"]})
             continue
-        state = read_json(inst["state"]) or {}
-        views.append(_engine_view(home, inst, state, homes))
-        for p in inst["cfg"]["project"]:
-            entry = projects.setdefault(p["name"], {"name": p["name"], "path": p["path"], "engines": {}})
-            s = state.get(p["name"]) or {}
-            entry["engines"][inst["engine"]] = {
-                "status": s.get("status", "active"), "interrupted": bool(s.get("interrupted")),
-                "blocked_until": s.get("blocked_until") or None, "weekly_cap": p.get("weekly_cap"), "cost": s.get("cost")}
+        try:
+            state = read_json(inst["state"]) or {}
+            view = _engine_view(home, inst, state, homes)
+            mine = {}
+            for p in inst["cfg"]["project"]:
+                s = _dict(state.get(p["name"]))
+                mine[p["name"]] = (p, {
+                    "status": s.get("status", "active"), "interrupted": bool(s.get("interrupted")),
+                    "blocked_until": s.get("blocked_until") or None, "weekly_cap": p.get("weekly_cap"), "cost": s.get("cost")})
+        except Exception:
+            errors.append({"config": inst["config"], "error": "engine"})
+            continue
+        views.append(view)
+        for name, (p, info) in mine.items():
+            entry = projects.setdefault(name, {"name": name, "path": p["path"], "engines": {}})
+            entry["engines"][inst["engine"]] = info
     out_projects = []
     for entry in projects.values():
         claim = read_json(home / "shared" / "claims" / f"{entry['name']}.json")
