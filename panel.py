@@ -1,0 +1,244 @@
+"""O que o painel mostra, montado a partir dos arquivos do Turno.
+
+Só lê: não grava nada, não pega travas e nunca carrega o secrets.toml (o tópico do ntfy não sai daqui).
+"""
+
+import datetime
+import json
+import os
+import time
+import tomllib
+from pathlib import Path
+
+import autopilot
+import backlog
+import engines
+import feed
+import history
+import schedule
+
+
+def read_json(path):
+    try:
+        return json.loads(Path(path).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+
+
+def instances(home):
+    """Cada *.toml da pasta de dados, menos o secrets.toml, é uma instância (projects.toml primeiro)."""
+    home = Path(home)
+    out = []
+    for path in sorted(home.glob("*.toml"), key=lambda p: (p.name != "projects.toml", p.name)):
+        if path.name == "secrets.toml":
+            continue
+        try:
+            with path.open("rb") as f:
+                cfg = tomllib.load(f)
+        except (OSError, tomllib.TOMLDecodeError):
+            cfg = None
+        kind = ((cfg or {}).get("engine") or {}).get("kind", "codex")
+        if not cfg or not cfg.get("project") or kind not in engines.ENGINES:
+            out.append({"config": path.name, "error": "config"})
+            continue
+        name = (cfg.get("instance") or {}).get("name")
+        suffix = f"-{name}" if name else ""
+        out.append({"config": path.name, "cfg": cfg, "engine": kind,
+                    "state": home / f"state{suffix}.json", "runs": home / f"runs{suffix}",
+                    "history": home / f"history-{kind}.jsonl"})
+    return out
+
+
+def _ok(home):
+    return [i for i in instances(home) if "error" not in i]
+
+
+def loop_pid(home, kind):
+    """O pid do loop, se ele estiver vivo. Lê o pid da trava sem tocar nela (sem flock)."""
+    try:
+        pid = int((Path(home) / "shared" / f"instance-{kind}.lock").read_text().strip())
+    except (OSError, ValueError):
+        return None
+    if pid <= 0:
+        return None
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return None
+    except PermissionError:
+        pass
+    try:
+        args = Path(f"/proc/{pid}/cmdline").read_bytes().split(b"\0")
+    except FileNotFoundError:
+        return pid  # sem /proc (macOS): vale o sinal
+    except OSError:
+        return None
+    # O pid pode ter sido reaproveitado por outro processo depois que o loop morreu.
+    return pid if any(a.endswith(b"autopilot.py") for a in args) else None
+
+
+def _engine(inst, homes):
+    kwargs = {"home": homes[inst["engine"]]} if homes and inst["engine"] in homes else {}
+    return engines.ENGINES[inst["engine"]](inst["cfg"], **kwargs)
+
+
+def _engine_view(home, inst, state, homes):
+    cfg = inst["cfg"]
+    eng = _engine(inst, homes)
+    try:
+        limits = eng.limits(state, max_age=float("inf")) or {}  # nunca consulta a cota: só a última leitura
+    except Exception:
+        limits = {}
+    pid = loop_pid(home, inst["engine"])
+    loop = dict(state.get("_loop") or {"phase": "unknown"}) if pid else {"phase": "stopped"}
+    window = None
+    win = schedule.from_config(cfg)
+    if win:
+        now = datetime.datetime.now()
+        inside = win.contains(now)
+        window = {"label": win.describe(), "open": inside,
+                  "until": (win.end_of(now) if inside else win.next_start(now)).timestamp()}
+
+    def usage(key):
+        used, reset = engines.window(limits, key)
+        return {"used": used, "resets_at": reset or None}
+
+    return {"engine": inst["engine"], "label": eng.label, "config": inst["config"], "pid": pid, "loop": loop,
+            "limits": {"known": bool(limits.get("primary") or limits.get("secondary")),
+                       "primary": usage("primary"), "secondary": usage("secondary")},
+            "primary_cap": (cfg.get("defaults") or {}).get("primary_cap"),
+            "weekly_cap": max((p.get("weekly_cap") or 0) for p in cfg["project"]),
+            "window": window}
+
+
+def pending_decisions(project_path):
+    out = []
+    for path in autopilot.decision_files({"path": str(project_path)}):
+        d = read_json(path)
+        if d and "answer" not in d and autopilot.valid_decision(d, path):
+            out.append({k: d.get(k) for k in ("id", "question", "context", "options", "default", "deadline", "notified_at")})
+    return out
+
+
+def _backlog_summary(project_path, cache):
+    if not Path(project_path).is_dir():
+        return {"error": "missing_path"}
+    b = backlog.read_backlog(project_path, cache)
+    if "error" in b:
+        return b
+    items = b["items"]
+    out = {"current": backlog.current(items), "done": sum(1 for i in items if i["state"] == "done"), "total": len(items)}
+    if b.get("stale"):
+        out["stale"] = True
+    return out
+
+
+def live_runs(home, homes=None):
+    """As execuções em andamento, com o caminho do JSONL (uso interno do servidor)."""
+    out = []
+    for inst in _ok(home):
+        state = read_json(inst["state"]) or {}
+        phase = state.get("_loop") or {}
+        if phase.get("phase") != "running" or not loop_pid(home, inst["engine"]):
+            continue
+        name = phase.get("project")
+        s = state.get(name) or {}
+        run = s.get("run") or {}
+        if not run.get("id"):
+            continue
+        root = next((p["path"] for p in inst["cfg"]["project"] if p["name"] == name), None)
+        out.append({"engine": inst["engine"], "project": name, "unit_id": s.get("unit_id"), "run": run["id"],
+                    "started_at": history.iso(run.get("started") or time.time()),
+                    "path": str(inst["runs"] / f"{run['id']}.jsonl"), "root": root})
+    return out
+
+
+def live(home, homes=None):
+    """As execuções em andamento com o fluxo até agora, para quem abre o painel no meio delas."""
+    out = []
+    for r in live_runs(home, homes):
+        out.append({"run": r["run"], "unit_id": r["unit_id"], "project": r["project"], "engine": r["engine"],
+                    "started_at": r["started_at"], "items": feed.read_run(r["engine"], r["path"], r["root"]) or []})
+    return out
+
+
+def overview(home, cache, homes=None):
+    home = Path(home)
+    views, errors, projects = [], [], {}
+    for inst in instances(home):
+        if "error" in inst:
+            errors.append({"config": inst["config"], "error": inst["error"]})
+            continue
+        state = read_json(inst["state"]) or {}
+        views.append(_engine_view(home, inst, state, homes))
+        for p in inst["cfg"]["project"]:
+            entry = projects.setdefault(p["name"], {"name": p["name"], "path": p["path"], "engines": {}})
+            s = state.get(p["name"]) or {}
+            entry["engines"][inst["engine"]] = {
+                "status": s.get("status", "active"), "interrupted": bool(s.get("interrupted")),
+                "blocked_until": s.get("blocked_until") or None, "weekly_cap": p.get("weekly_cap"), "cost": s.get("cost")}
+    out_projects = []
+    for entry in projects.values():
+        claim = read_json(home / "shared" / "claims" / f"{entry['name']}.json")
+        out_projects.append({
+            "name": entry["name"], "engines": entry["engines"],
+            "claim": {"engine": claim.get("engine"), "handoff_from": claim.get("handoff_from")} if claim else None,
+            "backlog": _backlog_summary(entry["path"], cache),
+            "decisions": len(pending_decisions(entry["path"])) if Path(entry["path"]).is_dir() else 0})
+    return {"engines": views, "projects": out_projects, "errors": errors, "now": time.time(),
+            "live": [{k: v for k, v in r.items() if k not in ("path", "root")} for r in live_runs(home, homes)]}
+
+
+def _project_path(home, name):
+    for inst in _ok(home):
+        for p in inst["cfg"]["project"]:
+            if p["name"] == name:
+                return p["path"]
+    return None
+
+
+def project_detail(home, name, cache):
+    path = _project_path(home, name)
+    if path is None:
+        return None
+    if not Path(path).is_dir():
+        return {"name": name, "backlog": {"error": "missing_path"}, "decisions": []}
+    return {"name": name, "backlog": backlog.read_backlog(path, cache), "decisions": pending_decisions(path)}
+
+
+def units(home, project=None, before=None, limit=50):
+    entries = [e for inst in _ok(home) for e in history.read(inst["history"])]
+    out = history.group(entries)
+    if project:
+        out = [u for u in out if u["project"] == project]
+    if before:
+        cutoff = history.ts(before)
+        out = [u for u in out if history.ts(u["started_at"]) < cutoff]
+    return out[:limit]
+
+
+def unit_detail(home, unit_id):
+    insts = {i["engine"]: i for i in _ok(home)}
+    entries = [e for i in insts.values() for e in history.read(i["history"]) if e.get("unit_id") == unit_id]
+    if not entries:
+        return None
+    unit = history.group(entries)[0]
+    root = _project_path(home, unit["project"])
+    for r in unit["runs"]:
+        inst = insts.get(r.get("engine"))
+        r["feed"] = feed.read_run(r["engine"], inst["runs"] / f"{r['run']}.jsonl", root) if inst and r.get("run") else None
+    return unit
+
+
+def watched_files(home):
+    """Os arquivos cuja mudança muda a visão geral."""
+    home = Path(home)
+    files = [p for p in home.glob("*.toml") if p.name != "secrets.toml"]
+    files += list(home.glob("state*.json")) + list(home.glob("history-*.jsonl"))
+    files += list((home / "shared" / "claims").glob("*.json")) + list((home / "shared").glob("instance-*.lock"))
+    for inst in _ok(home):
+        for p in inst["cfg"]["project"]:
+            base = Path(p["path"]) / ".superpowers" / "autopilot"
+            files.append(base / "backlog.json")
+            files += list((base / "decisions").glob("*.json"))
+    return files

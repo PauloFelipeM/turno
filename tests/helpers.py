@@ -76,3 +76,20 @@ class FakeEngine:
 
     def close_unit(self, s):
         pass
+
+
+DEFAULTS = '[defaults]\norchestrator_model = "m"\norchestrator_effort = "medium"\nprimary_cap = 100\n'
+
+
+def make_home(home, topic="segredo-xyz"):
+    """Pasta de dados de exemplo: Codex e Claude, três projetos, e o tópico do ntfy nos dois lugares."""
+    home = Path(home)
+    projects = {}
+    for name in ("my-app", "my-api", "side-project"):
+        projects[name] = home / "projects" / name
+        (projects[name] / ".superpowers" / "autopilot" / "decisions").mkdir(parents=True)
+    body = "".join(f'\n[[project]]\nname = "{n}"\npath = "{p}"\nweekly_cap = 90\n' for n, p in projects.items())
+    (home / "projects.toml").write_text(DEFAULTS + f'\n[notify]\ntopic = "{topic}"\n' + body)
+    (home / "claude.toml").write_text('[instance]\nname = "claude"\n\n[engine]\nkind = "claude"\n\n' + DEFAULTS + body)
+    (home / "secrets.toml").write_text(f'[notify]\ntopic = "{topic}"\n')
+    return projects
