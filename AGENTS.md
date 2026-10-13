@@ -17,10 +17,12 @@ Brazilian Portuguese until there is a language setting: ntfy notifications, deci
 **Never run `autopilot.py start`, `autopilot.py run` or `autopilot.py --config claude.toml run` from a
 Codex or Claude Code session.** The loop starts other sessions, spends the same quota you do and dies
 with your session. The owner starts the loops, with `autopilot.py start` (see `README.md`). `status`,
-`decisions`, `test-notify` and `serve` (the panel only reads) are safe; so is `check`, but it reads
+`decisions`, `test-notify` and `serve` (it starts nothing by itself) are safe; so is `check`, but it reads
 the quota (on Claude, with a minimal Haiku query). `stop`, `answer` and `reset` change state and only
 run when the owner asks. Each engine has an instance lock (`~/.turno/shared/instance-<engine>.lock`,
-holding the pid): two loops of the same engine never run.
+holding the pid): two loops of the same engine never run. From an agent session, never call the
+panel's start, stop or interrupt endpoints (`/api/engines/<engine>/start|stop`,
+`/api/projects/<name>/interrupt`) either: they have the same effect as the commands above.
 
 ## Files
 
@@ -35,8 +37,9 @@ holding the pid): two loops of the same engine never run.
 | `backlog.py` | Validation and reading of each project's `backlog.json` |
 | `feed.py` | Incremental reading of run JSONL files and translation into the live feed |
 | `panel.py` | What the panel shows, assembled from the files (read-only) |
+| `overrides.py` | The panel's requests to the loops (`~/.turno/overrides.json`), read-modify-write under a lock |
 | `server.py` | The panel's HTTP server on 127.0.0.1: API, events (SSE) and `web/` |
-| `control.py` | What the panel's write routes do (pause, next, interrupt, start/stop, decisions, messages, settings) |
+| `control.py` | What the panel's write routes do (pause, next, interrupt, start/stop, decisions, messages, settings); they need the `X-Turno: 1` header, JSON and a local `Host`/`Origin` |
 | `web/` | Interface: `index.html`, `app.js`, `style.css`, `i18n/pt-BR.js` |
 | `prompts/unit.md` | Prompt of every new unit: the protocol the orchestrator follows |
 | `prompts/resume.md` | Prompt to resume an interrupted unit |
@@ -46,10 +49,11 @@ holding the pid): two loops of the same engine never run.
 | `projects.toml` | Codex instance: projects in priority order, caps, models |
 | `claude.toml` | Claude instance: `[instance]`, `[engine]`, `[schedule]`, 90% cap |
 | `secrets.toml` | ntfy topic, read by both instances (outside git) |
+| `overrides.json` | Panel requests: `order`, `projects.<name>.paused`, `projects.<name>.weekly_cap.<engine>`, `primary_cap.<engine>`, `next`, `reset`, `poke` (generated; under `shared/overrides.lock`) |
 | `state.json`, `state-claude.json` | State of each instance (generated; do not edit while the loop runs) |
 | `autopilot.log`, `autopilot-claude.log` | Log of each instance (generated) |
 | `runs/`, `runs-claude/` | JSONL and stderr of the latest runs (generated) |
-| `shared/` | Claims (`claims/`), locks (`*.lock`), `notes/` and `notify.json` (generated) |
+| `shared/` | Claims (`claims/`), locks (`*.lock`, including `overrides.lock`), `notes/` and `notify.json` (generated) |
 | `tests/` | Tests: `python3 -m unittest discover -s tests -v` |
 | `~/.codex/agents/*.toml` | Codex roles: `planner`, `plan-reviewer`, `implementer`, `reviewer` |
 | `<project>/docs/autopilot.md` | Each project's rules: backlog, paths, verification, git |
@@ -86,7 +90,19 @@ Each instance has an engine (`[engine] kind`, `codex` by default). On every turn
    the CLI; with a window, cuts at its end) and `after_unit`: classifies the output (`usage_limit`,
    `error`, `ok` or cut), writes one history line, learns the unit cost (exponential moving average),
    releases or passes the claim and updates the state;
-7. `nap`: sleeps in 1-minute slices, reading ntfy answers.
+7. `nap`: sleeps in 5-second steps; reads ntfy answers once a minute, and wakes at once when
+   `overrides.json` changes.
+
+At the start of each turn the loop re-reads `overrides.json` and applies it over the config: project
+order, `paused` (a paused project is skipped, even with an interrupted unit, which waits for the resume), the
+caps of the panel's "Order and caps" window, `next` (the project that goes first, consumed when it
+starts), `reset` (puts a project back to `active`) and `poke` (refreshed on every write, to wake
+the nap).
+
+`SIGUSR1` interrupts the running unit: the handler only notes the request and signals the unit's
+process group, and never waits. The panel pauses the project first, so the loop does not pick it
+again. The unit stays `interrupted` (no cost learned) and is resumed after the project is resumed. The outcome
+`stopped` (a history line) covers this and also `stop` (SIGINT/SIGTERM) in the middle of a unit.
 
 Invariants a change must not break:
 
@@ -112,8 +128,14 @@ Invariants a change must not break:
   from the ledger.
 - **Claude only works inside its window and with the quota read.** Outside it, it does not even query
   the quota.
-- **The panel only reads.** It writes nothing in `~/.turno` or the projects, takes no locks and never
-  loads `secrets.toml`. It listens only on `127.0.0.1` and refuses foreign `Host` and `Origin`.
+- **The panel writes only three things.** `overrides.json` (under `shared/overrides.lock`), decision
+  answers in the decision files (under `shared/decisions.lock`) and the owner's notes (through
+  `coord.add_note`). It also starts and stops the loops through tmux and signals. It never edits the
+  state files, the `.toml` files or the projects, and never loads `secrets.toml`. It listens only on
+  `127.0.0.1`; write routes need `X-Turno: 1`, a JSON body and a local `Host` and `Origin`.
+- **The panel's controls:** start and stop per engine; the "Needs you" strip (pending decisions and
+  messages); pause, next and interrupt on each project card; the project panel with a message and
+  caps; and the "Order and caps" window.
 - **History per run.** Every finished run becomes one line in `history-<engine>.jsonl`; summary and
   cost only on the run that closes the unit.
 
@@ -139,7 +161,7 @@ The `topic` in `secrets.toml` is a secret: never print it in logs, commits or me
   containers. Never run `autopilot.py` commands without `TURNO_HOME` pointing at a temporary folder,
   except the safe ones above against the real data.
 - After editing: the tests,
-  `python3 -m py_compile autopilot.py coord.py engines.py schedule.py paths.py history.py backlog.py feed.py panel.py server.py`,
+  `python3 -m py_compile autopilot.py coord.py engines.py schedule.py paths.py history.py backlog.py feed.py panel.py server.py overrides.py control.py`,
   `python3 autopilot.py status` and `python3 autopilot.py --config claude.toml status`.
 - If the loop is running, a change only applies after the owner restarts it. Tell them.
 - This folder is under git. Large changes go on a branch.

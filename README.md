@@ -81,7 +81,7 @@ to run a command against the Claude instance.
 | `answer <project> <id> <option>` | Answer a decision from the terminal |
 | `reset <project>` | Put an `idle`, `blocked` or `waiting` project back to `active` |
 | `test-notify` | Send a test notification to your phone |
-| `serve [--port 8765]` | The read-only panel on 127.0.0.1 |
+| `serve [--port 8765]` | The panel on 127.0.0.1: follow the loops and control them |
 
 Project states in `status`:
 
@@ -111,8 +111,27 @@ data).
 `serve` shows, on one screen: the quota of each engine with its cap and reset time, what each loop
 is doing, every project with its state and backlog progress, the running unit live (commands, file
 changes, which subagent was called) and the unit history with outcome, duration and cost. It only
-reads files: it can stay open while the loops run, and closing it affects nothing. It listens on
-127.0.0.1 only and refuses requests from other origins.
+reads files for display: it can stay open while the loops run, and closing it affects nothing. It
+listens on 127.0.0.1 only and refuses requests from other origins.
+
+It also controls the loops:
+
+| Control | What it does |
+|---|---|
+| Start / Stop (per engine) | Starts the loop in tmux, or stops it like a Ctrl+C: the unit stops and is resumed on the next start |
+| "Needs you" strip | Pending decisions to answer, and messages to the agents |
+| Pause / resume (project card) | A paused project is skipped by the loop |
+| Next (project card) | That project goes first on the next turn |
+| Interrupt (project card) | Pauses the project and stops its running unit (`SIGUSR1`); resume it to continue |
+| Project panel | A message to the agents, and the project's caps |
+| "Order and caps" window | Project order, weekly caps per engine and the 5-hour cap |
+
+The panel never edits state or config. Its requests go to `overrides.json` in `~/.turno`
+(`order`, `projects.<name>.paused`, `projects.<name>.weekly_cap.<engine>`, `primary_cap.<engine>`,
+`next`, `reset`, `poke`); the loops re-read it on every turn and, while asleep, check it every 5
+seconds. Decision answers and messages use the same files as the phone. A unit interrupted from
+the panel, or by `stop`, appears in the history as `stopped`. Write requests need the `X-Turno: 1`
+header and a local origin.
 
 ## What stops the loop
 
