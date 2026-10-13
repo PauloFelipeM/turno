@@ -79,10 +79,11 @@ class HistoryTest(unittest.TestCase):
     def test_next_unit_gets_a_new_id(self):
         engine = helpers.FakeEngine(TRUE)
         self.do_run(engine, close={"status": "worked", "unit": "a"})
-        time.sleep(1.1)  # the id is the run name, with one-second resolution
-        self.do_run(engine, close={"status": "worked", "unit": "b"})
+        self.do_run(engine, close={"status": "worked", "unit": "b"})  # same second: no sleep on purpose
         first, second = self.lines()
         self.assertNotEqual(first["unit_id"], second["unit_id"])
+        self.assertNotEqual(first["run"], second["run"])
+        self.assertEqual(len(list(self.ap.RUNS.glob("*.jsonl"))), 2)  # neither run file was overwritten
 
     def test_usage_limit_and_error_are_recorded(self):
         self.do_run(LimitEngine(TRUE))

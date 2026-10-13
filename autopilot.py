@@ -550,7 +550,12 @@ def run_unit(cfg, engine, state, project, deadline=None):
         unit_file.unlink(missing_ok=True)
 
     RUNS.mkdir(exist_ok=True)
-    stem = RUNS / f"{time.strftime('%Y%m%d-%H%M%S')}-{project['name']}"
+    base = RUNS / f"{time.strftime('%Y%m%d-%H%M%S')}-{project['name']}"
+    stem, n = base, 2
+    # Two runs in the same second (or a clock that stepped back) must not share a name: the name is
+    # the run's file and, on a new unit, its unit_id.
+    while Path(f"{stem}.jsonl").exists():
+        stem, n = Path(f"{base}-{n}"), n + 1
     out, err = f"{stem}.jsonl", f"{stem}.err"
     if not s.get("unit_id"):
         s["unit_id"] = stem.name  # the first run names the unit; resumes and the baton keep it
