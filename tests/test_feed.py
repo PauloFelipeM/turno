@@ -47,7 +47,7 @@ class TranslateTest(unittest.TestCase):
 
     def test_items_carry_the_event_number(self):
         items = self.feed.read_run("codex", FIXTURES / "codex-run.jsonl")
-        self.assertEqual(items[0]["n"], 2)  # os dois primeiros eventos não viram item
+        self.assertEqual(items[0]["n"], 2)  # the first two events produce no item
 
     def test_missing_run_is_none(self):
         self.assertIsNone(self.feed.read_run("codex", "/nonexistent/x.jsonl"))
@@ -86,7 +86,7 @@ class TailTest(unittest.TestCase):
 
     def test_reads_only_complete_lines_once(self):
         tail = self.feed.Tail(self.path)
-        self.assertEqual(tail.read(), [])  # o arquivo ainda não existe
+        self.assertEqual(tail.read(), [])  # the file does not exist yet
         self.path.write_bytes(b'{"a": 1}\n{"b": ')
         self.assertEqual(tail.read(), [(0, {"a": 1})])
         with self.path.open("ab") as f:

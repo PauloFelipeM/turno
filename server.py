@@ -1,7 +1,7 @@
-"""Servidor do painel: API em JSON, canal de eventos (SSE) e a interface, só em 127.0.0.1.
+"""The panel server: JSON API, event stream (SSE) and the interface, on 127.0.0.1 only.
 
-Só lê os arquivos do Turno. Recusa Host e Origin de fora, para que nenhuma página aberta no
-navegador leia os dados por DNS rebinding.
+It only reads turno's files. It refuses foreign Host and Origin headers so that no page open in the
+browser can read the data through DNS rebinding.
 """
 
 import errno
@@ -23,13 +23,13 @@ TYPES = {".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=u
 
 
 class Hub:
-    """Assinantes do canal de eventos e o vigia que avisa quando algo muda."""
+    """The event stream subscribers and the watcher that announces changes."""
 
     def __init__(self, home, homes=None, interval=1.0):
         self.home, self.homes, self.interval = Path(home), homes, interval
         self.cache = {}
         self.subs, self.lock = set(), threading.Lock()
-        self.tails = {}  # id da execução -> (Tail, execução)
+        self.tails = {}  # run id -> (Tail, run)
         self.last = None
         self.stopped = threading.Event()
 
@@ -50,7 +50,7 @@ class Hub:
             try:
                 q.put_nowait((event, data))
             except queue.Full:
-                pass  # navegador lento: perde eventos e se acerta no próximo overview
+                pass  # slow browser: it loses events and catches up on the next overview
 
     def signature(self):
         out = []
@@ -70,7 +70,7 @@ class Hub:
         for run_id, r in runs.items():
             if run_id not in self.tails:
                 tail = feed.Tail(r["path"])
-                tail.read()  # o que já existe vem por /api/live; daqui em diante, pelo canal
+                tail.read()  # what already exists comes via /api/live; from here on, via the stream
                 self.tails[run_id] = (tail, r)
         for run_id in list(self.tails):
             tail, r = self.tails[run_id]
@@ -97,7 +97,7 @@ class Handler(BaseHTTPRequestHandler):
     server_version = "turno"
 
     def log_message(self, fmt, *args):
-        pass  # sem uma linha por requisição
+        pass  # no line per request
 
     def _send(self, code, body, ctype="application/json; charset=utf-8"):
         data = body if isinstance(body, bytes) else json.dumps(body, ensure_ascii=False).encode()
@@ -174,7 +174,7 @@ class Handler(BaseHTTPRequestHandler):
                 try:
                     event, data = q.get(timeout=15)
                 except queue.Empty:
-                    self.wfile.write(b": ping\n\n")  # mantém a conexão e descobre se o navegador saiu
+                    self.wfile.write(b": ping\n\n")  # keeps the connection alive and finds out whether the browser left
                     self.wfile.flush()
                     continue
                 self._emit(event, data)
@@ -198,10 +198,10 @@ def serve(home, port):
         srv = Server(hub, port)
     except OSError as e:
         if e.errno == errno.EADDRINUSE:
-            sys.exit(f"a porta {port} está ocupada; escolha outra com --port")
+            sys.exit(f"port {port} is in use; pick another with --port")
         raise
     threading.Thread(target=hub.run, daemon=True).start()
-    print(f"painel em http://localhost:{srv.server_address[1]}", flush=True)
+    print(f"panel at http://localhost:{srv.server_address[1]}", flush=True)
     try:
         srv.serve_forever()
     except KeyboardInterrupt:

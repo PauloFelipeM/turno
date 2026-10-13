@@ -1,4 +1,4 @@
-"""Carrega o autopilot com todo efeito colateral (estado, log, shared, ntfy) numa pasta temporária."""
+"""Loads the autopilot with every side effect (state, log, shared, ntfy) in a temporary folder."""
 
 import os
 import subprocess
@@ -37,7 +37,7 @@ def git_repo(path):
 
 
 class FakeEngine:
-    """Motor de teste: roda `cmd` e não lê cota de verdade."""
+    """Test engine: runs `cmd` and never reads a real quota."""
 
     label = "Fake"
     needs_limits = False
@@ -82,7 +82,7 @@ DEFAULTS = '[defaults]\norchestrator_model = "m"\norchestrator_effort = "medium"
 
 
 def make_home(home, topic="segredo-xyz"):
-    """Pasta de dados de exemplo: Codex e Claude, três projetos, e o tópico do ntfy nos dois lugares."""
+    """Sample data folder: Codex and Claude, three projects, and the ntfy topic in both places."""
     home = Path(home)
     projects = {}
     for name in ("my-app", "my-api", "side-project"):

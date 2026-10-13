@@ -89,7 +89,7 @@ class AfterUnitTest(unittest.TestCase):
 
     def test_invalid_backlog_is_logged_and_the_unit_still_closes(self):
         self.close("{}")
-        self.assertIn("backlog.json ausente ou inválido", self.ap.LOG.read_text())
+        self.assertIn("backlog.json missing or invalid", self.ap.LOG.read_text())
         self.assertFalse(self.state["my-api"]["interrupted"])
 
     def test_valid_backlog_is_not_logged(self):

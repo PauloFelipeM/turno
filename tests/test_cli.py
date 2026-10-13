@@ -32,17 +32,17 @@ class StatusTest(unittest.TestCase):
     def test_shows_claims_and_handoffs(self):
         self.ap.coord.claim("my-app", "claude")
         self.ap.coord.hand_off("my-app", "claude")
-        self.assertIn("bastão de claude", self.lines())
+        self.assertIn("baton from claude", self.lines())
 
     def test_shows_window(self):
         win = self.ap.schedule.Window("fri 19:00", "sun 03:00")
-        self.assertIn("dentro", self.lines(win, dt.datetime(2026, 10, 2, 20, 0)))
-        self.assertIn("fora", self.lines(win, dt.datetime(2026, 10, 6, 10, 0)))
+        self.assertIn("inside", self.lines(win, dt.datetime(2026, 10, 2, 20, 0)))
+        self.assertIn("outside", self.lines(win, dt.datetime(2026, 10, 6, 10, 0)))
 
-    def test_window_days_are_in_portuguese(self):
+    def test_window_days_stay_in_portuguese(self):
         win = self.ap.schedule.Window("fri 19:00", "sun 03:00")
-        self.assertIn("abre sex 09/10 19:00", self.lines(win, dt.datetime(2026, 10, 6, 10, 0)))
-        self.assertIn("fecha dom 04/10 03:00", self.lines(win, dt.datetime(2026, 10, 2, 20, 0)))
+        self.assertIn("opens sex 09/10 19:00", self.lines(win, dt.datetime(2026, 10, 6, 10, 0)))
+        self.assertIn("closes dom 04/10 03:00", self.lines(win, dt.datetime(2026, 10, 2, 20, 0)))
 
 
 if __name__ == "__main__":

@@ -1,4 +1,4 @@
-"""Pasta de dados do Turno: configuração, estado, logs e execuções, fora da pasta do código."""
+"""turno's data folder: config, state, logs and runs, outside the code folder."""
 
 import os
 from pathlib import Path

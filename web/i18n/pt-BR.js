@@ -1,4 +1,4 @@
-// Textos da interface. Outro idioma = outro arquivo com as mesmas chaves (peça 3).
+// Interface texts (pt-BR). Another language = another file with the same keys.
 export default {
   engine: { codex: "Codex", claude: "Claude" },
   phase: {

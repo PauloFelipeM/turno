@@ -1,4 +1,4 @@
-"""Fluxo ao vivo: lê o JSONL de uma execução aos poucos e traduz cada evento para itens comuns."""
+"""Live feed: reads a run's JSONL incrementally and translates each event into common items."""
 
 import json
 from pathlib import Path
@@ -7,9 +7,9 @@ import engines
 
 
 class Tail:
-    """Lê só as linhas completas novas de um arquivo que ainda está sendo escrito.
+    """Reads only the new complete lines of a file that is still being written.
 
-    Devolve pares (número do evento, evento); o número permite ao navegador descartar repetidos.
+    Returns (event number, event) pairs; the number lets the browser drop duplicates.
     """
 
     def __init__(self, path):
@@ -38,23 +38,23 @@ class Tail:
             return []
         self.pos += len(chunk)
         lines = (self.rest + chunk).split(b"\n")
-        self.rest = lines.pop()  # sem quebra no fim: espera completar
+        self.rest = lines.pop()  # no newline at the end: wait for it to complete
         return self._parse(lines)
 
     def flush(self):
-        """A última linha sem quebra, para um arquivo que já terminou."""
+        """The last line without a newline, for a file that has finished."""
         rest, self.rest = self.rest, b""
         return self._parse([rest])
 
 
 def translate(engine_name, event, root=None):
-    """Traduz um evento do motor em itens do fluxo; evento estranho vira `unknown`."""
+    """Translates an engine event into feed items; an odd event becomes `unknown`."""
     cls = engines.ENGINES.get(engine_name)
     if cls is None:
         return [{"kind": "unknown", "text": str(event.get("type"))}]
     try:
         items = cls.feed_items(event)
-    except Exception:  # formato novo de CLI não derruba o fluxo
+    except Exception:  # a new CLI format does not bring the feed down
         return [{"kind": "unknown", "text": str(event.get("type"))}]
     if root:
         prefix = str(root).rstrip("/") + "/"
@@ -75,7 +75,7 @@ def items(engine_name, pairs, root=None):
 
 
 def read_run(engine_name, path, root=None):
-    """Todos os itens de uma execução; None se o arquivo já foi apagado."""
+    """Every item of a run; None if the file was already deleted."""
     if not Path(path).exists():
         return None
     tail = Tail(path)

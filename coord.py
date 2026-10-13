@@ -1,10 +1,10 @@
-"""Coordenação entre as instâncias do autopilot (Codex e Claude) que trabalham nos mesmos projetos.
+"""Coordination between the instances (Codex and Claude) that work on the same projects.
 
-- Reserva (claims/<projeto>.json): o motor que abriu uma unidade no projeto. Dura até a unidade
-  fechar, inclusive enquanto ela está interrompida. Reserva "any" é um bastão: qualquer motor pega.
-- Trava de execução (<grupo>.lock): flock mantido enquanto a unidade roda. O sistema solta a trava
-  se o processo morrer. Projetos do mesmo docker_group dividem a trava.
-- Decisões (decisions.lock e notify.json): uma instância por vez fala com o ntfy.
+- Claim (claims/<project>.json): the engine that opened a unit on the project. It lasts until the
+  unit closes, including while it is interrupted. An "any" claim is a baton: any engine takes it.
+- Run lock (<group>.lock): flock held while the unit runs. The OS releases it if the process dies.
+  Projects of the same docker_group share the lock.
+- Decisions (decisions.lock and notify.json): one instance at a time talks to ntfy.
 """
 
 import contextlib
@@ -26,7 +26,7 @@ def shared_dir(*parts):
 
 
 def try_lock(name):
-    """flock exclusivo e não bloqueante em shared/<name>.lock. Devolve o arquivo aberto ou None."""
+    """Exclusive, non-blocking flock on shared/<name>.lock. Returns the open file or None."""
     f = open(shared_dir() / f"{name}.lock", "a")
     try:
         fcntl.flock(f, fcntl.LOCK_EX | fcntl.LOCK_NB)
@@ -38,7 +38,7 @@ def try_lock(name):
 
 def unlock(handle):
     if handle is not None:
-        handle.close()  # fechar o arquivo solta o flock
+        handle.close()  # closing the file releases the flock
 
 
 def group_of(project):
@@ -47,7 +47,7 @@ def group_of(project):
 
 @contextlib.contextmanager
 def _claims_mutex():
-    # Bloqueante e curto: só serializa a leitura e a escrita das reservas entre as instâncias.
+    # Blocking and short: it only serializes reading and writing claims between the instances.
     with open(shared_dir() / "claims.lock", "a") as f:
         fcntl.flock(f, fcntl.LOCK_EX)
         yield
@@ -72,7 +72,7 @@ def _write_claim(project, data):
 
 
 def claim(project, engine):
-    """Reserva o projeto para `engine`, assumindo um bastão. False se o outro motor já o reservou."""
+    """Claims the project for `engine`, taking over a baton. False if the other engine already claimed it."""
     with _claims_mutex():
         current = read_claim(project)
         if current and current.get("engine") not in (engine, ANY):
@@ -83,7 +83,7 @@ def claim(project, engine):
 
 
 def release(project, engine):
-    """Remove a reserva, se ela for de `engine`."""
+    """Removes the claim if it belongs to `engine`."""
     with _claims_mutex():
         current = read_claim(project)
         if current and current.get("engine") == engine:
@@ -91,9 +91,9 @@ def release(project, engine):
 
 
 def hand_off(project, engine, unit_id=None):
-    """Troca a reserva de `engine` por um bastão que qualquer motor pode pegar.
+    """Turns `engine`'s claim into a baton any engine can take.
 
-    O bastão leva o identificador da unidade, para o histórico juntar as execuções dos dois motores.
+    The baton carries the unit id, so the history can join the runs of both engines.
     """
     with _claims_mutex():
         current = read_claim(project)
@@ -113,11 +113,11 @@ def held_by_other(project, engine):
 
 
 def reconcile(engine, open_units):
-    """Acerta as reservas de `engine` com o estado dele, ao iniciar.
+    """Reconciles `engine`'s claims with its state, at startup.
 
-    `open_units` é {projeto: há unidade interrompida no estado do motor}. Remove as reservas sem
-    unidade aberta, cria as que faltam e devolve os projetos com unidade aberta aqui, mas
-    reservados pelo outro motor.
+    `open_units` is {project: there is an interrupted unit in the engine's state}. Removes claims
+    without an open unit, creates the missing ones and returns the projects with a unit open here
+    but claimed by the other engine.
     """
     conflicts = []
     with _claims_mutex():
@@ -134,7 +134,7 @@ def reconcile(engine, open_units):
 
 
 def claims():
-    """{projeto: reserva} de todas as reservas atuais."""
+    """{project: claim} of every current claim."""
     return {p.stem: read_claim(p.stem) for p in sorted(shared_dir("claims").glob("*.json"))}
 
 
@@ -152,7 +152,7 @@ def save_notify(data):
     tmp.replace(path)
 
 
-# --- mensagens do dono (texto livre pelo ntfy) ----------------------------------------------------
+# --- owner messages (free text via ntfy) ------------------------------------------------
 
 
 def _notes_path(project):
@@ -174,7 +174,7 @@ def _write_notes(project, notes):
 
 
 def add_note(project, text):
-    """Guarda uma mensagem para a próxima unidade do projeto, de qualquer motor."""
+    """Stores a message for the project's next unit, of either engine."""
     with _claims_mutex():
         notes = _read_notes(project)
         notes.append({"id": f"{time.time_ns()}", "at": time.time(), "text": text, "delivered": False})
@@ -186,7 +186,7 @@ def pending_notes(project):
 
 
 def mark_delivered(project, ids):
-    """Marca como entregues as mensagens que foram no prompt de uma unidade que fechou."""
+    """Marks as delivered the messages that went into the prompt of a unit that closed."""
     ids = set(ids)
     with _claims_mutex():
         notes = _read_notes(project)

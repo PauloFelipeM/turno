@@ -58,7 +58,7 @@ class PanelTest(unittest.TestCase):
         return self.panel.overview(self.home, self.cache, self.homes)
 
     def start_loop(self, kind):
-        """Um processo cujo nome parece o do loop, com o pid na trava de instância."""
+        """A process whose name looks like the loop's, with its pid in the instance lock."""
         script = self.home / "fake" / "autopilot.py"
         script.parent.mkdir(exist_ok=True)
         script.write_text("import time\ntime.sleep(30)\n")
@@ -89,7 +89,7 @@ class PanelTest(unittest.TestCase):
         (self.home / "shared" / "instance-codex.lock").write_text(str(dead.pid))
         self.assertIsNone(self.panel.loop_pid(self.home, "codex"))
         import os
-        (self.home / "shared" / "instance-codex.lock").write_text(str(os.getpid()))  # vivo, mas não é o loop
+        (self.home / "shared" / "instance-codex.lock").write_text(str(os.getpid()))  # alive, but not the loop
         self.assertIsNone(self.panel.loop_pid(self.home, "codex"))
 
     def test_overview_projects(self):
@@ -158,7 +158,7 @@ class PanelTest(unittest.TestCase):
     def test_unit_detail_with_and_without_the_run_file(self):
         u = self.panel.unit_detail(self.home, "u1")
         self.assertEqual(u["runs"][0]["feed"][0]["kind"], "message")
-        self.assertIsNone(self.panel.unit_detail(self.home, "u0")["runs"][0]["feed"])  # runs-claude/r0 não existe
+        self.assertIsNone(self.panel.unit_detail(self.home, "u0")["runs"][0]["feed"])  # runs-claude/r0 does not exist
         self.assertIsNone(self.panel.unit_detail(self.home, "nope"))
 
     def test_watched_files(self):

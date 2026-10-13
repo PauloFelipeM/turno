@@ -1,4 +1,4 @@
-"""Registro de unidades: uma linha por execução encerrada, em ~/.turno/history-<motor>.jsonl."""
+"""Unit history: one line per finished run, in ~/.turno/history-<engine>.jsonl."""
 
 import datetime
 import json
@@ -8,12 +8,12 @@ OUTCOMES = ("worked", "waiting", "idle", "blocked", "usage_limit", "error", "cut
 
 
 def iso(ts):
-    """Timestamp -> ISO 8601 no fuso local, com o deslocamento."""
+    """Timestamp -> ISO 8601 in the local time zone, with the offset."""
     return datetime.datetime.fromtimestamp(ts).astimezone().isoformat(timespec="seconds")
 
 
 def ts(value):
-    """ISO 8601 -> timestamp; 0 se vier vazio ou inválido."""
+    """ISO 8601 -> timestamp; 0 if empty or invalid."""
     try:
         return datetime.datetime.fromisoformat(value).timestamp()
     except (TypeError, ValueError):
@@ -24,7 +24,7 @@ def append(path, entry):
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("ab+") as f:
-        # Uma queda no meio da escrita deixa a última linha sem quebra; sem isto a próxima grudaria nela.
+        # A crash mid-write leaves the last line without a newline; without this the next one would stick to it.
         f.seek(0, 2)
         if f.tell():
             f.seek(-1, 2)
@@ -34,7 +34,7 @@ def append(path, entry):
 
 
 def read(path):
-    """As linhas válidas do registro; linha quebrada ou sem unit_id é ignorada."""
+    """The valid history lines; a broken line or one without unit_id is skipped."""
     out = []
     try:
         with open(path, encoding="utf-8", errors="replace") as f:
@@ -51,7 +51,7 @@ def read(path):
 
 
 def group(entries):
-    """Agrupa as execuções por unidade; a mais nova (pelo início da primeira execução) vem primeiro."""
+    """Groups runs by unit; the newest (by its first run's start) comes first."""
     units = {}
     for e in sorted(entries, key=lambda e: ts(e.get("started_at"))):
         u = units.setdefault(e["unit_id"], {"unit_id": e["unit_id"], "project": e.get("project"), "runs": []})

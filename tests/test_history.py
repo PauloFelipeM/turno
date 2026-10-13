@@ -79,7 +79,7 @@ class HistoryTest(unittest.TestCase):
     def test_next_unit_gets_a_new_id(self):
         engine = helpers.FakeEngine(TRUE)
         self.do_run(engine, close={"status": "worked", "unit": "a"})
-        time.sleep(1.1)  # o id é o nome da execução, com resolução de segundos
+        time.sleep(1.1)  # the id is the run name, with one-second resolution
         self.do_run(engine, close={"status": "worked", "unit": "b"})
         first, second = self.lines()
         self.assertNotEqual(first["unit_id"], second["unit_id"])

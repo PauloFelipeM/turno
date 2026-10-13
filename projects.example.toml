@@ -1,29 +1,29 @@
-# Agendador do autopilot do Codex. A ordem dos [[project]] é a prioridade.
+# Codex instance. The order of the [[project]] entries is the priority.
 #
-# weekly_cap: até quantos % da janela semanal de uso o projeto ainda pode COMEÇAR uma unidade
-# nova. Projetos de prioridade menor param antes e deixam a cota restante para os de cima.
-# docker_group: projetos no mesmo grupo nunca ficam com o stack no ar ao mesmo tempo
-# (my-app e side-project disputam as portas 8000, 3306 e 5173).
+# weekly_cap: up to what % of the weekly usage window the project may still START a new unit.
+# Lower-priority projects stop earlier and leave the remaining quota to the ones above.
+# docker_group: projects in the same group never have their stacks up at the same time
+# (use it when two projects bind the same ports).
 
 [defaults]
 orchestrator_model = "gpt-6-sol"
 orchestrator_effort = "medium"
 max_subagents = 2
-# Só começa uma unidade se a janela tiver folga de safety_factor x o custo médio aprendido.
+# A unit only starts if the window has room for safety_factor x the learned average cost.
 safety_factor = 1.5
-# Teto da janela de 5 h, em %, para qualquer projeto.
+# Cap of the 5-hour window, in %, for any project.
 primary_cap = 100
-# Custo inicial estimado por unidade (pontos percentuais), até o agendador aprender o real.
+# Initial estimated cost per unit (percentage points), until the scheduler learns the real one.
 initial_cost_primary = 8.0
 initial_cost_secondary = 1.5
-# Projeto que terminou em "blocked" só é tentado de novo depois deste intervalo.
+# A project that ended "blocked" is only tried again after this interval.
 blocked_cooldown_hours = 6
 
 [notify]
-# Push gratuito via ntfy.sh. O tópico fica em secrets.toml (ver secrets.example.toml), fora do git;
-# assine-o no app ntfy do celular. Respostas chegam em <topic>-reply.
+# Free push via ntfy.sh. The topic lives in secrets.toml (see secrets.example.toml), outside git;
+# subscribe to it in the ntfy phone app. Answers arrive on <topic>-reply.
 server = "https://ntfy.sh"
-# Quanto tempo um projeto espera sua resposta antes de aplicar a opção padrão.
+# How long a project waits for your answer before applying the default option.
 decision_timeout_hours = 4
 
 [[project]]

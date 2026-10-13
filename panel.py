@@ -1,6 +1,6 @@
-"""O que o painel mostra, montado a partir dos arquivos do Turno.
+"""What the panel shows, assembled from turno's files.
 
-Só lê: não grava nada, não pega travas e nunca carrega o secrets.toml (o tópico do ntfy não sai daqui).
+Read-only: it writes nothing, takes no locks and never loads secrets.toml (the ntfy topic never leaves it).
 """
 
 import datetime
@@ -19,7 +19,7 @@ import schedule
 
 
 def read_json(path):
-    """Lê um JSON e devolve só objetos (dict); arquivo ausente, inválido ou de outro tipo vira None."""
+    """Reads a JSON file and returns only objects (dict); a missing, invalid or other-typed file is None."""
     try:
         data = json.loads(Path(path).read_text(encoding="utf-8"))
     except (OSError, ValueError):
@@ -38,7 +38,7 @@ def _valid_projects(cfg):
 
 
 def instances(home):
-    """Cada *.toml da pasta de dados, menos o secrets.toml, é uma instância (projects.toml primeiro)."""
+    """Every *.toml in the data folder except secrets.toml is an instance (projects.toml first)."""
     home = Path(home)
     out, seen = [], set()
     for path in sorted(home.glob("*.toml"), key=lambda p: (p.name != "projects.toml", p.name)):
@@ -53,7 +53,7 @@ def instances(home):
         if not cfg or not _valid_projects(cfg) or not isinstance(kind, str) or kind not in engines.ENGINES:
             out.append({"config": path.name, "error": "config"})
             continue
-        if kind in seen:  # dois arquivos para o mesmo motor misturariam histórico e trava
+        if kind in seen:  # two files for the same engine would mix history and lock
             out.append({"config": path.name, "error": "duplicate"})
             continue
         seen.add(kind)
@@ -70,7 +70,7 @@ def _ok(home):
 
 
 def loop_pid(home, kind):
-    """O pid do loop, se ele estiver vivo. Lê o pid da trava sem tocar nela (sem flock)."""
+    """The loop's pid if it is alive. Reads the pid from the lock file without touching the lock (no flock)."""
     try:
         pid = int((Path(home) / "shared" / f"instance-{kind}.lock").read_text().strip())
     except (OSError, ValueError):
@@ -86,10 +86,10 @@ def loop_pid(home, kind):
     try:
         args = Path(f"/proc/{pid}/cmdline").read_bytes().split(b"\0")
     except FileNotFoundError:
-        return pid  # sem /proc (macOS): vale o sinal
+        return pid  # no /proc (macOS): the signal check is enough
     except OSError:
         return None
-    # O pid pode ter sido reaproveitado por outro processo depois que o loop morreu.
+    # The pid may have been reused by another process after the loop died.
     return pid if any(a.endswith(b"autopilot.py") for a in args) else None
 
 
@@ -102,7 +102,7 @@ def _engine_view(home, inst, state, homes):
     cfg = inst["cfg"]
     eng = _engine(inst, homes)
     try:
-        limits = eng.limits(state, max_age=float("inf")) or {}  # nunca consulta a cota: só a última leitura
+        limits = eng.limits(state, max_age=float("inf")) or {}  # never queries the quota: only the last reading
     except Exception:
         limits = {}
     pid = loop_pid(home, inst["engine"])
@@ -151,7 +151,7 @@ def _backlog_summary(project_path, cache):
 
 
 def live_runs(home, homes=None):
-    """As execuções em andamento, com o caminho do JSONL (uso interno do servidor)."""
+    """The runs in progress, with the JSONL path (for the server's internal use)."""
     out = []
     for inst in _ok(home):
         state = read_json(inst["state"]) or {}
@@ -171,7 +171,7 @@ def live_runs(home, homes=None):
 
 
 def live(home, homes=None):
-    """As execuções em andamento com o fluxo até agora, para quem abre o painel no meio delas."""
+    """The runs in progress with their feed so far, for whoever opens the panel in the middle of them."""
     out = []
     for r in live_runs(home, homes):
         out.append({"run": r["run"], "unit_id": r["unit_id"], "project": r["project"], "engine": r["engine"],
@@ -256,7 +256,7 @@ def unit_detail(home, unit_id):
 
 
 def watched_files(home):
-    """Os arquivos cuja mudança muda a visão geral."""
+    """The files whose changes change the overview."""
     home = Path(home)
     files = [p for p in home.glob("*.toml") if p.name != "secrets.toml"]
     files += list(home.glob("state*.json")) + list(home.glob("history-*.jsonl"))

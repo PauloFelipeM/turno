@@ -1,4 +1,4 @@
-"""Andamento do backlog que o orquestrador grava ao fechar cada unidade (backlog.json)."""
+"""Backlog progress the orchestrator writes when it closes each unit (backlog.json)."""
 
 import json
 from pathlib import Path
@@ -31,10 +31,10 @@ def valid_backlog(data):
 
 
 def read_backlog(project_path, cache=None):
-    """{"items": [...]} ou {"error": "missing" | "invalid"}.
+    """{"items": [...]} or {"error": "missing" | "invalid"}.
 
-    O agente pode estar no meio da escrita: com `cache`, um arquivo inválido devolve a última leitura
-    válida, marcada como `stale`.
+    The agent may be mid-write: with `cache`, an invalid file returns the last valid reading, marked
+    `stale`.
     """
     path = Path(project_path) / FILE
     try:
@@ -53,6 +53,6 @@ def read_backlog(project_path, cache=None):
 
 
 def current(items):
-    """O item em andamento: o primeiro em `doing`; senão o primeiro que não terminou; senão None."""
+    """The item in progress: the first `doing` one; else the first not done; else None."""
     return (next((i for i in items if i["state"] == "doing"), None)
             or next((i for i in items if i["state"] != "done"), None))

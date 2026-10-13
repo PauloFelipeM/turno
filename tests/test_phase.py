@@ -27,7 +27,7 @@ class Open:
 
 
 class PastMargin:
-    """Dentro da janela, mas já na margem final: não começa nada."""
+    """Inside the window but already in the final margin: nothing starts."""
     def can_start(self, now):
         return False
 

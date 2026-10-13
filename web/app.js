@@ -1,4 +1,4 @@
-// Painel do Turno: desenha o que a API devolve. Toda a lógica de dados fica no servidor.
+// turno panel: draws what the API returns. All data logic lives in the server.
 import T from "./i18n/pt-BR.js";
 
 const $ = (sel) => document.querySelector(sel);
@@ -10,7 +10,7 @@ function t(path, vars = {}) {
   return String(raw ?? path).replace(/\{(\w+)\}/g, (_, k) => String(vars[k] ?? ""));
 }
 
-// Monta elementos sem innerHTML: todo texto vindo da API entra como texto.
+// Builds elements without innerHTML: every text from the API goes in as text.
 function h(tag, attrs = {}, ...kids) {
   const node = document.createElement(tag);
   for (const [k, v] of Object.entries(attrs)) {
@@ -37,7 +37,7 @@ async function getJSON(url) {
   return r.json();
 }
 
-// Guarda e devolve o foco do teclado quando a lista é redesenhada.
+// Keeps and restores keyboard focus when the list is redrawn.
 function keepFocus(attr, render) {
   const key = document.activeElement && document.activeElement.dataset ? document.activeElement.dataset[attr] : null;
   render();
@@ -47,7 +47,7 @@ function keepFocus(attr, render) {
   }
 }
 
-// --- motores ---------------------------------------------------------------------------------
+// --- engines -------------------------------------------------------------------------------
 
 function phaseText(e) {
   const p = e.loop || {};
@@ -77,7 +77,7 @@ function renderEngines() {
     ...o.errors.map((err) => h("p", { class: "error" }, t("configError", { config: err.config }))));
 }
 
-// --- projetos --------------------------------------------------------------------------------
+// --- projects ------------------------------------------------------------------------------
 
 function projectState(p) {
   const c = p.claim;
@@ -162,7 +162,7 @@ async function selectProject(name) {
       h("p", { class: "muted small" }, x.deadline ? `${t("project.deadline", { when: when(x.deadline) })}. ` : "", t("project.answerByPhone")))));
 }
 
-// --- ao vivo ---------------------------------------------------------------------------------
+// --- live ----------------------------------------------------------------------------------
 
 function feedItem(i) {
   switch (i.kind) {
@@ -211,7 +211,7 @@ function renderLive() {
   }));
 }
 
-// Une itens por n (sem repetir, em ordem); devolve só os que eram novos.
+// Merges items by n (no repeats, in order); returns only the new ones.
 function mergeItems(run, incoming) {
   const items = view.feeds.get(run) || [];
   const seen = new Set(items.map((i) => i.n));
@@ -240,9 +240,9 @@ async function loadLive() {
   for (const r of await getJSON("/api/live")) mergeItems(r.run, r.items);
 }
 
-// --- histórico -------------------------------------------------------------------------------
+// --- history -------------------------------------------------------------------------------
 
-// mode: "reset" (filtro mudou), "refresh" (evento: só a primeira página, mantém as já carregadas), "more".
+// mode: "reset" (filter changed), "refresh" (event: first page only, keeps those already loaded), "more".
 async function loadUnits(mode = "reset") {
   const params = new URLSearchParams({ limit: String(PAGE) });
   if (view.filter) params.set("project", view.filter);
@@ -313,7 +313,7 @@ async function openUnit(id) {
   $("#unit").showModal();
 }
 
-// --- canal de eventos ------------------------------------------------------------------------
+// --- event stream --------------------------------------------------------------------------
 
 function connect() {
   const es = new EventSource("/api/events"); // reconecta sozinho se o servidor cair
@@ -331,7 +331,7 @@ function connect() {
       try {
         await loadLive();
         renderLive();
-      } catch { /* o passo a passo chega nos próximos eventos */ }
+      } catch { /* the steps arrive with the next events */ }
     }
     await loadUnits("refresh");
   });

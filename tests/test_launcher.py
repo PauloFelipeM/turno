@@ -17,7 +17,7 @@ def _hold_instance(shared, name, ready):
     handle = autopilot.instance_lock(name)
     assert handle is not None
     ready.set()
-    time.sleep(30)  # o SIGINT do stop interrompe aqui
+    time.sleep(30)  # stop's SIGINT interrupts here
 
 
 class LauncherTest(unittest.TestCase):
@@ -25,7 +25,7 @@ class LauncherTest(unittest.TestCase):
         self.tmp = Path(tempfile.mkdtemp())
         self.ap = helpers.load(self.tmp)
         self.calls = []
-        self.windows = {}  # nome -> pane_dead ("0" vivo, "1" morto); None = sem sessão
+        self.windows = {}  # name -> pane_dead ("0" alive, "1" dead); None = no session
 
         def tmux(*args):
             self.calls.append(args)
@@ -42,7 +42,7 @@ class LauncherTest(unittest.TestCase):
         return [c for c in self.calls if c[0] == verb]
 
     def loop_launches(self):
-        """new-session/new-window dos loops (não da janela de logs)."""
+        """new-session/new-window of the loops (not of the logs window)."""
         return [c for c in self.commands("new-session") + self.commands("new-window") if "logs" not in c]
 
     def test_start_creates_one_session_with_both_loops(self):
@@ -100,7 +100,7 @@ class LauncherTest(unittest.TestCase):
 
     def test_logs_window_needs_no_running_session(self):
         self.windows = None
-        self.ap.loop_pids = lambda config: [4242]  # os dois loops rodando fora do tmux
+        self.ap.loop_pids = lambda config: [4242]  # both loops running outside tmux
         self.ap.start_loops()
         session = self.commands("new-session")
         self.assertEqual(len(session), 1)

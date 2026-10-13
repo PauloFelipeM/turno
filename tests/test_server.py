@@ -89,7 +89,7 @@ class ServerTest(unittest.TestCase):
         self.assertEqual((status, json.loads(body)), (500, {"error": "internal"}))
 
     def test_events_send_overview_now_and_on_change(self):
-        time.sleep(0.3)  # o primeiro aviso do vigia sai antes da conexão
+        time.sleep(0.3)  # the watcher's first announcement goes out before the connection
         sock = socket.create_connection(("127.0.0.1", self.port), timeout=5)
         sock.sendall(f"GET /api/events HTTP/1.1\r\nHost: 127.0.0.1:{self.port}\r\n\r\n".encode())
         stream = sock.makefile("rb")
@@ -105,7 +105,7 @@ class ServerTest(unittest.TestCase):
                     return event, json.loads(line[6:])
 
         self.assertEqual(next_event()[0], "overview")
-        time.sleep(0.3)  # o vigia registra a assinatura atual
+        time.sleep(0.3)  # the watcher records the current signature
         state = self.home / "state.json"
         state.write_text(json.dumps({"_loop": {"phase": "sleeping", "until": 5}}))
         os.utime(state, ns=(time.time_ns() + 10**9, time.time_ns() + 10**9))
@@ -125,7 +125,7 @@ class PortTest(unittest.TestCase):
         self.addCleanup(busy.close)
         with self.assertRaises(SystemExit) as ctx:
             server.serve(home, busy.getsockname()[1])
-        self.assertIn("ocupada", str(ctx.exception))
+        self.assertIn("in use", str(ctx.exception))
 
 
 if __name__ == "__main__":
