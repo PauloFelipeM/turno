@@ -216,11 +216,11 @@ class ControlApiTest(unittest.TestCase):
         import coord
         handle = coord.try_lock("decisions")
         self.assertIsNotNone(handle)
-        t = time.time()
+        t = time.monotonic()  # not the wall clock: it can step back under WSL
         status, body = self.post("/api/decisions/my-app/pay", {"option": "a"})
         coord.unlock(handle)
         self.assertEqual((status, body["error"]), (409, "busy"))
-        self.assertGreaterEqual(time.time() - t, 0.4)
+        self.assertGreaterEqual(time.monotonic() - t, 0.4)
         self.assertNotIn("answer", json.loads((self.dec / "pay.json").read_text()))
         self.assertEqual(self.post("/api/decisions/my-app/pay", {"option": "a"})[0], 200)  # lock released
 

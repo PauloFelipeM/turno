@@ -18,7 +18,16 @@ export default {
   requestError: "Não foi possível enviar o pedido. Tente de novo.",
   // Server errors by code; a code without a text here shows the server's own message.
   errors: {
-    restart_needed: "Este loop é de antes do botão de interromper. Pare e inicie o loop de novo; depois o ⏹ funciona.",
+    bad_option: "Essa opção não existe nesta decisão.",
+    bad_request: "Pedido inválido. Confira os campos e tente de novo.",
+    not_found: "Não encontrado: o projeto, o motor ou a decisão não existe mais.",
+    already_running: "O loop já está rodando.",
+    busy: "O agendador está lendo as decisões agora; tente de novo em alguns segundos.",
+    not_running: "Nada rodando para parar ou interromper.",
+    paused: "O projeto está pausado; retome antes.",
+    restart_needed: "Este loop precisa ser reiniciado para aceitar a interrupção.",
+    forbidden: "Pedido recusado: só o painel aberto neste computador pode enviar.",
+    internal: "Erro interno do painel. Veja o terminal onde o painel está rodando.",
   },
   attention: {
     title: "Precisa de você",
@@ -73,6 +82,7 @@ export default {
   weekly: "semana",
   noLimits: "cota sem leitura",
   reset: "reset {when}",
+  retry: "tenta de novo {when}",
   cap: "teto {cap}%",
   configError: "Configuração ilegível: {config}",
   loadError: "Não foi possível carregar. Tente de novo.",
@@ -110,6 +120,8 @@ export default {
     answerByPhone: "Responda pelo ntfy.",
     default: "padrão",
     deadline: "prazo {when}",
+    retryNow: "Tentar agora",
+    retryRequested: "Pedido enviado; {project} tenta de novo na próxima volta do loop",
   },
   history: { title: "Histórico", empty: "Nenhuma unidade registrada ainda.", more: "Carregar mais" },
   outcome: {

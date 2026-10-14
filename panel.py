@@ -32,6 +32,11 @@ def _dict(x):
     return x if isinstance(x, dict) else {}
 
 
+def _future(ts, now):
+    """`ts` if it is a time still ahead of `now`; None otherwise (0, past or not a number)."""
+    return ts if isinstance(ts, (int, float)) and not isinstance(ts, bool) and ts > now else None
+
+
 def _valid_projects(cfg):
     ps = cfg.get("project")
     return (isinstance(ps, list) and bool(ps)
@@ -192,6 +197,7 @@ def live(home, homes=None):
 
 def overview(home, cache, homes=None):
     home = Path(home)
+    now = time.time()
     views, errors, projects = [], [], {}
     for inst in instances(home):
         if "error" in inst:
@@ -205,7 +211,8 @@ def overview(home, cache, homes=None):
                 s = _dict(state.get(p["name"]))
                 mine[p["name"]] = (p, {
                     "status": s.get("status", "active"), "interrupted": bool(s.get("interrupted")),
-                    "blocked_until": s.get("blocked_until") or None, "weekly_cap": p.get("weekly_cap"), "cost": s.get("cost")})
+                    "blocked_until": s.get("blocked_until") or None, "weekly_cap": p.get("weekly_cap"), "cost": s.get("cost"),
+                    "retry_at": _future(s.get("retry_at"), now)})
         except Exception:
             errors.append({"config": inst["config"], "error": "engine"})
             continue
@@ -236,7 +243,7 @@ def overview(home, cache, homes=None):
             "next": ov.get("next") == entry["name"],
             "blocked_summary": blocked.get(entry["name"]) if any(
                 e["status"] == "blocked" for e in entry["engines"].values()) else None})
-    return {"engines": views, "projects": out_projects, "errors": errors, "now": time.time(),
+    return {"engines": views, "projects": out_projects, "errors": errors, "now": now,
             "live": [{k: v for k, v in r.items() if k not in ("path", "root")} for r in live_runs(home, homes)]}
 
 

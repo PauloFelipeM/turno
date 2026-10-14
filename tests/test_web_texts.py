@@ -33,6 +33,26 @@ class WebTextsTest(unittest.TestCase):
         self.assertIn("restart_needed:", self.block("errors"))
         self.assertIn("errors.${", self.app)
 
+    def test_every_error_code_the_server_returns_has_a_text(self):
+        root = WEB.parent
+        codes = set(re.findall(r'ApiError\(\d+, "(\w+)"', (root / "control.py").read_text()))
+        codes |= set(re.findall(r'\{"error": "(\w+)"', (root / "server.py").read_text()))
+        self.assertEqual(codes, {"bad_option", "bad_request", "not_found", "already_running", "busy", "not_running",
+                                 "paused", "restart_needed", "forbidden", "internal"})
+        block = self.block("errors")
+        for code in codes:
+            self.assertRegex(block, rf'\n?\s*{code}: "[^"]+",', code)
+        self.assertIn('restart_needed: "Este loop precisa ser reiniciado para aceitar a interrupção."', block)
+
+    def test_retry_wait_shows_on_the_card_and_can_be_cleared_from_the_project_panel(self):
+        self.assertIn('retry: "tenta de novo {when}"', self.i18n)
+        self.assertIn('retryNow: "Tentar agora"', self.i18n)
+        self.assertIn('t("retry", {', self.app)
+        self.assertIn('t("project.retryNow")', self.app)
+        self.assertIn("retry_at", self.app)
+        strip = self.app[self.app.index("function attentionItems"):self.app.index("function decisionItem")]
+        self.assertNotIn("retry_at", strip)  # a waiting project stays on its card, out of the strip
+
 
 if __name__ == "__main__":
     unittest.main()

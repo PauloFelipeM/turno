@@ -238,6 +238,9 @@ function statusChip(s) {
   return h("span", { class: `chip st-${key}` }, t(`status.${key}`, { until: when(s.blocked_until) }));
 }
 
+// The wait after an error, a usage limit or a busy Docker, while it is still ahead.
+const retryAt = (s) => (s && s.retry_at && s.retry_at > Date.now() / 1000 ? s.retry_at : null);
+
 function claimText(c) {
   if (!c) return null;
   return c.engine === "any" ? t("baton", { engine: engineName(c.handoff_from) }) : t("claim", { engine: engineName(c.engine) });
@@ -296,6 +299,7 @@ function drawProjects() {
       },
       h("span", { class: "row" }, h("b", {}, p.name), h("span", {}, p.paused ? h("span", { class: "chip paused-chip" }, t("card.pausedChip")) : null, statusChip(projectState(p)))),
       h("span", { class: "muted small" }, extra.filter(Boolean).join(" · ")),
+      retryAt(projectState(p)) ? h("span", { class: "muted small" }, t("retry", { when: when(retryAt(projectState(p))) })) : null,
       progress(p.backlog)),
       projectActions(p, running.has(p.name)));
   }));
@@ -310,6 +314,19 @@ async function selectProject(name) {
   await loadUnits("reset");
   if (!view.filter) return;
   await loadDetail(name);
+}
+
+// "Try now" in the project panel: only while some engine is waiting to retry this project.
+function retryRow(name) {
+  const p = view.overview && view.overview.projects.find((x) => x.name === name);
+  const times = p ? Object.values(p.engines).map(retryAt).filter(Boolean) : [];
+  if (!times.length) return null;
+  const row = h("p", { class: "muted small" }, t("retry", { when: when(Math.min(...times)) }), " ",
+    h("button", { type: "button", class: "btn", onclick: async (ev) => {
+      const ok = await act(ev.currentTarget, () => post(`/api/projects/${enc(name)}/reset`, {}), t("project.retryRequested", { project: name }));
+      if (ok) row.remove();
+    } }, t("project.retryNow")));
+  return row;
 }
 
 async function loadDetail(name) {
@@ -329,6 +346,7 @@ async function loadDetail(name) {
   if (view.filter !== name) return;
   box.hidden = false;
   fill(box,
+    retryRow(name),
     h("h3", {}, `${t("project.backlog")} · ${name}`),
     d.backlog.error
       ? h("p", { class: "muted" }, t(`backlog.${d.backlog.error}`))

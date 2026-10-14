@@ -283,5 +283,19 @@ class PanelTest(unittest.TestCase):
         self.assertFalse(hasattr(overrides, "_cap"))
 
 
+    def test_overview_shows_retry_at_only_while_it_is_in_the_future(self):
+        state = json.loads((self.home / "state.json").read_text())
+        soon = time.time() + 600
+        state["my-app"]["retry_at"] = soon
+        state["my-api"]["retry_at"] = time.time() - 5
+        state["side-project"] = {"status": "active", "retry_at": "soon"}
+        (self.home / "state.json").write_text(json.dumps(state))
+        my-app, my-api, side-project = self.overview()["projects"]
+        self.assertEqual(my-app["engines"]["codex"]["retry_at"], soon)
+        self.assertIsNone(my-app["engines"]["claude"]["retry_at"])
+        self.assertIsNone(my-api["engines"]["codex"]["retry_at"])
+        self.assertIsNone(side-project["engines"]["codex"]["retry_at"])
+
+
 if __name__ == "__main__":
     unittest.main()
