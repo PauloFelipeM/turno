@@ -67,6 +67,14 @@ button { font: inherit; color: inherit; }
 .cap-field input { width: 6em; font: inherit; color: inherit; background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 2px 6px; }
 .order { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
 .order li { display: grid; gap: 4px; border-top: 1px solid var(--line); padding-top: 6px; }
+.field { display: grid; gap: 2px; font-size: .85rem; }
+.field input, .field select { font: inherit; color: inherit; background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 2px 6px; }
+.field.wide { width: 100%; }
+.field.wide input { width: 100%; }
+.check { display: flex; gap: 6px; align-items: center; margin: 6px 0; }
+.tab.on { border-color: var(--accent); font-weight: 600; }
+.warns { margin: 4px 0; padding-left: 1.2em; color: var(--warn); font-size: .85rem; }
+.engine-cfg { border-top: 1px solid var(--line); margin-top: 8px; }
 #settings-open { width: 100%; margin-top: 8px; }
 .toast { position: fixed; inset: auto auto 16px 50%; margin: 0; border: 0; transform: translateX(-50%); max-width: min(90vw, 520px); padding: 8px 16px; border-radius: 8px; background: var(--fg); color: var(--bg); z-index: 10; }
 .toast.error { background: var(--bad); color: #fff; }

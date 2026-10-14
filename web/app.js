@@ -8,7 +8,7 @@ const view = {
   confirm: null, // key of the confirmation row that is open: "engine:<name>" or "project:<name>"
   drafts: new Map(), // comment texts typed in the attention strip, kept across redraws
   attentionSig: null, // what the attention strip shows now, to redraw it only when that changes
-  draft: null, // the settings dialog's working copy
+  draft: null, // the settings dialog's working copy (see buildDraft)
 };
 
 function t(path, vars = {}) {
@@ -138,6 +138,7 @@ function engineControls(e) {
   const running = e.loop.phase !== "stopped";
   const key = `engine:${e.engine}`;
   const name = engineName(e.engine);
+  if (!running && !e.enabled) return h("span", { class: "muted" }, t("disabled"));
   if (!running) {
     return h("button", { type: "button", class: "btn", "data-action": `start:${e.engine}`, onclick: (ev) =>
       act(ev.currentTarget, () => post(`/api/engines/${enc(e.engine)}/start`), t("engineStarting", { engine: name })) }, t("start"));
@@ -410,21 +411,62 @@ function capsForm(name, settings) {
 }
 
 // --- settings dialog -----------------------------------------------------------------------
+// The dialog edits a working copy (view.draft) of GET /api/config. Saving sends only what changed.
 
-function loadDraft(s) {
-  view.draft = {
-    order: [...s.order],
-    orig: [...s.order],
-    engines: Object.keys(s.engines),
-    weekly: Object.fromEntries(s.order.map((n) => [n, Object.fromEntries(Object.entries(s.engines).map(([e, v]) => [e, v.weekly_cap[n] ?? ""]))])),
-    primary: Object.fromEntries(Object.entries(s.engines).map(([e, v]) => [e, v.primary_cap ?? ""])),
+const EFFORTS = ["low", "medium", "high"];
+const clone = (x) => JSON.parse(JSON.stringify(x));
+
+function engineDraft(e) {
+  const s = e.schedule;
+  return {
+    enabled: !!e.enabled,
+    orchestrator_model: e.orchestrator_model ?? "",
+    orchestrator_effort: e.orchestrator_effort ?? "medium",
+    noWindow: !s,
+    start: s ? s.start : "", end: s ? s.end : "", margin: s ? String(s.start_margin_minutes ?? 15) : "15",
+    primary_cap: e.primary_cap ?? "",
+    fable_cap: e.fable_cap ?? "",
   };
-  view.draft.origWeekly = JSON.parse(JSON.stringify(view.draft.weekly));
-  view.draft.origPrimary = { ...view.draft.primary };
+}
+
+function buildDraft(cfg) {
+  const d = {
+    section: "projects", cfg, confirmRemove: null, checks: {},
+    order: cfg.projects.map((p) => p.name),
+    proj: Object.fromEntries(cfg.projects.map((p) => [p.name, {
+      path: p.path, group: p.docker_group ?? "",
+      caps: Object.fromEntries(Object.keys(cfg.engines).map((e) => [e, p.weekly_cap[e] ?? ""])),
+    }])),
+    eng: Object.fromEntries(Object.entries(cfg.engines).map(([k, e]) => [k, engineDraft(e)])),
+    add: { name: "", path: "", group: "", caps: {} },
+  };
+  d.orig = [...d.order];
+  d.origProj = clone(d.proj);
+  d.origEng = clone(d.eng);
+  return d;
+}
+
+// Rebuilds the draft from fresh server data but keeps what the owner has typed and not saved yet.
+function mergeDraft(cfg) {
+  const old = view.draft;
+  const d = buildDraft(cfg);
+  if (!old) return d;
+  d.section = old.section;
+  d.add = old.add;
+  d.checks = old.checks;
+  const names = new Set(d.order);
+  for (const n of d.order) {
+    if (old.proj[n]) { d.proj[n] = old.proj[n]; d.origProj[n] = old.origProj[n]; }
+  }
+  d.order = [...old.order.filter((n) => names.has(n)), ...d.order.filter((n) => !old.order.includes(n))];
+  d.orig = [...old.orig.filter((n) => names.has(n)), ...d.orig.filter((n) => !old.orig.includes(n))];
+  d.eng = old.eng;
+  d.origEng = old.origEng;
+  return d;
 }
 
 function renderSettings() {
-  keepFocus("mv", drawSettings);
+  keepFocus("mv", () => keepFocus("sf", drawSettings));
 }
 
 function move(i, delta) {
@@ -433,65 +475,209 @@ function move(i, delta) {
   renderSettings();
 }
 
-// Only what changed since the dialog was loaded; an empty field means "leave it alone". null = invalid field.
-function saveBody() {
+// The cap fields of one project/form: an empty field means "leave it alone". Returns {engine: n} or null if invalid.
+function readCaps(raw, was) {
+  const out = {};
+  for (const [e, v] of Object.entries(raw)) {
+    if (String(v ?? "").trim() === "") continue;
+    const n = parseCap(v);
+    if (n == null) return null;
+    if (n !== was?.[e]) out[e] = n;
+  }
+  return out;
+}
+
+// The requests that save the changes: [{ run(), done() }] in order; null = an invalid field.
+function saveSteps() {
   const d = view.draft;
-  const body = {};
-  if (d.order.some((n, i) => n !== d.orig[i])) body.order = d.order;
-  const weekly = {};
-  const primary = {};
-  const read = (raw, was, put) => {
-    if (String(raw ?? "").trim() === "") return true;
-    const v = parseCap(raw);
-    if (v == null) return false;
-    if (v !== was) put(v);
-    return true;
-  };
+  const steps = [];
   for (const n of d.order) {
-    for (const e of d.engines) {
-      if (!read(d.weekly[n][e], d.origWeekly[n][e], (v) => { (weekly[n] ||= {})[e] = v; })) return null;
+    const cur = d.proj[n], was = d.origProj[n];
+    const body = {};
+    if (cur.path !== was.path) body.path = cur.path.trim();
+    if (cur.group !== was.group) body.docker_group = cur.group.trim();
+    const caps = readCaps(cur.caps, was.caps);
+    if (!caps) return null;
+    if (Object.keys(caps).length) body.weekly_cap = caps;
+    if (Object.keys(body).length) steps.push({ url: `/api/projects/${enc(n)}`, body, done: () => { d.origProj[n] = clone(cur); } });
+  }
+  if (d.order.some((n, i) => n !== d.orig[i])) steps.push({ url: "/api/settings", body: { order: [...d.order] }, done: () => { d.orig = [...d.order]; } });
+  for (const [k, cur] of Object.entries(d.eng)) {
+    const was = d.origEng[k];
+    const body = {};
+    if (cur.enabled !== was.enabled) body.enabled = cur.enabled;
+    if (cur.orchestrator_model !== was.orchestrator_model) body.orchestrator_model = cur.orchestrator_model.trim();
+    if (cur.orchestrator_effort !== was.orchestrator_effort) body.orchestrator_effort = cur.orchestrator_effort;
+    for (const f of k === "claude" ? ["primary_cap", "fable_cap"] : ["primary_cap"]) {
+      if (String(cur[f]).trim() === "") { if (String(was[f]).trim() !== "") return null; continue; }
+      const n = parseCap(cur[f]);
+      if (n == null) return null;
+      if (n !== was[f]) body[f] = n;
     }
+    if (cur.noWindow !== was.noWindow || (!cur.noWindow && (cur.start !== was.start || cur.end !== was.end || cur.margin !== was.margin))) {
+      if (cur.noWindow) body.schedule = null;
+      else {
+        const margin = Number(cur.margin);
+        if (!cur.start.trim() || !cur.end.trim() || !Number.isInteger(margin) || margin < 0) return null;
+        body.schedule = { start: cur.start.trim(), end: cur.end.trim(), start_margin_minutes: margin };
+      }
+    }
+    if (Object.keys(body).length) steps.push({ url: `/api/engines/${enc(k)}`, body, done: () => { d.origEng[k] = clone(cur); } });
   }
-  for (const e of d.engines) {
-    if (!read(d.primary[e], d.origPrimary[e], (v) => { primary[e] = v; })) return null;
+  return steps;
+}
+
+async function saveSettings(steps) {
+  const d = view.draft;
+  for (const s of steps) {
+    await post(s.url, s.body, "PUT");
+    s.done();
   }
-  if (Object.keys(weekly).length) body.weekly_cap = weekly;
-  if (Object.keys(primary).length) body.primary_cap = primary;
-  return body;
+  view.draft = buildDraft(await getJSON("/api/config"));
+  view.draft.section = d.section;
+  view.draft.add = d.add;
+  view.draft.checks = d.checks;
+  if (view.filter) loadDetail(view.filter);
+}
+
+// Runs a settings request; on an error the working copy is redrawn as it stands (partial saves are kept).
+function settingsAct(btn, fn, okText) {
+  return act(btn, async () => {
+    try { await fn(); } finally { renderSettings(); }
+  }, okText);
+}
+
+function field(label, input, cls = "") {
+  return h("label", { class: `field ${cls}`.trim() }, h("span", {}, label), input);
+}
+
+function textInput(value, onChange, attrs = {}) {
+  return h("input", { type: "text", value: value ?? "", oninput: (ev) => onChange(ev.target.value), ...attrs });
+}
+
+function projectRow(n, i) {
+  const d = view.draft;
+  const p = d.cfg.projects.find((x) => x.name === n);
+  const cur = d.proj[n];
+  const why = p && !p.removable ? t(`settings.blocked.${p.blocked_by}`) : "";
+  const confirming = d.confirmRemove === n;
+  return h("li", {},
+    h("span", { class: "order-name" }, h("b", {}, n)),
+    field(t("settings.path"), textInput(cur.path, (v) => { cur.path = v; }, { "data-sf": `path:${n}` }), "wide"),
+    h("div", { class: "cap-row" },
+      field(t("settings.group"), textInput(cur.group, (v) => { cur.group = v; }, { "data-sf": `group:${n}` })),
+      Object.keys(cur.caps).map((e) => capInput(`${engineName(e)} (%)`, cur.caps[e], (v) => { cur.caps[e] = v; }))),
+    p && p.checks.length ? h("ul", { class: "warns" }, p.checks.map((c) => h("li", {}, t(`settings.checks.${c}`)))) : null,
+    h("span", { class: "btn-row" },
+      actionBtn("↑", () => move(i, -1), { disabled: i === 0, title: t("settings.up", { project: n }), "aria-label": t("settings.up", { project: n }), "data-mv": `up:${n}` }),
+      actionBtn("↓", () => move(i, 1), { disabled: i === d.order.length - 1, title: t("settings.down", { project: n }), "aria-label": t("settings.down", { project: n }), "data-mv": `down:${n}` }),
+      confirming
+        ? h("span", { class: "confirm", role: "group" },
+          h("span", {}, t("settings.removeConfirm", { project: n })),
+          h("button", { type: "button", class: "btn danger", "data-sf": `remove-yes:${n}`, onclick: (ev) =>
+            settingsAct(ev.currentTarget, async () => {
+              d.confirmRemove = null;
+              await post(`/api/projects/${enc(n)}`, undefined, "DELETE");
+              view.draft = mergeDraft(await getJSON("/api/config"));
+            }, t("settings.removed", { project: n })) }, t("settings.remove")),
+          h("button", { type: "button", class: "btn", onclick: () => { d.confirmRemove = null; renderSettings(); } }, t("cancel")))
+        : h("button", { type: "button", class: "btn", "data-sf": `remove:${n}`, disabled: !!why, title: why || null,
+          onclick: () => { d.confirmRemove = n; renderSettings(); } }, t("settings.remove")),
+      why ? h("span", { class: "muted small" }, why) : null));
+}
+
+function addForm() {
+  const a = view.draft.add;
+  const engs = Object.keys(view.draft.cfg.engines);
+  return h("section", { class: "form" },
+    h("h3", {}, t("settings.addTitle")),
+    h("div", { class: "cap-row" },
+      field(t("settings.name"), textInput(a.name, (v) => { a.name = v; }, { "data-sf": "add-name" })),
+      field(t("settings.group"), textInput(a.group, (v) => { a.group = v; }, { "data-sf": "add-group" }))),
+    field(t("settings.path"), textInput(a.path, (v) => { a.path = v; }, { "data-sf": "add-path" }), "wide"),
+    h("div", { class: "cap-row" }, engs.map((e) => capInput(`${engineName(e)} (%)`, a.caps[e] ?? "", (v) => { a.caps[e] = v; }))),
+    h("div", { class: "btn-row" },
+      h("button", { type: "button", class: "btn", "data-sf": "add-go", onclick: (ev) => {
+        if (!a.name.trim() || !a.path.trim()) { toast(t("settings.addMissing"), "error"); return; }
+        const caps = readCaps(a.caps);
+        if (!caps) { toast(t("caps.invalid"), "error"); return; }
+        const body = { name: a.name.trim(), path: a.path.trim() };
+        if (a.group.trim()) body.docker_group = a.group.trim();
+        if (Object.keys(caps).length) body.weekly_cap = caps;
+        return settingsAct(ev.currentTarget, async () => {
+          await post("/api/projects", body);
+          view.draft = mergeDraft(await getJSON("/api/config"));
+          view.draft.add = { name: "", path: "", group: "", caps: {} };
+        }, t("settings.added", { project: body.name }));
+      } }, t("settings.add"))));
+}
+
+function limitText(l) {
+  const win = (label, w) => `${label} ${pct(w && w.used_percent)}${w && w.resets_at ? ` (${t("reset", { when: when(w.resets_at) })})` : ""}`;
+  return `${win(t("window5h"), l.primary)} · ${win(t("weekly"), l.secondary)}`;
+}
+
+function engineBlock(k) {
+  const d = view.draft;
+  const cur = d.eng[k];
+  const cli = d.cfg.engines[k].cli || {};
+  const res = d.checks[k];
+  const efforts = EFFORTS.includes(cur.orchestrator_effort) ? EFFORTS : [...EFFORTS, cur.orchestrator_effort];
+  return h("section", { class: "engine-cfg" },
+    h("h3", {}, engineName(k)),
+    h("label", { class: "check" },
+      h("input", { type: "checkbox", checked: cur.enabled, "data-sf": `enabled:${k}`, onchange: (ev) => { cur.enabled = ev.target.checked; } }),
+      t("settings.enabled")),
+    h("div", { class: "cap-row" },
+      field(t("settings.model"), textInput(cur.orchestrator_model, (v) => { cur.orchestrator_model = v; }, { "data-sf": `model:${k}` })),
+      field(t("settings.effort"), h("select", { "data-sf": `effort:${k}`, onchange: (ev) => { cur.orchestrator_effort = ev.target.value; } },
+        efforts.map((x) => h("option", { value: x, selected: x === cur.orchestrator_effort }, x)))),
+      capInput(t("settings.primaryCap"), cur.primary_cap, (v) => { cur.primary_cap = v; }),
+      k === "claude" ? capInput(t("settings.fableCap"), cur.fable_cap, (v) => { cur.fable_cap = v; }) : null),
+    h("label", { class: "check" },
+      h("input", { type: "checkbox", checked: cur.noWindow, "data-sf": `nowindow:${k}`, onchange: (ev) => { cur.noWindow = ev.target.checked; renderSettings(); } }),
+      t("settings.noWindow")),
+    cur.noWindow ? null : h("div", { class: "cap-row" },
+      field(t("settings.start"), textInput(cur.start, (v) => { cur.start = v; }, { placeholder: "fri 19:00", "data-sf": `start:${k}` })),
+      field(t("settings.end"), textInput(cur.end, (v) => { cur.end = v; }, { placeholder: "sun 03:00", "data-sf": `end:${k}` })),
+      field(t("settings.margin"), h("input", { type: "number", min: "0", step: "1", value: cur.margin, "data-sf": `margin:${k}`, oninput: (ev) => { cur.margin = ev.target.value; } }))),
+    h("p", { class: "muted small" }, cli.found ? t("settings.cliFound", { path: cli.path, version: cli.version || "?" }) : t("settings.cliMissing")),
+    h("div", { class: "btn-row" },
+      h("button", { type: "button", class: "btn", "data-sf": `check:${k}`, onclick: (ev) =>
+        act(ev.currentTarget, async () => {
+          d.checks[k] = { loading: true };
+          renderSettings();
+          try { d.checks[k] = await post(`/api/engines/${enc(k)}/check`); } finally { if (d.checks[k].loading) delete d.checks[k]; renderSettings(); }
+        }) }, t("settings.check"))),
+    res && !res.loading ? h("p", { class: res.limits ? "small" : "error small", "data-check": k },
+      res.limits ? limitText(res.limits) : t("settings.checkError", { error: res.error || "" })) : null);
 }
 
 function drawSettings() {
   const d = view.draft;
+  const tab = (key, label) => h("button", { type: "button", class: "btn tab" + (d.section === key ? " on" : ""), "data-sf": `tab:${key}`,
+    "aria-pressed": String(d.section === key), onclick: () => { d.section = key; renderSettings(); } }, label);
   fill($("#settings-body"),
     h("h2", {}, t("settings.title")),
-    h("p", { class: "muted small" }, t("settings.hint")),
-    h("ol", { class: "order" }, d.order.map((n, i) => h("li", {},
-      h("span", { class: "order-name" }, h("b", {}, n)),
-      h("span", { class: "cap-row" }, d.engines.map((e) => capInput(`${engineName(e)} (%)`, d.weekly[n][e], (v) => { d.weekly[n][e] = v; }))),
-      h("span", { class: "btn-row" },
-        actionBtn("↑", () => move(i, -1), { disabled: i === 0, title: t("settings.up", { project: n }), "aria-label": t("settings.up", { project: n }), "data-mv": `up:${n}` }),
-        actionBtn("↓", () => move(i, 1), { disabled: i === d.order.length - 1, title: t("settings.down", { project: n }), "aria-label": t("settings.down", { project: n }), "data-mv": `down:${n}` }))))),
-    h("h3", {}, t("settings.primary")),
-    h("div", { class: "cap-row" }, d.engines.map((e) => capInput(`${engineName(e)} (%)`, d.primary[e], (v) => { d.primary[e] = v; }))),
+    h("div", { class: "btn-row" }, tab("projects", t("settings.projects")), tab("engines", t("settings.engines"))),
+    d.section === "projects"
+      ? [h("p", { class: "muted small" }, t("settings.hint")),
+        h("ol", { class: "order" }, d.order.map(projectRow)),
+        addForm()]
+      : Object.keys(d.eng).map(engineBlock),
     h("div", { class: "btn-row" },
-      h("button", { type: "button", class: "btn", onclick: (ev) => {
-        const body = saveBody();
-        if (!body) { toast(t("caps.invalid"), "error"); return; }
-        if (!Object.keys(body).length) { toast(t("caps.nothing")); return; }
-        return act(ev.currentTarget, async () => {
-          loadDraft(await post("/api/settings", body, "PUT"));
-          drawSettings();
-          if (view.filter) loadDetail(view.filter);
-        }, t("settings.saved"));
+      h("button", { type: "button", class: "btn", "data-sf": "save", onclick: (ev) => {
+        const steps = saveSteps();
+        if (!steps) { toast(t("settings.invalid"), "error"); return; }
+        if (!steps.length) { toast(t("caps.nothing")); return; }
+        return settingsAct(ev.currentTarget, () => saveSettings(steps), t("settings.saved"));
       } }, t("settings.save")),
-      h("button", { type: "button", class: "btn", onclick: (ev) =>
-        act(ev.currentTarget, async () => { loadDraft(await post("/api/settings", undefined, "DELETE")); drawSettings(); if (view.filter) loadDetail(view.filter); }, t("settings.resetDone")) }, t("settings.reset")),
       h("button", { type: "button", class: "btn", onclick: () => $("#settings").close() }, t("settings.close"))));
 }
 
 async function openSettings(ev) {
   await act(ev.currentTarget, async () => {
-    loadDraft(await getJSON("/api/settings"));
+    view.draft = buildDraft(await getJSON("/api/config"));
     drawSettings();
     $("#settings").showModal();
   });

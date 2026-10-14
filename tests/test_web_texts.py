@@ -38,10 +38,10 @@ class WebTextsTest(unittest.TestCase):
         codes = set(re.findall(r'ApiError\(\d+, "(\w+)"', (root / "control.py").read_text()))
         codes |= set(re.findall(r'\{"error": "(\w+)"', (root / "server.py").read_text()))
         self.assertEqual(codes, {"bad_option", "bad_request", "not_found", "already_running", "busy", "not_running",
-                                 "paused", "restart_needed", "forbidden", "internal",
-                                 "exists", "in_use", "disabled", "config"})
+                                 "paused", "restart_needed", "forbidden", "internal", "exists", "in_use", "disabled",
+                                 "config"})
         block = self.block("errors")
-        for code in codes - {"exists", "in_use", "disabled", "config"}:  # their texts come with the interface (Task 5)
+        for code in codes:
             self.assertRegex(block, rf'\n?\s*{code}: "[^"]+",', code)
         self.assertIn('restart_needed: "Este loop precisa ser reiniciado para aceitar a interrupção."', block)
 
