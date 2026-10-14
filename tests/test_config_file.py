@@ -137,7 +137,28 @@ class LoadTests(Base):
         data = config.load(self.home)
         self.assertEqual([p["name"] for p in data["projects"]],
                          ["my-app", "my-api", "side-project", "extra"])
-        self.assertEqual(data["projects"][-1]["weekly_cap"], {"claude": 70})
+        self.assertEqual(data["projects"][-1]["weekly_cap"], {"claude": 70, "codex": 0})
+        self.assertEqual(config.for_engine(data, "codex")["project"][-1]["weekly_cap"], 0)
+
+    def test_codex_only_project_gets_claude_zero_only_when_claude_toml_exists(self):
+        self.put("projects.toml")
+        text = (self.home / "projects.toml").read_text() + (
+            '\n[[project]]\nname = "extra"\npath = "/x/extra"\nweekly_cap = 70\n')
+        (self.home / "projects.toml").write_text(text)
+        self.assertEqual(config.import_toml(self.home)["projects"][-1]["weekly_cap"], {"codex": 70})
+        self.put("claude.toml")
+        self.assertEqual(config.import_toml(self.home)["projects"][-1]["weekly_cap"],
+                         {"codex": 70, "claude": 0})
+
+    def test_schedule_without_margin_gets_15(self):
+        self.put("projects.toml", "claude.toml")
+        text = (self.home / "claude.toml").read_text().replace(
+            "start_margin_minutes = 15", "")
+        (self.home / "claude.toml").write_text(text)
+        data = config.load(self.home)
+        self.assertEqual(data["engines"]["claude"]["schedule"]["start_margin_minutes"], 15)
+        self.assertEqual(config.for_engine(data, "claude")["schedule"],
+                         {"start": "fri 19:00", "end": "sun 03:00", "start_margin_minutes": 15})
 
     def test_overrides_folded_and_removed(self):
         self.put("projects.toml", "claude.toml")
@@ -206,6 +227,14 @@ class SaveTests(Base):
 
 
 class ForEngineTests(unittest.TestCase):
+    def test_missing_engine_uses_defaults(self):
+        d = config.empty()
+        del d["engines"]["claude"]
+        got = config.for_engine(d, "claude")
+        self.assertFalse(got["enabled"])
+        self.assertEqual(got["defaults"]["orchestrator_model"], "claude-opus-5-5")
+        self.assertEqual(got["defaults"]["fable_cap"], 80)
+
     def test_defaults_and_caps(self):
         d = config.empty()
         d["projects"] = [{"name": "a", "path": "/x", "docker_group": "g", "weekly_cap": {"claude": 90}},

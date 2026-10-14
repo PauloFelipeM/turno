@@ -243,7 +243,7 @@ def save(home, fn):
 
 def for_engine(data, engine):
     """The config in the legacy shape the loop consumes (see `cfg` in autopilot.py)."""
-    e = data["engines"][engine]
+    e = data["engines"].get(engine) or copy.deepcopy(ENGINE_DEFAULTS[engine])
     out = {
         "enabled": bool(e.get("enabled")),
         "defaults": {k: v for k, v in e.items() if k not in ("enabled", "schedule")},
@@ -278,6 +278,7 @@ def import_toml(home):
     data = empty()
     files = {"codex": _toml(home, "projects.toml"), "claude": _toml(home, "claude.toml")}
     by_name = {}
+    listed = {eng: set() for eng in ENGINES}
     for eng in ENGINES:
         cfg = files[eng]
         if cfg is None:
@@ -286,8 +287,10 @@ def import_toml(home):
         e["enabled"] = True
         e.update(cfg.get("defaults") or {})
         if cfg.get("schedule"):
-            e["schedule"] = dict(cfg["schedule"])
+            # schedule.from_config defaults the margin to 15; the config file requires the key.
+            e["schedule"] = {"start_margin_minutes": 15, **cfg["schedule"]}
         for p in cfg.get("project") or []:
+            listed[eng].add(p["name"])
             item = by_name.get(p["name"])
             if item is None:
                 item = {"name": p["name"], "path": p["path"]}
@@ -299,6 +302,10 @@ def import_toml(home):
             if "weekly_cap" in p:
                 item["weekly_cap"][eng] = p["weekly_cap"]
     for item in data["projects"]:
+        # A project the other engine's file does not list is not run by that engine.
+        for eng in ENGINES:
+            if files[eng] is not None and item["name"] not in listed[eng]:
+                item["weekly_cap"][eng] = 0
         if not item["weekly_cap"]:
             del item["weekly_cap"]
     primary = next((f for f in (files["codex"], files["claude"]) if f is not None), None)
