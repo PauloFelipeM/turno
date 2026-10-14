@@ -110,19 +110,12 @@ def write_config_text(home, text):
 
 
 def make_home(home, topic="segredo-xyz"):
-    """Sample data folder: Codex and Claude, three projects, and the ntfy topic in both places.
-
-    It writes `config.json` (what the loops read) and the equivalent TOML files, which the panel
-    still reads until it moves to `config.json`.
-    """
+    """Sample data folder: Codex and Claude, three projects, `config.json` and the ntfy topic in `secrets.toml`."""
     home = Path(home)
     projects = {}
     for name in ("my-app", "my-api", "side-project"):
         projects[name] = home / "projects" / name
         (projects[name] / ".superpowers" / "autopilot" / "decisions").mkdir(parents=True)
-    body = "".join(f'\n[[project]]\nname = "{n}"\npath = "{p}"\nweekly_cap = 90\n' for n, p in projects.items())
-    (home / "projects.toml").write_text(DEFAULTS + f'\n[notify]\ntopic = "{topic}"\n' + body)
-    (home / "claude.toml").write_text('[instance]\nname = "claude"\n\n[engine]\nkind = "claude"\n\n' + DEFAULTS + body)
     (home / "secrets.toml").write_text(f'[notify]\ntopic = "{topic}"\n')
 
     def models(data):

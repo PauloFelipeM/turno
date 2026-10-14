@@ -1,12 +1,16 @@
 import contextlib
 import io
+import shutil
 import sys
 import tempfile
+import tomllib
 import unittest
 from pathlib import Path
 from unittest import mock
 
 import helpers
+
+FIXTURES = Path(__file__).parent / "fixtures"
 
 CLAUDE_TOML = '[instance]\nname = "claude"\n\n[defaults]\norchestrator_model = "m"\n'
 
@@ -129,15 +133,17 @@ class LoadConfigTest(unittest.TestCase):
 
     def test_the_toml_files_are_imported_the_first_time(self):
         (self.tmp / "config.json").unlink()
+        shutil.copy(FIXTURES / "projects.toml", self.tmp / "projects.toml")
+        shutil.copy(FIXTURES / "claude.toml", self.tmp / "claude.toml")
         self.ap.configure("claude")
         cfg = self.ap.load_config()
         self.assertTrue((self.tmp / "config.json").exists())
-        self.assertEqual([p["weekly_cap"] for p in cfg["project"]], [90, 90, 90])
+        self.assertEqual([p["name"] for p in cfg["project"]], [p["name"] for p in tomllib.loads(
+            (FIXTURES / "claude.toml").read_text())["project"]])
         self.assertEqual(cfg["instance"], {"name": "claude"})
 
     def test_no_config_at_all_is_an_empty_disabled_engine(self):
-        for name in ("config.json", "projects.toml", "claude.toml"):
-            (self.tmp / name).unlink()
+        (self.tmp / "config.json").unlink()
         cfg = self.ap.load_config()
         self.assertEqual((cfg["project"], cfg["enabled"]), ([], False))
 

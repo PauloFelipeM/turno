@@ -69,9 +69,17 @@ class PanelTest(unittest.TestCase):
         time.sleep(0.2)
         return proc
 
-    def test_instances_skip_secrets(self):
-        names = [i["config"] for i in self.panel.instances(self.home)]
-        self.assertEqual(names, ["projects.toml", "claude.toml"])
+    def test_instances_come_from_the_config_file(self):
+        found = self.panel.instances(self.home)
+        self.assertEqual([(i["config"], i["engine"], i["enabled"]) for i in found],
+                         [("config.json", "codex", True), ("config.json", "claude", True)])
+        self.assertEqual(found[1]["state"], self.home / "state-claude.json")
+        self.assertEqual(found[0]["history"], self.home / "history-codex.jsonl")
+
+    def test_a_disabled_engine_is_still_listed_with_enabled_false(self):
+        helpers.write_config(self.home, [], enabled=("codex",))
+        self.assertEqual([(e["engine"], e["enabled"]) for e in self.overview()["engines"]],
+                         [("codex", True), ("claude", False)])
 
     def test_overview_engines_and_loop_phase(self):
         self.start_loop("codex")
@@ -143,23 +151,23 @@ class PanelTest(unittest.TestCase):
             f.write(json.dumps(row) + "\n")
         self.assertIsNone(self.overview()["projects"][2]["blocked_summary"])
 
-    def test_settings_without_and_with_overrides(self):
-        import overrides
+    def test_settings_come_from_the_config(self):
         s = self.panel.settings(self.home)
         self.assertEqual(s["order"], ["my-app", "my-api", "side-project"])
         self.assertEqual(s["engines"]["codex"], {"primary_cap": 100, "weekly_cap": {"my-app": 90, "my-api": 90, "side-project": 90}})
-        self.assertEqual(s["overridden"], {"order": False, "caps": False})
-        overrides.update(self.home, lambda d: d.update(
-            order=["side-project", "my-app"], primary_cap={"claude": 70},
-            projects={"my-api": {"weekly_cap": {"codex": 55}}}))
+        self.assertNotIn("overridden", s)
+
+        def edit(d):
+            d["projects"].reverse()
+            d["projects"][0]["weekly_cap"] = {"codex": 55}
+            d["engines"]["claude"]["primary_cap"] = 70
+        import config
+        config.save(self.home, edit)
         s = self.panel.settings(self.home)
-        # The loops no longer apply an order or caps from the overrides, so the panel does not show
-        # them as effective either. The settings move to config.json in the config API task.
-        self.assertEqual(s["order"], ["my-app", "my-api", "side-project"])
-        self.assertEqual(s["engines"]["codex"]["weekly_cap"]["my-api"], 90)
-        self.assertEqual(s["engines"]["claude"]["weekly_cap"]["my-api"], 90)
-        self.assertEqual((s["engines"]["claude"]["primary_cap"], s["engines"]["codex"]["primary_cap"]), (100, 100))
-        self.assertEqual(s["overridden"], {"order": True, "caps": True})
+        self.assertEqual(s["order"], ["side-project", "my-api", "my-app"])
+        self.assertEqual(s["engines"]["codex"]["weekly_cap"]["side-project"], 55)
+        self.assertEqual(s["engines"]["claude"]["weekly_cap"]["side-project"], 100)  # no value for the engine: 100
+        self.assertEqual((s["engines"]["claude"]["primary_cap"], s["engines"]["codex"]["primary_cap"]), (70, 100))
 
     def test_live_only_while_the_loop_runs(self):
         self.assertEqual(self.overview()["live"], [])
@@ -178,11 +186,11 @@ class PanelTest(unittest.TestCase):
         self.assertEqual(o["projects"][1]["backlog"], {"error": "invalid"})
         self.assertEqual(o["projects"][0]["backlog"]["current"]["id"], "admin")
 
-    def test_unreadable_config_is_reported_and_the_rest_works(self):
-        (self.home / "broken.toml").write_text("[[[")
+    def test_unreadable_config_is_reported(self):
+        helpers.write_config_text(self.home, "[[[")
         o = self.overview()
-        self.assertEqual(o["errors"], [{"config": "broken.toml", "error": "config"}])
-        self.assertEqual(len(o["engines"]), 2)
+        self.assertEqual(o["errors"], [{"config": "config.json", "error": "config"}])
+        self.assertEqual(o["engines"], [])
 
     def test_no_secret_anywhere(self):
         self.start_loop("codex")
@@ -225,11 +233,10 @@ class PanelTest(unittest.TestCase):
         self.assertIn(str(self.projects["my-app"] / ".superpowers" / "autopilot" / "backlog.json"), files)
 
     def test_project_without_path_is_a_config_error(self):
-        with open(self.home / "projects.toml", "a") as f:
-            f.write('\n[[project]]\nname = "x"\n')
+        helpers.write_config(self.home, [{"name": "x"}])
         o = self.overview()
-        self.assertIn({"config": "projects.toml", "error": "config"}, o["errors"])
-        self.assertEqual([e["engine"] for e in o["engines"]], ["claude"])
+        self.assertEqual(o["errors"], [{"config": "config.json", "error": "config"}])
+        self.assertEqual(o["engines"], [])
 
     def test_unexpected_json_types_are_tolerated(self):
         (self.home / "state.json").write_text("[]")
@@ -239,17 +246,6 @@ class PanelTest(unittest.TestCase):
         self.assertEqual(len(o["engines"]), 2)
         self.assertIsNone(o["projects"][0]["claim"])
         self.assertEqual(o["projects"][0]["decisions"], 1)
-
-    def test_duplicate_engine_kind_is_reported(self):
-        shutil.copy(self.home / "claude.toml", self.home / "claude2.toml")
-        o = self.overview()
-        self.assertIn({"config": "claude2.toml", "error": "duplicate"}, o["errors"])
-        self.assertEqual(len(o["engines"]), 2)
-
-    def test_non_string_engine_kind_is_a_config_error(self):
-        (self.home / "bad.toml").write_text('[engine]\nkind = ["x"]\n\n[[project]]\nname = "x"\npath = "/tmp/x"\n')
-        o = self.overview()
-        self.assertIn({"config": "bad.toml", "error": "config"}, o["errors"])
 
     def test_panel_never_queries_the_claude_quota(self):
         import engines

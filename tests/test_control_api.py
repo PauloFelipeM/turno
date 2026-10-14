@@ -237,39 +237,36 @@ class ControlApiTest(unittest.TestCase):
 
     # settings
 
-    def test_settings_get_put_delete(self):
+    def cfg(self):
+        import config
+        return config.load(self.home)
+
+    def test_settings_get_and_put_write_the_config(self):
         status, s = self.call("GET", "/api/settings")
         self.assertEqual(status, 200)
         self.assertEqual(s["order"], ["my-app", "my-api", "side-project"])
-        self.assertEqual(s["overridden"], {"order": False, "caps": False})
         body = {"order": ["side-project", "my-app"], "weekly_cap": {"side-project": {"codex": 40, "claude": 80.5}},
                 "primary_cap": {"codex": 90}}
-        self.assertEqual(self.call("PUT", "/api/settings", body)[0], 200)
-        ov = self.ov()
-        self.assertEqual(ov["order"], ["side-project", "my-app"])
-        self.assertEqual(ov["projects"]["side-project"]["weekly_cap"], {"codex": 40, "claude": 80.5})
-        self.assertEqual(ov["primary_cap"], {"codex": 90})
-        s = self.call("GET", "/api/settings")[1]
-        # Still written to the overrides, which the loops no longer apply: the effective values are
-        # the config's until this route writes to config.json (the config API task).
-        self.assertEqual(s["order"], ["my-app", "my-api", "side-project"])
-        self.assertEqual(s["engines"]["codex"]["weekly_cap"]["side-project"], 90)
-        self.assertEqual(s["overridden"], {"order": True, "caps": True})
+        status, s = self.call("PUT", "/api/settings", body)
+        self.assertEqual(status, 200)
+        data = self.cfg()
+        self.assertEqual([p["name"] for p in data["projects"]], ["side-project", "my-app", "my-api"])
+        self.assertEqual(data["projects"][0]["weekly_cap"], {"codex": 40, "claude": 80.5})
+        self.assertEqual(data["engines"]["codex"]["primary_cap"], 90)
+        self.assertEqual(self.ov(), {"poke": self.ov().get("poke")})  # only the poke touches the overrides
+        self.assertEqual(self.call("GET", "/api/settings")[1], s)
+        self.assertEqual(s["order"], ["side-project", "my-app", "my-api"])
+        self.assertEqual(s["engines"]["codex"]["weekly_cap"]["side-project"], 40)
         # merge: a second PUT keeps the rest
         self.call("PUT", "/api/settings", {"weekly_cap": {"side-project": {"codex": 10}, "my-api": {"claude": 5}}})
-        ov = self.ov()
-        self.assertEqual(ov["projects"]["side-project"]["weekly_cap"], {"codex": 10, "claude": 80.5})
-        self.assertEqual(ov["projects"]["my-api"]["weekly_cap"], {"claude": 5})
-        self.assertEqual(ov["order"], ["side-project", "my-app"])
-        # DELETE keeps pause, next and reset
-        self.post("/api/projects/side-project/pause")
-        self.post("/api/projects/my-api/next")
-        self.assertEqual(self.call("DELETE", "/api/settings")[0], 200)
-        ov = self.ov()
-        self.assertEqual((ov.get("order"), ov.get("primary_cap")), (None, None))
-        self.assertEqual(ov["projects"]["side-project"], {"paused": True})
-        self.assertNotIn("my-api", ov["projects"])
-        self.assertEqual(ov["next"], "my-api")
+        data = self.cfg()
+        self.assertEqual(data["projects"][0]["weekly_cap"], {"codex": 10, "claude": 80.5})
+        self.assertEqual(data["projects"][2]["weekly_cap"], {"codex": 90, "claude": 5})
+        self.assertEqual([p["name"] for p in data["projects"]], ["side-project", "my-app", "my-api"])
+
+    def test_delete_settings_is_gone(self):
+        self.assertEqual(self.call("DELETE", "/api/settings")[0], 404)
+        self.assertFalse(hasattr(self.control, "delete_settings") or hasattr(self.control, "reset_settings"))
 
     def test_corrupt_overrides_types_do_not_break_writes(self):
         (self.home / "overrides.json").write_text(json.dumps({"projects": [], "reset": 5, "primary_cap": 1}))
@@ -280,9 +277,8 @@ class ControlApiTest(unittest.TestCase):
         (self.home / "overrides.json").write_text(json.dumps({"projects": {"side-project": []}, "reset": 5}))
         self.assertEqual(self.call("PUT", "/api/settings", {"weekly_cap": {"side-project": {"codex": 5}}, "primary_cap": {"codex": 9}})[0], 200)
         (self.home / "overrides.json").write_text(json.dumps({"projects": {"side-project": {"weekly_cap": 3}}}))
-        self.assertEqual(self.call("PUT", "/api/settings", {"weekly_cap": {"side-project": {"codex": 5}}})[0], 200)
-        self.assertEqual(self.ov()["projects"]["side-project"]["weekly_cap"], {"codex": 5})
-        self.assertEqual(self.call("DELETE", "/api/settings")[0], 200)
+        self.assertEqual(self.call("PUT", "/api/settings", {"weekly_cap": {"side-project": {"codex": 6}}})[0], 200)
+        self.assertEqual(self.cfg()["projects"][2]["weekly_cap"]["codex"], 6)
 
     def test_settings_validation_writes_nothing(self):
         bad = [{"order": ["nope"]}, {"order": "side-project"}, {"order": ["side-project", "side-project"]}, {"order": [1]},
@@ -294,14 +290,15 @@ class ControlApiTest(unittest.TestCase):
                {"colour": "red"},
                # a valid part next to an invalid one: nothing is written
                {"order": ["side-project"], "primary_cap": {"codex": 500}}]
+        before = self.cfg()
         for body in bad:
             self.assertEqual(self.call("PUT", "/api/settings", body)[0], 400, body)
         self.assertEqual(self.call("PUT", "/api/settings", raw=b"{x")[0], 400)
         self.assertEqual(self.ov(), {})
+        self.assertEqual(self.cfg(), before)
 
     def test_settings_writes_need_the_guard(self):
         self.assertEqual(self.call("PUT", "/api/settings", {"order": ["side-project"]}, turno=None)[0], 403)
-        self.assertEqual(self.call("DELETE", "/api/settings", turno=None)[0], 403)
         self.assertEqual(self.call("PUT", "/api/settings", raw=b'{"order": ["side-project"]}', ctype="text/plain")[0], 403)
         self.assertEqual(self.ov(), {})
 

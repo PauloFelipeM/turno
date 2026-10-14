@@ -6,12 +6,13 @@ Read-only (the writes live in control.py): it writes nothing, takes no locks and
 import datetime
 import json
 import os
+import subprocess
 import time
-import tomllib
 from pathlib import Path
 
 import autopilot
 import backlog
+import config
 import engines
 import feed
 import history
@@ -37,35 +38,22 @@ def _future(ts, now):
     return ts if isinstance(ts, (int, float)) and not isinstance(ts, bool) and ts > now else None
 
 
-def _valid_projects(cfg):
-    ps = cfg.get("project")
-    return (isinstance(ps, list) and bool(ps)
-            and all(isinstance(p, dict) and isinstance(p.get("name"), str) and isinstance(p.get("path"), str) for p in ps))
-
-
 def instances(home):
-    """Every *.toml in the data folder except secrets.toml is an instance (projects.toml first)."""
+    """One instance per engine in `config.json` (disabled ones too: the overview shows them as off).
+
+    An unreadable or invalid config gives a single error entry."""
     home = Path(home)
-    out, seen = [], set()
-    for path in sorted(home.glob("*.toml"), key=lambda p: (p.name != "projects.toml", p.name)):
-        if path.name == "secrets.toml":
+    try:
+        data = config.load(home)
+    except (config.ConfigError, OSError):
+        return [{"config": config.FILE, "error": "config"}]
+    out = []
+    for kind in config.ENGINES:
+        if kind not in data["engines"]:
             continue
-        try:
-            with path.open("rb") as f:
-                cfg = tomllib.load(f)
-        except (OSError, tomllib.TOMLDecodeError):
-            cfg = None
-        kind = _dict((cfg or {}).get("engine")).get("kind", "codex")
-        if not cfg or not _valid_projects(cfg) or not isinstance(kind, str) or kind not in engines.ENGINES:
-            out.append({"config": path.name, "error": "config"})
-            continue
-        if kind in seen:  # two files for the same engine would mix history and lock
-            out.append({"config": path.name, "error": "duplicate"})
-            continue
-        seen.add(kind)
-        name = _dict(cfg.get("instance")).get("name")
-        suffix = f"-{name}" if name else ""
-        out.append({"config": path.name, "cfg": cfg, "engine": kind,
+        cfg = config.for_engine(data, kind)
+        suffix = "-claude" if kind == "claude" else ""
+        out.append({"config": config.FILE, "cfg": cfg, "engine": kind, "enabled": cfg["enabled"],
                     "state": home / f"state{suffix}.json", "runs": home / f"runs{suffix}",
                     "history": home / f"history-{kind}.jsonl"})
     return out
@@ -125,7 +113,7 @@ def _engine_view(home, inst, state, homes):
         used, reset = engines.window(limits, key)
         return {"used": used, "resets_at": reset or None}
 
-    return {"engine": inst["engine"], "label": eng.label, "config": inst["config"], "pid": pid, "loop": loop,
+    return {"engine": inst["engine"], "label": eng.label, "config": inst["config"], "enabled": inst["enabled"], "pid": pid, "loop": loop,
             "limits": {"known": bool(limits.get("primary") or limits.get("secondary")),
                        "primary": usage("primary"), "secondary": usage("secondary")},
             "primary_cap": _dict(cfg.get("defaults")).get("primary_cap"),
@@ -248,20 +236,75 @@ def overview(home, cache, homes=None):
 
 
 def settings(home):
-    """The effective order and caps (the .toml with the overrides applied) and what is overridden."""
-    ov = overrides.read(home)
+    """The order and caps in effect (read from `config.json`)."""
     order, engines_view = [], {}
     for inst in configured(home):
-        cfg = overrides.apply(inst["cfg"], inst["engine"], ov)
+        cfg = inst["cfg"]
         order += [p["name"] for p in cfg["project"] if p["name"] not in order]
         engines_view[inst["engine"]] = {
             "primary_cap": _dict(cfg.get("defaults")).get("primary_cap"),
             "weekly_cap": {p["name"]: p.get("weekly_cap") for p in cfg["project"]}}
-    ov_projects = _dict(ov.get("projects"))
-    caps = any(overrides.valid_cap(c) for per in ov_projects.values() for c in _dict(_dict(per).get("weekly_cap")).values())
-    caps = caps or any(overrides.valid_cap(c) for c in _dict(ov.get("primary_cap")).values())
-    return {"order": order, "engines": engines_view,
-            "overridden": {"order": isinstance(ov.get("order"), list) and bool(ov["order"]), "caps": caps}}
+    return {"order": order, "engines": engines_view}
+
+
+def project_checks(path):
+    """Warning codes for a project folder (see the spec); nothing here blocks anything."""
+    root = Path(path)
+    if not root.is_dir():
+        return ["missing_path"]
+    out = []
+    if not (root / ".git").exists():
+        out.append("not_git")
+    if not (root / "docs" / "autopilot.md").is_file():
+        out.append("no_autopilot_doc")
+    if "not_git" not in out:
+        try:
+            r = subprocess.run(["git", "-C", str(root), "check-ignore", "-q", ".superpowers/autopilot/last-unit.json"],
+                               capture_output=True, stdin=subprocess.DEVNULL, timeout=5)
+            ignored = r.returncode == 0
+        except (OSError, subprocess.SubprocessError):
+            ignored = True  # git unavailable: no basis for a warning
+        if not ignored:
+            out.append("superpowers_not_ignored")
+    return out
+
+
+def blocked_by(home, name):
+    """Why a project cannot be removed: "running", "interrupted", "claimed"; None when it can."""
+    home = Path(home)
+    states = []
+    for inst in instances(home):
+        if "error" in inst:
+            continue
+        state = read_json(inst["state"]) or {}
+        states.append(state)
+        loop = _dict(state.get("_loop"))
+        if loop.get("phase") == "running" and loop.get("project") == name and loop_pid(home, inst["engine"]):
+            return "running"
+    if any(_dict(st.get(name)).get("interrupted") for st in states):
+        return "interrupted"
+    if (home / "shared" / "claims" / f"{name}.json").exists():
+        return "claimed"
+    return None
+
+
+def config_view(home):
+    """What the settings screen edits: projects with their warnings, engines with their CLI status, notify.
+
+    Raises `config.ConfigError` when `config.json` is invalid."""
+    data = config.load(home)
+    projects = []
+    for p in data["projects"]:
+        why = blocked_by(home, p["name"])
+        projects.append({"name": p["name"], "path": p["path"], "docker_group": p.get("docker_group"),
+                         "weekly_cap": dict(p.get("weekly_cap") or {}), "checks": project_checks(p["path"]),
+                         "removable": why is None, "blocked_by": why})
+    engine_view = {}
+    for kind in config.ENGINES:
+        if kind in data["engines"]:
+            engine_view[kind] = {**config.ENGINE_DEFAULTS[kind], **data["engines"][kind],
+                                 "cli": engines.cli_status(kind)}
+    return {"projects": projects, "engines": engine_view, "notify": dict(data["notify"])}
 
 
 def project_path(home, name):
@@ -308,7 +351,7 @@ def unit_detail(home, unit_id):
 def watched_files(home):
     """The files whose changes change the overview."""
     home = Path(home)
-    files = [p for p in home.glob("*.toml") if p.name != "secrets.toml"]
+    files = [home / config.FILE]
     files += list(home.glob("state*.json")) + list(home.glob("history-*.jsonl")) + [home / overrides.FILE]
     files += list((home / "shared" / "claims").glob("*.json")) + list((home / "shared").glob("instance-*.lock"))
     for inst in configured(home):

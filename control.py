@@ -1,10 +1,12 @@
 """What the panel's write routes do, as plain functions: each returns (status, body) or raises ApiError.
 
-They only touch `overrides.json` (under its lock), decision answers (under the decisions lock), owner
-notes (through `coord.add_note`), and start/stop the loops or signal them. They never edit state files,
-`.toml` files or the projects.
+They only touch `config.json` (through `config.save`, which validates before writing), `overrides.json`
+(under its lock), decision answers (under the decisions lock), owner notes (through `coord.add_note`),
+and start/stop the loops or signal them. They never edit state files or the projects, and removing a
+project only drops its entry from the config.
 """
 
+import copy
 import os
 import signal
 import threading
@@ -13,7 +15,9 @@ import traceback
 from pathlib import Path
 
 import autopilot
+import config
 import coord
+import engines
 import overrides
 import panel
 
@@ -67,6 +71,8 @@ def engine_action(home, engine, action):
         raise ApiError(404, "not_found", f"unknown engine: {engine}")
     running = panel.loop_pid(home, engine) is not None
     if action == "start":
+        if not next(i for i in panel.configured(home) if i["engine"] == engine)["enabled"]:
+            raise ApiError(409, "disabled", "the engine is disabled in the configuration")
         if running:
             raise ApiError(409, "already_running", "the loop is already running")
         _background(autopilot.start_loops, engine)
@@ -226,11 +232,168 @@ def _caps(value, names, kinds, what):
             raise bad(f"{what}: unknown engine or cap outside 0 to 100 for {key!r}")
 
 
-def put_settings(home, body):
-    names, kinds = _known(home)
-    unknown = set(body) - {"order", "weekly_cap", "primary_cap"}
+def _poke(home):
+    overrides.update(home, lambda d: None)  # wakes a sleeping loop so it rereads the config
+
+
+def _save(home, fn):
+    """`config.save` with the problems of an invalid result turned into a 400; pokes the loops on success."""
+    try:
+        data = config.save(home, fn)
+    except config.ConfigError as e:
+        raise bad("; ".join(e.problems)) from e
+    _poke(home)
+    return data
+
+
+def _check_fields(body, allowed):
+    unknown = set(body) - set(allowed)
     if unknown:
         raise bad(f"unknown fields: {sorted(unknown)}")
+
+
+def _folder(value):
+    """The project folder as an absolute path string; it must exist and be a directory."""
+    if not isinstance(value, str) or not value.strip():
+        raise bad("path must be a non-empty string")
+    path = Path(value.strip()).expanduser()
+    if not path.is_absolute():
+        raise bad("path must be absolute")
+    if not path.is_dir():
+        raise bad(f"path is not an existing directory: {path}")
+    return str(path)
+
+
+def _group(value):
+    if value is None or value == "":
+        return None
+    if not isinstance(value, str) or not value.strip():
+        raise bad("docker_group must be a string, null or empty")
+    return value.strip()
+
+
+def _project_caps(value):
+    if not isinstance(value, dict):
+        raise bad("weekly_cap must be an object engine -> number")
+    for eng, n in value.items():
+        if eng not in config.ENGINES or not _number(n):
+            raise bad("weekly_cap: unknown engine or cap outside 0 to 100")
+    return value
+
+
+def add_project(home, body):
+    _check_fields(body, ("name", "path", "docker_group", "weekly_cap"))
+    name = body.get("name")
+    if not isinstance(name, str) or not name:
+        raise bad("name is required")
+    path = _folder(body.get("path"))
+    group = _group(body.get("docker_group"))
+    caps = _project_caps(body["weekly_cap"]) if "weekly_cap" in body else None
+
+    def fn(d):
+        if any(isinstance(p, dict) and p.get("name") == name for p in d["projects"]):
+            raise ApiError(409, "exists", f"a project named {name!r} already exists")
+        item = {"name": name, "path": path}
+        if group:
+            item["docker_group"] = group
+        if caps:
+            item["weekly_cap"] = dict(caps)
+        d["projects"].append(item)
+    _save(home, fn)
+    return 200, {"ok": True}
+
+
+def edit_project(home, name, body):
+    _check_fields(body, ("path", "docker_group", "weekly_cap"))
+    path = _folder(body["path"]) if "path" in body else None
+    caps = _project_caps(body["weekly_cap"]) if "weekly_cap" in body else None
+    group = _group(body["docker_group"]) if "docker_group" in body else None
+
+    def fn(d):
+        p = next((p for p in d["projects"] if p.get("name") == name), None)
+        if p is None:
+            raise ApiError(404, "not_found", f"unknown project: {name}")
+        if path is not None:
+            p["path"] = path
+        if "docker_group" in body:
+            if group:
+                p["docker_group"] = group
+            else:
+                p.pop("docker_group", None)
+        if caps is not None:
+            p["weekly_cap"] = {**(p.get("weekly_cap") or {}), **caps}
+    _save(home, fn)
+    return 200, {"ok": True}
+
+
+def remove_project(home, name):
+    """Drops the project from the config; state, history, claims and the folder are left alone."""
+    def fn(d):
+        if not any(p.get("name") == name for p in d["projects"]):
+            raise ApiError(404, "not_found", f"unknown project: {name}")
+        why = panel.blocked_by(home, name)
+        if why:
+            raise ApiError(409, "in_use", f"the project is in use ({why})")
+        d["projects"] = [p for p in d["projects"] if p.get("name") != name]
+    _save(home, fn)
+    return 200, {"ok": True}
+
+
+ENGINE_FIELDS = ("enabled", "orchestrator_model", "orchestrator_effort", "max_subagents", "primary_cap", "fable_cap",
+                 "safety_factor", "blocked_cooldown_hours", "schedule")
+SCHEDULE_FIELDS = ("start", "end", "start_margin_minutes")
+DEFAULT_MARGIN = 15  # like schedule.from_config and the TOML import
+
+
+def put_engine(home, engine, body):
+    if engine not in config.ENGINES:
+        raise ApiError(404, "not_found", f"unknown engine: {engine}")
+    _check_fields(body, ENGINE_FIELDS)
+    for key in body:
+        if key not in config.ENGINE_DEFAULTS[engine]:
+            raise bad(f"{key} does not apply to {engine}")
+    new = dict(body)
+    sched = new.get("schedule")
+    if sched is not None:
+        if not isinstance(sched, dict):
+            raise bad("schedule must be null or an object")
+        _check_fields(sched, SCHEDULE_FIELDS)
+        new["schedule"] = {"start_margin_minutes": DEFAULT_MARGIN, **sched}
+
+    def fn(d):
+        d["engines"].setdefault(engine, copy.deepcopy(config.ENGINE_DEFAULTS[engine])).update(new)
+    _save(home, fn)
+    return 200, {"ok": True}
+
+
+_log_lock = threading.Lock()
+
+
+def check_engine(home, engine):
+    """Reads the engine's quota now. Writes no file: the state is a throwaway dict and the log is captured."""
+    if engine not in config.ENGINES:
+        raise ApiError(404, "not_found", f"unknown engine: {engine}")
+    try:
+        cfg = config.for_engine(config.load(home), engine)
+    except (config.ConfigError, OSError) as e:
+        return 200, {"limits": None, "error": str(e)}
+    messages = []
+    with _log_lock:  # engines.log writes autopilot.log; here it only collects
+        previous, engines.log = engines.log, messages.append
+        try:
+            limits = engines.ENGINES[engine](cfg).limits({}, max_age=0)
+        except Exception as e:
+            return 200, {"limits": None, "error": f"{type(e).__name__}: {e}"}
+        finally:
+            engines.log = previous
+    if not limits:
+        return 200, {"limits": None, "error": messages[-1] if messages else "no quota reading"}
+    return 200, {"limits": limits}
+
+
+def put_settings(home, body):
+    names, kinds = _known(home)
+    _check_fields(body, ("order", "weekly_cap", "primary_cap"))
     order = body.get("order")
     if "order" in body and not (isinstance(order, list) and all(isinstance(n, str) and n in names for n in order)
                                 and len(set(order)) == len(order)):
@@ -242,31 +405,16 @@ def put_settings(home, body):
 
     def fn(d):
         if "order" in body:
-            d["order"] = order
+            rank = {n: i for i, n in enumerate(order)}
+            # Listed projects first, in the given order; the rest keep their relative order after them.
+            d["projects"].sort(key=lambda p: rank.get(p.get("name"), len(rank)))
         for name, per in body.get("weekly_cap", {}).items():
-            entry = _project_entry(d, name)
-            if not isinstance(entry.get("weekly_cap"), dict):
-                entry["weekly_cap"] = {}
-            entry["weekly_cap"].update(per)
-        if "primary_cap" in body:
-            if not isinstance(d.get("primary_cap"), dict):
-                d["primary_cap"] = {}
-            d["primary_cap"].update(body["primary_cap"])
-    overrides.update(home, fn)
-    return 200, panel.settings(home)
-
-
-def reset_settings(home):
-    def fn(d):
-        d.pop("order", None)
-        d.pop("primary_cap", None)
-        projects = d.get("projects")
-        for name in list(projects) if isinstance(projects, dict) else []:
-            if isinstance(projects[name], dict):
-                projects[name].pop("weekly_cap", None)
-            if not projects[name]:
-                del projects[name]
-    overrides.update(home, fn)
+            p = next((p for p in d["projects"] if p.get("name") == name), None)
+            if p is not None:
+                p["weekly_cap"] = {**(p.get("weekly_cap") or {}), **per}
+        for eng, n in body.get("primary_cap", {}).items():
+            d["engines"][eng]["primary_cap"] = n
+    _save(home, fn)
     return 200, panel.settings(home)
 
 
@@ -275,6 +423,16 @@ def write_route(home, method, parts, body):
     n = len(parts)
     if method == "POST" and n == 4 and parts[:2] == ["api", "engines"] and parts[3] in ("start", "stop"):
         return engine_action(home, parts[2], parts[3])
+    if method == "POST" and n == 4 and parts[:2] == ["api", "engines"] and parts[3] == "check":
+        return check_engine(home, parts[2])
+    if method == "PUT" and n == 3 and parts[:2] == ["api", "engines"]:
+        return put_engine(home, parts[2], body)
+    if method == "POST" and parts == ["api", "projects"]:
+        return add_project(home, body)
+    if method == "PUT" and n == 3 and parts[:2] == ["api", "projects"]:
+        return edit_project(home, parts[2], body)
+    if method == "DELETE" and n == 3 and parts[:2] == ["api", "projects"]:
+        return remove_project(home, parts[2])
     if method == "POST" and n == 4 and parts[:2] == ["api", "projects"]:
         return project_action(home, parts[2], parts[3])
     if method == "POST" and n == 4 and parts[:2] == ["api", "decisions"]:
@@ -283,6 +441,4 @@ def write_route(home, method, parts, body):
         return send_message(home, body)
     if parts == ["api", "settings"] and method == "PUT":
         return put_settings(home, body)
-    if parts == ["api", "settings"] and method == "DELETE":
-        return reset_settings(home)
     raise ApiError(404, "not_found")

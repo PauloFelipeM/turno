@@ -16,6 +16,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, unquote, urlsplit
 
+import config
 import control
 import feed
 import panel
@@ -177,11 +178,15 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(200, detail) if detail else self._send(404, {"error": "not_found"})
             if parts == ["api", "settings"]:
                 return self._send(200, panel.settings(hub.home))
+            if parts == ["api", "config"]:
+                return self._send(200, panel.config_view(hub.home))
             if parts == ["api", "events"]:
                 return self._events(hub)
             return self._send(404, {"error": "not_found"})
         except (BrokenPipeError, ConnectionResetError):
             return None
+        except config.ConfigError as e:
+            return self._send(500, {"error": "config", "message": str(e)})
         except ValueError:
             return self._send(400, {"error": "bad_request"})
         except Exception:
