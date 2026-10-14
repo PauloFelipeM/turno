@@ -39,6 +39,16 @@ def git_repo(path):
     return path
 
 
+def isolate_git(test, tmp):
+    """Keeps the user's global git config and ignore file out of `test`: either could ignore `.superpowers/`."""
+    from unittest import mock
+    xdg = Path(tmp) / "xdg-config"
+    xdg.mkdir(parents=True, exist_ok=True)
+    patch = mock.patch.dict(os.environ, {"GIT_CONFIG_GLOBAL": os.devnull, "XDG_CONFIG_HOME": str(xdg)})
+    patch.start()
+    test.addCleanup(patch.stop)
+
+
 class FakeEngine:
     """Test engine: runs `cmd` and never reads a real quota."""
 
