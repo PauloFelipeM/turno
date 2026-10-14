@@ -151,7 +151,7 @@ class ValidateTests(Base):
                 self.assertTrue(config.validate(data), label)
 
     def test_reserved_names_are_refused_as_project_name_and_as_group(self):
-        for reserved in ("claims", "config", "decisions", "overrides", "notify", "notes", "instance-codex",
+        for reserved in ("claims", "config", "decisions", "overrides", "notify", "notes", "setup", "instance-codex",
                          "Claims", "CONFIG", "Instance-x"):
             for field in ("name", "docker_group"):
                 with self.subTest(reserved=reserved, field=field):
