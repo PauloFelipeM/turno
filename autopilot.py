@@ -50,6 +50,7 @@ import history
 import overrides
 import paths
 import schedule
+import repo_setup as setup
 
 BASE = Path(__file__).resolve().parent  # code: prompts, roles, interface
 HOME = paths.home()  # data: config, state, logs, runs
@@ -181,6 +182,7 @@ def ensure_state(cfg, state):
         s.setdefault("notes_sent", [])
         s.setdefault("unit_id", None)
         s.setdefault("run", None)
+        s.setdefault("setup", None)  # "draft" or "apply" while a setup unit is open
 
 
 def load_state(cfg):
@@ -453,7 +455,8 @@ def process_decisions(cfg, state):
     for p in cfg["project"]:
         s = state[p["name"]]
         pending = any(d and "answer" not in d for d in map(read_decision, decision_files(p)))
-        if s["status"] == "waiting" and not pending:
+        # A draft in review waits for the owner in the panel, not for a decision file.
+        if s["status"] == "waiting" and not pending and setup.phase(HOME, p["name"]) != "review":
             s["status"] = "active"
             log(f"{p['name']}: decisions resolved; project released")
 
@@ -588,6 +591,58 @@ def owner_messages(messages):
             "a lasting instruction in the decisions file so later units keep it. They never override step 7.")
 
 
+SETUP_MODES = {"requested": "draft", "approved": "apply"}
+
+
+def setup_mode(name):
+    """"draft" or "apply" while the project's setup request asks for a unit; None otherwise."""
+    return SETUP_MODES.get(setup.phase(HOME, name))
+
+
+def setup_section(mode, request, files):
+    """The part of a setup unit's prompt that says what to do: mode, goal, feedback and draft files."""
+    part = "Draft unit" if mode == "draft" else "Apply unit"
+    lines = [f"Setup unit — mode: {mode}. Follow the \"{part}\" part of the setup instructions, not steps 3 "
+             "to 8 of the normal unit protocol (on a resume, the setup instructions are your original ones).",
+             "Owner's goal for this project (it may be in Portuguese):", request.get("goal") or "(none)"]
+    if mode == "draft" and request.get("feedback"):
+        lines += ["Owner's feedback on the previous draft (apply it to this draft):", request["feedback"]]
+    lines.append("Draft files already in .superpowers/autopilot/setup/: " + (", ".join(files) if files else "none"))
+    return "\n".join(lines)
+
+
+def finish_setup(cfg, project, s, mode, unit_status, summary):
+    """Moves the setup request after a setup unit closed; returns the (status, summary) after_unit applies.
+
+    A ready draft goes to `review` and the project waits for the owner; a finished apply goes to `done`
+    and the project is active. A setup unit that closed without its result is blocked, so the loop does
+    not run it again and again; an owner who changed the request meanwhile is never overridden."""
+    name, root = project["name"], Path(project["path"])
+    if mode == "draft":
+        frm, to = "requested", "review"
+        ok = unit_status in ("worked", "waiting") and (root / setup.DRAFT / "autopilot.md").is_file()
+    else:
+        frm, to = "approved", "done"
+        ok = unit_status == "worked" and (root / "docs" / "autopilot.md").is_file()
+    if ok and setup.transition(HOME, name, frm, to):
+        if mode == "draft":
+            log(f"{name}: setup draft ready for the owner")
+            ntfy(cfg, f"Rascunho do {name} pronto para revisar", "Abra o painel para aprovar ou pedir mudanças.",
+                 tags=["memo"])
+            return "waiting", summary
+        log(f"{name}: prepared for turno; it joins the normal queue")
+        s["status"] = "active"
+        return "worked", summary
+    if setup.phase(HOME, name) != frm:
+        log(f"{name}: the setup request changed during the unit; it stays as it is")
+        return unit_status, summary
+    if unit_status == "blocked":
+        return unit_status, summary
+    missing = "o rascunho (setup/autopilot.md)" if mode == "draft" else "o docs/autopilot.md no lugar"
+    log(f"{name}: the {mode} setup unit closed without its result; blocking the project")
+    return "blocked", f"A unidade de preparo terminou sem {missing}. {summary}".strip()
+
+
 CUT = "cut"  # "exit code" of a unit cut at the end of the window
 STOPPED = "stopped"  # "exit code" of a unit interrupted from the panel (SIGUSR1)
 CURRENT = None  # process of the running unit, so Ctrl+C can end its group
@@ -697,11 +752,18 @@ def run_unit(cfg, engine, state, project, deadline=None):
     s = state[project["name"]]
     path = project["path"]
     resume = engine.resumable(s)
+    mode = setup_mode(project["name"])  # read on every run: a resume keeps the setup section
+    if mode:
+        setup.ensure_excluded(path)  # also for a resume or a baton, which skip pick's clean-tree pass
+    base = "resume.md" if resume else ("setup.md" if mode else "unit.md")
     # replace, not format: the prompts have JSON examples with braces.
-    prompt = (PROMPTS / ("resume.md" if resume else "unit.md")).read_text().replace("{project}", project["name"])
+    prompt = (PROMPTS / base).read_text().replace("{project}", project["name"])
     notes = PROMPTS / f"engine-{engine.name}.md"
     if notes.exists():
         prompt += "\n\n" + notes.read_text()
+    if mode:
+        prompt += "\n\n" + setup_section(mode, setup.read(HOME, project["name"]) or {}, setup.draft_files(path))
+    s["setup"] = mode  # after_unit moves the request by the mode the unit ran with
     messages = coord.pending_notes(project["name"])
     if messages:
         prompt += "\n\n" + owner_messages(messages)
@@ -858,6 +920,9 @@ def after_unit(cfg, engine, state, project, out, err, code, unit_file):
         s["notes_sent"] = []
     unit_status = result.get("status", "worked")
     summary = result.get("summary", "")
+    mode, s["setup"] = s.get("setup"), None
+    if mode:
+        unit_status, summary = finish_setup(cfg, project, s, mode, unit_status, summary)
     log(f"{project['name']}: {unit_status} — {result.get('unit', '?')}")
     if not backlog.valid_backlog(read_json(Path(project["path"]) / backlog.FILE)):
         log(f"{project['name']}: backlog.json missing or invalid; the panel has no progress for it")
@@ -917,9 +982,14 @@ def pick(cfg, engine, state, limits, next_project=None):
         if s.get("retry_at", 0) > now:
             waits.append(s["retry_at"] - now)
             continue
-        if s["status"] == "idle":
+        phase = setup.phase(HOME, name)
+        if phase == "review":
+            waits.append(600)  # the draft waits for the owner; the panel's answer wakes the nap
             continue
-        if s["status"] == "waiting":
+        setup_unit = phase in ("requested", "approved")  # a setup unit is not held by idle or waiting
+        if s["status"] == "idle" and not setup_unit:
+            continue
+        if s["status"] == "waiting" and not setup_unit:
             waits.append(max(60, next_deadline(p) - now))
             continue
         if s["status"] == "blocked":
@@ -930,6 +1000,8 @@ def pick(cfg, engine, state, limits, next_project=None):
         if coord.held_by_other(name, engine.name):
             waits.append(600)
             continue
+        if setup_unit:
+            setup.ensure_excluded(p["path"])  # before the clean-tree check: the draft must not dirty the tree
         if is_dirty(p["path"]):
             if not s["dirty_logged"]:
                 log(f"{name}: tree has changes that are not the autopilot's; skipping until it is clean")
@@ -1020,7 +1092,9 @@ def run_once(cfg, engine, state, win=None, now=None):
         return 600
     project, lock, wait = pick(
         cfg, engine, state, limits, next_project=ov.get("next") if isinstance(ov.get("next"), str) else None)
-    done = project is None and all(state[p["name"]]["status"] == "idle" for p in cfg["project"])
+    # A project waiting to be prepared is not finished, even if it was idle before the request.
+    done = project is None and all(state[p["name"]]["status"] == "idle" and setup.phase(HOME, p["name"]) not in setup.OPEN
+                                   for p in cfg["project"])
     # Announced once, and again only after some project left `idle`; never for an empty project list.
     announce = done and bool(cfg["project"]) and not state.get("_idle_notified")
     state["_idle_notified"] = done and bool(cfg["project"])

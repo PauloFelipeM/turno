@@ -57,6 +57,23 @@ class PromptsTest(unittest.TestCase):
         for state in ('"todo"', '"spec"', '"plan"', '"doing"', '"done"'):
             self.assertIn(state, unit)
 
+    def test_setup_prompt_has_both_modes(self):
+        text = (ROOT / "prompts" / "setup.md").read_text()
+        flat = " ".join(text.split())
+        self.assertTrue(text.startswith("Autopilot setup unit — project {project}."))
+        for s in ("## Draft unit", "## Apply unit", "`notes.md`", "at most 15 lines", "**Verification**",
+                  "**What this file overrides**", "`autopilot.md` → `docs/autopilot.md`", "`docs: prepare for turno`",
+                  "Do not push", "`.superpowers/`", "last-unit.json", "`waiting`", "`blocked`", "`planner`",
+                  "Do not write `backlog.json`"):
+            self.assertIn(s, flat)
+        for term in ("spawn allowlist", "list_agents"):
+            self.assertNotIn(term, text)
+
+    def test_resume_points_setup_units_to_their_instructions(self):
+        resume = " ".join((ROOT / "prompts" / "resume.md").read_text().split())
+        self.assertIn('"Setup unit" section', resume)
+        self.assertIn("not steps 3 to 8", resume)
+
 
 if __name__ == "__main__":
     unittest.main()
