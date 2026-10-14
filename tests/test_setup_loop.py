@@ -257,6 +257,65 @@ class SetupLoopTest(unittest.TestCase):
         self.assertEqual(self.pick(), "alpha")  # first in the queue, clean: no exclude call at all
         self.assertEqual(calls, [])
 
+    # baton, cancel during docker, empty review, dirty approved
+
+    def echo_and_close(self, status, files=()):
+        cmd = closer(self.unit_file("alpha"), status, files)
+        cmd[2] = f"import sys, pathlib; pathlib.Path({str(self.tmp / 'prompt.txt')!r}).write_text(sys.stdin.read())\n" + cmd[2]
+        return cmd
+
+    def test_a_draft_cut_at_the_window_end_is_resumed_as_a_draft_by_the_other_engine(self):
+        self.request("alpha")
+        self.state["alpha"].update(interrupted=True, session="s1", setup="draft", unit_id="u1")
+        self.ap.coord.claim("alpha", "codex")
+        self.ap.pass_baton(helpers.FakeEngine(TRUE, name="codex"), "alpha", self.state["alpha"])
+        self.assertEqual(self.ap.coord.read_claim("alpha")["setup"], "draft")
+        self.state["alpha"]["setup"] = None  # the other engine's own state knows nothing of it
+        engine = helpers.FakeEngine(self.echo_and_close("waiting"), name="claude")
+        engine.label = "Claude"
+        self.ap.run_project(self.cfg, engine, self.state, self.by_name["alpha"], self.limits, None)
+        self.assertIn("Setup unit — mode: draft.", (self.tmp / "prompt.txt").read_text())
+
+    def test_an_old_baton_without_the_mode_is_accepted(self):
+        self.ap.coord.hand_off("beta", "codex", "u2")
+        self.assertNotIn("setup", self.ap.coord.read_claim("beta"))
+
+    def test_a_request_cancelled_during_docker_does_not_run_a_normal_unit(self):
+        self.request("alpha")
+        self.state["alpha"]["status"] = "idle"
+
+        def docker(cfg, project):
+            self.setup.delete(self.tmp, "alpha")
+            return "ok"
+        self.ap.prepare_docker = docker
+        engine = helpers.FakeEngine(self.echo_and_close("worked"))
+        engine.label = "Fake"
+        self.ap.run_project(self.cfg, engine, self.state, self.by_name["alpha"], self.limits, None)
+        self.assertFalse(self.state["alpha"]["interrupted"])
+        self.assertEqual(self.state["alpha"]["status"], "idle")
+        self.assertIsNone(self.ap.coord.read_claim("alpha"))
+        self.assertFalse(self.unit_file("alpha").exists())
+
+    def test_a_stale_draft_file_does_not_reach_review(self):
+        self.request("alpha")
+        draft = self.root("alpha") / self.setup.DRAFT / "autopilot.md"
+        draft.parent.mkdir(parents=True)
+        draft.write_text("old")
+        import os
+        old = time.time() - 3600
+        os.utime(draft, (old, old))
+        self.run_and_close("alpha", closer(self.unit_file("alpha"), "waiting"))
+        self.assertEqual(self.phase("alpha"), "requested")
+        self.assertEqual(self.state["alpha"]["status"], "blocked")
+
+    def test_an_approved_project_with_a_dirty_tree_still_runs_its_apply_unit(self):
+        self.request("alpha", "approved")
+        (self.root("alpha") / "docs").mkdir()
+        (self.root("alpha") / "docs" / "autopilot.md").write_text("half applied")
+        self.assertEqual(self.pick(), "alpha")
+        self.setup.update(self.tmp, "alpha", lambda cur: {**cur, "status": "requested"})
+        self.assertEqual(self.pick(), "beta")  # a draft unit still waits for a clean tree
+
     # around the units
 
     def test_a_project_in_review_stays_waiting(self):

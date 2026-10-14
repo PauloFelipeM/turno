@@ -632,7 +632,13 @@ def finish_setup(cfg, project, s, mode, unit_status, summary):
     name, root = project["name"], Path(project["path"])
     if mode == "draft":
         frm, to = "requested", "review"
-        ok = unit_status in ("worked", "waiting") and (root / setup.DRAFT / "autopilot.md").is_file()
+        draft = root / setup.DRAFT / "autopilot.md"
+        requested_at = (setup.read(HOME, name) or {}).get("requested_at") or 0
+        try:  # a file left by an earlier draft does not count as this unit's result
+            fresh_draft = draft.is_file() and draft.stat().st_mtime > requested_at
+        except OSError:
+            fresh_draft = False
+        ok = unit_status in ("worked", "waiting") and fresh_draft
     else:
         frm, to = "approved", "done"
         ok = unit_status == "worked" and (root / "docs" / "autopilot.md").is_file()
@@ -764,8 +770,9 @@ def run_unit(cfg, engine, state, project, deadline=None):
     s = state[project["name"]]
     path = project["path"]
     resume = engine.resumable(s)
-    # A new unit takes its mode from the request now; a resume (or a baton) keeps the mode it started with,
-    # so a normal unit never turns into a setup one, nor a draft into a normal one, midway.
+    # A new unit takes its mode from the request now; a resume keeps the mode it started with (kept in the
+    # state; a baton carries it in the claim and run_project restores it), so a normal unit never turns
+    # into a setup one, nor a draft into a normal one, midway.
     mode = s.get("setup") if s["interrupted"] else setup_mode(project["name"])
     if mode:
         exclude_setup(project["name"], path)  # also for a resume or a baton, which skip pick's clean-tree pass
@@ -1019,7 +1026,7 @@ def pick(cfg, engine, state, limits, next_project=None):
             # Only for the project about to run: the draft must not count as someone else's changes.
             exclude_setup(name, p["path"])
             dirty = is_dirty(p["path"])
-        if dirty:
+        if dirty and phase != "approved":  # an apply unit decides for itself what a dirty tree means
             if not s["dirty_logged"]:
                 log(f"{name}: tree has changes that are not the autopilot's; skipping until it is clean")
                 s["dirty_logged"] = True
@@ -1045,7 +1052,7 @@ def pick(cfg, engine, state, limits, next_project=None):
 def pass_baton(engine, name, s):
     """End of the window: the work stays in the repository and the ledger, and any engine can resume it."""
     engine.close_unit(s)
-    coord.hand_off(name, engine.name, s.get("unit_id"))
+    coord.hand_off(name, engine.name, s.get("unit_id"), setup=s.get("setup"))
     s.update(interrupted=False, session=None, early_ends=0, errors=0, unit_id=None, retry_at=0)
 
 
@@ -1149,7 +1156,8 @@ def run_project(cfg, engine, state, project, limits, win):
     if handoff:
         log(f"{name}: taking the baton left by {current.get('handoff_from')}")
         engine.close_unit(s)
-        s.update(interrupted=True, session=None, early_ends=0, unit_id=current.get("unit_id"))
+        s.update(interrupted=True, session=None, early_ends=0, unit_id=current.get("unit_id"),
+                 setup=current.get("setup"))  # a baton keeps the mode of a setup unit
 
     docker = prepare_docker(cfg, project)
     if docker != "ok":
@@ -1166,6 +1174,11 @@ def run_project(cfg, engine, state, project, limits, win):
             return 5
         return 600
     state["_notify"]["docker_alerted"] = False
+    if fresh and s["status"] in ("idle", "waiting") and setup_mode(name) is None:
+        # Picked only for its setup request, which was cancelled meanwhile: a normal unit must not run.
+        coord.release(name, engine.name)
+        log(f"{name}: the setup request is gone; nothing started")
+        return 5
     if fresh:
         overrides.take_next(HOME, name)  # consumed only now that the unit really starts
     deadline = win.end_of(datetime.datetime.now()).timestamp() if win else None

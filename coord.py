@@ -90,16 +90,20 @@ def release(project, engine):
             _claim_path(project).unlink(missing_ok=True)
 
 
-def hand_off(project, engine, unit_id=None):
+def hand_off(project, engine, unit_id=None, setup=None):
     """Turns `engine`'s claim into a baton any engine can take.
 
-    The baton carries the unit id, so the history can join the runs of both engines.
+    The baton carries the unit id, so the history can join the runs of both engines, and the mode of a
+    setup unit ("draft" or "apply"), so the engine that takes it resumes it as one. Old batons have no mode.
     """
     with _claims_mutex():
         current = read_claim(project)
         if current and current.get("engine") not in (engine, ANY):
             return
-        _write_claim(project, {"engine": ANY, "handoff_from": engine, "unit_id": unit_id, "since": time.time()})
+        data = {"engine": ANY, "handoff_from": engine, "unit_id": unit_id, "since": time.time()}
+        if setup:
+            data["setup"] = setup
+        _write_claim(project, data)
 
 
 def is_handoff(project):
