@@ -76,8 +76,8 @@ An exception in `feed_items` becomes `unknown`: a new CLI format never brings th
 5. Test it against `tests/helpers.FakeEngine`'s shape, with a fake binary: never the real CLI.
 
 The panel's start/stop, the `--engine` choices and the settings screen follow `config.ENGINES`.
-Strings in `web/i18n/pt-BR.js` that name an engine (and the Claude-only window defaults) are still
-written per engine.
+Strings in `web/i18n/*.js` (every language) that name an engine (and the Claude-only window
+defaults) are still written per engine.
 
 ## What the protocol requires of a CLI
 

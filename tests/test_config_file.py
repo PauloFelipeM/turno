@@ -468,6 +468,12 @@ class LanguageAndNotifyTests(Base):
         self.assertTrue(config.notify_enabled({"server": "https://ntfy.sh"}))
         self.assertTrue(config.notify_enabled(None))
 
+    def test_example_config_shows_the_language_and_ntfy_keys(self):
+        example = json.loads((Path(__file__).resolve().parents[1] / "config.example.json").read_text())
+        self.assertEqual(example["language"], "pt-BR")
+        self.assertIs(example["notify"]["enabled"], True)
+        self.assertNotIn("topic", example["notify"])
+
     def test_import_switches_ntfy_on_only_with_a_topic(self):
         self.put("projects.toml")
         self.assertIs(config.load(self.home)["notify"]["enabled"], False)

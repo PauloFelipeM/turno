@@ -4,12 +4,12 @@ turno runs the Codex CLI and Claude Code unattended on several of your repositor
 quota of your ChatGPT and Claude subscriptions. It works through each project's backlog one short
 session at a time, following a fixed method: spec, then plan, then execution, with planner,
 reviewer and implementer subagents. Product decisions that matter reach your phone (ntfy) as a
-question with buttons. A local web panel shows what is running, what happened and how much of each
-backlog is left.
+question with buttons, or wait for you in the panel when you do not use ntfy. A local web panel
+shows what is running, what happened and how much of each backlog is left.
 
-> **Status:** early. It was built for one person's setup and is being generalized. Phone
-> notifications, decision questions and the panel are in Brazilian Portuguese for now; a language
-> setting is planned. Linux, macOS and Windows with WSL2 are the targets.
+> **Status:** early. It was built for one person's setup and is being generalized. Everything turno
+> and its agents write for you (panel, phone notifications, decisions, summaries) is in Brazilian
+> Portuguese or English (Settings → General). It runs on Linux, macOS and Windows with WSL2.
 
 ## How it works
 
@@ -40,8 +40,11 @@ ledgers live, how to verify work and the git policy. The protocol the orchestrat
 - Python 3.11 or newer (standard library only)
 - The Codex CLI and/or Claude Code, logged in with your subscription
 - tmux, to keep the loops running after you close the terminal
-- Docker, if your projects need it (turno brings each project's stack up before a unit)
-- The ntfy app on your phone, subscribed to a private topic
+- Docker, if your projects need it (turno brings each project's stack up before a unit; when
+  Docker is down it opens Docker Desktop on macOS and WSL, and on Linux it waits for you to start
+  the Docker service)
+- Optional: the ntfy app on your phone, subscribed to a private topic. Without it, decisions and
+  warnings wait for you in the panel
 
 ## Setup
 
@@ -57,7 +60,8 @@ cp secrets.example.toml ~/.turno/secrets.toml
 Edit `config.json` with your projects (in priority order) and their weekly caps, switch on the
 engines you use (`"enabled": true`) and replace the `topic` in `secrets.toml` with a random name
 only you know. Or start without a `config.json` and add the projects and engines in the panel's
-"⚙ Configurações" screen. Then:
+settings screen. Without a phone, skip `secrets.toml` and switch ntfy off in Settings → General,
+where you also pick the language. Then:
 
 ```bash
 python3 autopilot.py status   # check the config and the current quota
@@ -93,7 +97,8 @@ An invalid file never stops a loop: it keeps the last good configuration and log
 |---|---|
 | `projects` | Name, path, optional `docker_group` and `weekly_cap` per engine. The order is the priority for every engine |
 | `engines.<engine>` | `enabled`, orchestrator model and effort, `roles` (model and effort of `planner`, `implementer` and `reviewer`; the Settings screen edits them), `primary_cap`, `safety_factor`, initial costs, `blocked_cooldown_hours`, `schedule` (window) and, per engine, `max_subagents` (Codex) |
-| `notify` | ntfy server and the decision timeout. The topic stays in `secrets.toml` |
+| `language` | `pt-BR` (the default when the key is missing) or `en`: the panel, the phone texts and what the agents write for you. A change applies from the next turn (scheduler texts) and the next unit (agents); texts already written stay as they are |
+| `notify` | `enabled` (missing = on), the ntfy server and the decision timeout. The topic stays in `secrets.toml` |
 
 A project's name is never changed after it is created: state, claims, notes and history use it.
 `config.example.json` is a complete example.
@@ -139,7 +144,9 @@ When a decision is significant (user-facing behaviour, money, a data model that 
 legal matters, scope), the orchestrator writes it with two or three options and a default, and the
 project waits. You answer with the notification buttons or by typing the letter in the topic (`B`,
 or `myapp B` when several projects are waiting). Without an answer, the default applies at the
-deadline (`decision_timeout_hours`).
+deadline (`decision_timeout_hours`). Without ntfy (switched off, or on without a topic in
+`secrets.toml`) the question waits in the panel's "Precisa de você" strip; the deadline and the
+default still apply.
 
 Any other text you type in the topic becomes a message to the agents. It goes to the projects named
 in it (or to all of them) and is read by the next unit. A lasting instruction is recorded in the
@@ -167,7 +174,7 @@ It also controls the loops:
 | Interrupt (project card) | Pauses the project and stops its running unit (`SIGUSR1`); resume it to continue |
 | Project panel | A message to the agents, the project's caps and, while the project waits to retry, "Tentar agora" |
 | Preparar com um agente (settings, a project without `docs/autopilot.md`) | You write what the project should become; an agent drafts `docs/autopilot.md`, an `AGENTS.md` if missing and the initial backlog. The project panel shows the draft with "Aprovar", "Pedir mudanças" and "Cancelar preparo" |
-| "⚙ Configurações" screen | Projects: add, edit, reorder and remove (a project with an open unit, a claim or a running unit cannot be removed). Engines: on or off, orchestrator model and effort, caps, window, and a check that shows the CLI found, its version and the quota |
+| "⚙ Configurações" screen | Projects: add, edit, reorder and remove (a project with an open unit, a claim or a running unit cannot be removed). Engines: on or off, orchestrator model and effort, caps, window, and a check that shows the CLI found, its version and the quota. General: language, ntfy on or off, ntfy server and decision timeout, with a warning when ntfy is on but `secrets.toml` has no topic |
 
 The panel never edits state. It writes five kinds of file: the configuration, in `config.json`
 (projects, order, caps, engines; validated before it replaces the file); its requests to the loops,
@@ -185,8 +192,9 @@ Two things an ordinary click does not do:
   until its time comes. Only a reset clears it: "Reativar" in the strip, "Tentar agora" in the
   project panel, or `autopilot.py reset <project>`.
 - **It does not interrupt a loop started by an older version.** Interrupt needs a loop that handles
-  `SIGUSR1`; the panel checks first, and if the loop does not, it refuses and asks you to stop and
-  start that loop again. Nothing is paused or signalled in that case.
+  `SIGUSR1`; the panel checks first (in `/proc` on Linux and WSL, in the loop's
+  `shared/instance-<engine>.json` on macOS), and if the loop does not, it refuses and asks you to
+  stop and start that loop again. Nothing is paused or signalled in that case.
 
 ## Preparing a new project
 

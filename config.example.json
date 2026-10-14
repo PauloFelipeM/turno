@@ -1,5 +1,6 @@
 {
   "version": 1,
+  "language": "pt-BR",
   "projects": [
     {"name": "my-app", "path": "/home/me/projects/my-app", "docker_group": "web",
      "weekly_cap": {"codex": 95, "claude": 90}},
@@ -34,5 +35,5 @@
       "schedule": {"start": "fri 19:00", "end": "sun 03:00", "start_margin_minutes": 15}
     }
   },
-  "notify": {"server": "https://ntfy.sh", "decision_timeout_hours": 4}
+  "notify": {"enabled": true, "server": "https://ntfy.sh", "decision_timeout_hours": 4}
 }
