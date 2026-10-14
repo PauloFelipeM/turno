@@ -1,0 +1,44 @@
+# Codex instance. The order of the [[project]] entries is the priority.
+#
+# weekly_cap: up to what % of the weekly usage window the project may still START a new unit.
+# Lower-priority projects stop earlier and leave the remaining quota to the ones above.
+# docker_group: projects in the same group never have their stacks up at the same time
+# (use it when two projects bind the same ports).
+
+[defaults]
+orchestrator_model = "gpt-6-sol"
+orchestrator_effort = "medium"
+max_subagents = 2
+# A unit only starts if the window has room for safety_factor x the learned average cost.
+safety_factor = 1.5
+# Cap of the 5-hour window, in %, for any project.
+primary_cap = 100
+# Initial estimated cost per unit (percentage points), until the scheduler learns the real one.
+initial_cost_primary = 8.0
+initial_cost_secondary = 1.5
+# A project that ended "blocked" is only tried again after this interval.
+blocked_cooldown_hours = 6
+
+[notify]
+# Free push via ntfy.sh. The topic lives in secrets.toml (see secrets.example.toml), outside git;
+# subscribe to it in the ntfy phone app. Answers arrive on <topic>-reply.
+server = "https://ntfy.sh"
+# How long a project waits for your answer before applying the default option.
+decision_timeout_hours = 4
+
+[[project]]
+name = "my-app"
+path = "/home/me/projects/my-app"
+weekly_cap = 95
+docker_group = "web"
+
+[[project]]
+name = "my-api"
+path = "/home/me/projects/my-api"
+weekly_cap = 85
+
+[[project]]
+name = "side-project"
+path = "/home/me/projects/side-project"
+weekly_cap = 60
+docker_group = "web"
