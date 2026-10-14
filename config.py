@@ -60,22 +60,38 @@ def _text(v):
     return isinstance(v, str) and bool(v.strip())
 
 
+NAME = re.compile(r"[A-Za-z0-9_-]+")
+# Files in shared/ that a project or group lock (`shared/<name>.lock`) would collide with.
+RESERVED = ("claims", "config", "decisions", "overrides", "notify", "notes")
+
+
+def _reserved(name):
+    low = name.lower()
+    return low in RESERVED or low.startswith("instance-")
+
+
 def _validate_project(i, p, names, problems):
     where = f"projects[{i}]"
     if not isinstance(p, dict):
         problems.append(f"{where} must be an object")
         return
     name = p.get("name")
-    if not isinstance(name, str) or not re.fullmatch(r"[A-Za-z0-9_-]+", name):
+    if not isinstance(name, str) or not NAME.fullmatch(name):
         problems.append(f"{where}.name must match [A-Za-z0-9_-]+")
+    elif _reserved(name):
+        problems.append(f"{where}.name {name!r} is reserved: it would collide with a file in shared/")
     elif name in names:
         problems.append(f"{where}.name {name!r} is duplicated")
     else:
         names.add(name)
     if not _text(p.get("path")):
         problems.append(f"{where}.path must be a non-empty string")
-    if "docker_group" in p and not _text(p["docker_group"]):
-        problems.append(f"{where}.docker_group must be a non-empty string")
+    if "docker_group" in p:
+        group = p["docker_group"]
+        if not isinstance(group, str) or not NAME.fullmatch(group):
+            problems.append(f"{where}.docker_group must match [A-Za-z0-9_-]+")
+        elif _reserved(group):
+            problems.append(f"{where}.docker_group {group!r} is reserved: it would collide with a file in shared/")
     if "weekly_cap" in p:
         caps = p["weekly_cap"]
         if not isinstance(caps, dict):
@@ -185,6 +201,8 @@ def _read_file(home):
         text = _path(home).read_text()
     except FileNotFoundError:
         return None
+    except UnicodeDecodeError as e:
+        raise ConfigError([f"{FILE} is not valid UTF-8 text: {e}"]) from e
     try:
         data = json.loads(text)
     except ValueError as e:
@@ -198,8 +216,23 @@ def _read_file(home):
 def _write(home, data):
     path = _path(home)
     tmp = path.with_name(f"{FILE}.{os.getpid()}.tmp")
-    tmp.write_text(json.dumps(data, indent=2, ensure_ascii=False))
-    tmp.replace(path)
+    try:
+        with open(tmp, "w") as f:
+            f.write(json.dumps(data, indent=2, ensure_ascii=False))
+            f.flush()
+            os.fsync(f.fileno())
+        tmp.replace(path)
+    except BaseException:
+        tmp.unlink(missing_ok=True)
+        raise
+    try:
+        fd = os.open(path.parent, os.O_RDONLY)
+        try:
+            os.fsync(fd)
+        finally:
+            os.close(fd)
+    except OSError:
+        pass
 
 
 def _load_locked(home):
@@ -268,8 +301,11 @@ def _toml(home, name):
     path = Path(home) / name
     if not path.exists():
         return None
-    with open(path, "rb") as f:
-        return tomllib.load(f)
+    try:
+        with open(path, "rb") as f:
+            return tomllib.load(f)
+    except (tomllib.TOMLDecodeError, UnicodeDecodeError) as e:
+        raise ConfigError([f"{name} could not be imported: {e}"]) from e
 
 
 def import_toml(home):

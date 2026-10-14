@@ -66,8 +66,23 @@ class PanelTest(unittest.TestCase):
         self.addCleanup(proc.wait)
         self.addCleanup(proc.kill)
         (self.home / "shared" / f"instance-{kind}.lock").write_text(str(proc.pid))
-        time.sleep(0.2)
+        deadline = time.monotonic() + 5
+        while self.panel.loop_pid(self.home, kind) is None and time.monotonic() < deadline:
+            time.sleep(0.01)
         return proc
+
+    def test_unreadable_config_keeps_the_overview_alive(self):
+        (self.home / "config.json").write_bytes(b"\xff\xfe\x80")
+        o = self.overview()
+        self.assertEqual(o["engines"], [])
+        self.assertEqual([e["error"] for e in o["errors"]], ["config"])
+
+    def test_invalid_toml_import_keeps_the_overview_alive(self):
+        (self.home / "config.json").unlink()
+        (self.home / "projects.toml").write_text("[[project\n")
+        o = self.overview()
+        self.assertEqual(o["engines"], [])
+        self.assertEqual([e["error"] for e in o["errors"]], ["config"])
 
     def test_instances_come_from_the_config_file(self):
         found = self.panel.instances(self.home)

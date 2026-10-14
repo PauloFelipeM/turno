@@ -80,6 +80,31 @@ class ValidateTests(Base):
             with self.subTest(label):
                 self.assertTrue(config.validate(data), label)
 
+    def test_reserved_names_are_refused_as_project_name_and_as_group(self):
+        for reserved in ("claims", "config", "decisions", "overrides", "notify", "notes", "instance-codex",
+                         "Claims", "CONFIG", "Instance-x"):
+            for field in ("name", "docker_group"):
+                with self.subTest(reserved=reserved, field=field):
+                    project = {"name": "a", "path": "/x"}
+                    project[field] = reserved
+                    d = config.empty()
+                    d["projects"] = [project]
+                    problems = config.validate(d)
+                    self.assertTrue(any("reserved" in m for m in problems), problems)
+
+    def test_docker_group_must_be_a_plain_name(self):
+        for group in ("../x", "../../x", "a/b", "a b", ".."):
+            with self.subTest(group=group):
+                d = config.empty()
+                d["projects"] = [{"name": "a", "path": "/x", "docker_group": group}]
+                self.assertTrue(any("docker_group must match" in m for m in config.validate(d)))
+
+    def test_current_names_stay_valid(self):
+        d = config.empty()
+        d["projects"] = [{"name": n, "path": "/x/" + n, "docker_group": "web"}
+                         for n in ("my-app", "my-api", "side-project", "my-app", "claims2")]
+        self.assertEqual(config.validate(d), [])
+
     def test_unknown_keys_allowed(self):
         d = config.empty()
         d["future"] = 1
@@ -198,6 +223,50 @@ class LoadTests(Base):
                 config.load(self.home)
             self.assertTrue(cm.exception.problems)
             self.assertIsInstance(cm.exception, ValueError)
+
+
+class BrokenFileTests(Base):
+    def test_non_utf8_config_json_is_a_config_error_naming_the_file(self):
+        (self.home / config.FILE).write_bytes(b"\xff\xfe\x80 not utf-8")
+        with self.assertRaises(config.ConfigError) as cm:
+            config.load(self.home)
+        self.assertIn("config.json", str(cm.exception))
+
+    def test_invalid_toml_import_is_a_config_error_naming_the_file(self):
+        (self.home / "projects.toml").write_text("[[project\nname = ")
+        with self.assertRaises(config.ConfigError) as cm:
+            config.load(self.home)
+        self.assertIn("projects.toml", str(cm.exception))
+        self.assertFalse((self.home / config.FILE).exists())
+
+    def test_invalid_claude_toml_names_claude_toml(self):
+        self.put("projects.toml")
+        (self.home / "claude.toml").write_bytes(b"\xff\xfe\x80")
+        with self.assertRaises(config.ConfigError) as cm:
+            config.load(self.home)
+        self.assertIn("claude.toml", str(cm.exception))
+
+    def test_write_failure_leaves_no_tmp_and_the_original(self):
+        config.save(self.home, lambda d: None)  # creates the file
+        (self.home / config.FILE).write_text(json.dumps(config.empty()))
+        before = (self.home / config.FILE).read_bytes()
+        from unittest import mock
+        with mock.patch.object(config.os, "fsync", side_effect=OSError("disk full")):
+            with self.assertRaises(OSError):
+                config.save(self.home, lambda d: d["notify"].update(decision_timeout_hours=9))
+        self.assertEqual(list(self.home.glob("*.tmp")), [])
+        self.assertEqual((self.home / config.FILE).read_bytes(), before)
+
+    def test_write_fsyncs_the_file_before_replace(self):
+        from unittest import mock
+        calls = []
+        real_replace = Path.replace
+        with mock.patch.object(config.os, "fsync", side_effect=lambda fd: calls.append("fsync")), \
+                mock.patch.object(Path, "replace", lambda self, t: (calls.append("replace"), real_replace(self, t))[1]):
+            config.save(self.home, lambda d: None)
+        self.assertEqual(calls[0], "fsync")
+        self.assertLess(calls.index("fsync"), calls.index("replace"))
+        self.assertEqual(calls.count("fsync"), 2)  # the file, then the directory
 
 
 class SaveTests(Base):
