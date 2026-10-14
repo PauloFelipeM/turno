@@ -4,6 +4,8 @@ import re
 import unittest
 from pathlib import Path
 
+OLD_ROLE = "plan" + "-reviewer"  # the removed role, spelled so a grep for it stays clean
+
 WEB = Path(__file__).resolve().parents[1] / "web"
 
 
@@ -60,7 +62,7 @@ class WebTextsTest(unittest.TestCase):
         for text in ('role: "Papel"', 'orchestrator: "Orquestrador"', 'planner: "Planejador"',
                      'implementer: "Implementador"', 'reviewer: "Revisor"', 'fableHint: "O teto do Fable só vale para papéis no Fable."'):
             self.assertIn(text, settings)
-        self.assertNotIn("plan-reviewer", self.i18n + self.app)
+        self.assertNotIn(OLD_ROLE, self.i18n + self.app)
         self.assertIn('const ROLES = ["planner", "implementer", "reviewer"]', self.app)
         self.assertIn('"xhigh"', self.app)
         self.assertIn("known_models", self.app)

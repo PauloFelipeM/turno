@@ -12,6 +12,8 @@ from unittest import mock
 
 import helpers
 
+OLD_ROLE = "plan" + "-reviewer"  # the removed role, spelled so a grep for it stays clean
+
 CLI = {"found": True, "path": "/bin/fake", "version": "1.0"}
 
 
@@ -223,7 +225,7 @@ class ConfigApiTest(unittest.TestCase):
     def test_put_engine_roles_errors_leave_the_file_alone(self):
         before = self.raw()
         bad = [{"roles": []}, {"roles": "x"}, {"roles": {"orchestrator": {"model": "m"}}},
-               {"roles": {"plan-reviewer": {"model": "m"}}}, {"roles": {"planner": "x"}},
+               {"roles": {OLD_ROLE: {"model": "m"}}}, {"roles": {"planner": "x"}},
                {"roles": {"planner": {"model": ""}}}, {"roles": {"planner": {"model": "a b"}}},
                {"roles": {"planner": {"effort": ""}}}, {"roles": {"planner": {"colour": "red"}}}]
         for b in bad:

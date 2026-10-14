@@ -13,6 +13,7 @@ import helpers  # noqa: E402  (sets sys.path to the repo root)
 import config  # noqa: E402
 import overrides  # noqa: E402
 
+OLD_ROLE = "plan" + "-reviewer"  # the removed role, spelled so a grep for it stays clean
 FIX = Path(__file__).resolve().parent / "fixtures"
 
 
@@ -45,6 +46,12 @@ class RolesTests(Base):
             self.assertEqual({r: (v["model"], v["effort"]) for r, v in got.items()}, roles)
         self.assertEqual(config.ENGINE_DEFAULTS["claude"]["orchestrator_model"], "claude-sonnet-5-5")
         self.assertEqual(config.ENGINE_DEFAULTS["codex"]["orchestrator_model"], "gpt-6-sol")
+
+    def test_example_config_is_valid_and_has_the_default_roles(self):
+        example = json.loads((Path(__file__).resolve().parents[1] / "config.example.json").read_text())
+        self.assertEqual(config.validate(example), [])
+        for engine in config.ENGINES:
+            self.assertEqual(example["engines"][engine]["roles"], config.ENGINE_DEFAULTS[engine]["roles"])
 
     def test_known_models(self):
         self.assertEqual(config.KNOWN_MODELS["claude"],
@@ -128,7 +135,7 @@ class ValidateTests(Base):
                 schedule={"start": "fri 19:00", "end": "sun 03:00", "start_margin_minutes": -1})),
             "roles type": mut(lambda d: d["engines"]["codex"].update(roles=[])),
             "role unknown": mut(lambda d: d["engines"]["codex"]["roles"].update(orchestrator={"model": "m"})),
-            "role old": mut(lambda d: d["engines"]["claude"]["roles"].update(**{"plan-reviewer": {"model": "m"}})),
+            "role old": mut(lambda d: d["engines"]["claude"]["roles"].update(**{OLD_ROLE: {"model": "m"}})),
             "role type": mut(lambda d: d["engines"]["codex"]["roles"].update(planner="x")),
             "role field": mut(lambda d: d["engines"]["codex"]["roles"]["planner"].update(colour="red")),
             "role model empty": mut(lambda d: d["engines"]["codex"]["roles"]["planner"].update(model="")),

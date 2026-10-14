@@ -85,7 +85,7 @@ written per engine.
 |---|---|
 | **Non-interactive mode** that takes the prompt on stdin, runs the whole unit and exits with a code | The loop starts one process per run and waits for it. Codex: `codex exec ... -`. Claude: `claude -p` |
 | **No permission prompts** | Nobody is there to answer. Both engines run with their "bypass" flag; the protocol's fixed rules (`prompts/unit.md`, step 7) are what keep it safe |
-| **Subagents with the four roles** (`planner`, `plan-reviewer`, `implementer`, `reviewer`) | The method delegates planning, review and implementation. Codex reads `~/.codex/agents/*.toml`; Claude gets `claude-agents.json` through `--agents` |
+| **Subagents with the three roles** (`planner`, `implementer`, `reviewer`), each with its own model and effort | The method delegates planning, review and implementation; the orchestrator checks the plan itself. Model and effort per role come from `engines.<engine>.roles` in `config.json`. Codex: turno writes `$CODEX_HOME/agents/<role>.toml` from the templates in `codex-agents/` before each unit. Claude: `claude-agents.json` (prompts only) plus the configured model and effort go through `--agents` |
 | **A session that can be resumed** by id | A unit cut, interrupted or ended early continues in the same session. When the session does not resume, the loop restarts from the ledger in a new one |
 | **JSONL on stdout** (one JSON event per line) | The panel's live feed reads it; `after_run` and `classify` read it too. Codex: `--json`. Claude: `--output-format stream-json --verbose` |
 | **A way to tell usage exhaustion from an error**, in the output or the exit code | `classify` must return `usage_limit` with the reset time when it can: the wait ends at the reset, not after a guess |

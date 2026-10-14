@@ -12,13 +12,23 @@
     "codex": {
       "enabled": true,
       "orchestrator_model": "gpt-6-sol", "orchestrator_effort": "medium", "max_subagents": 2,
+      "roles": {
+        "planner": {"model": "gpt-6-astra", "effort": "xhigh"},
+        "implementer": {"model": "gpt-6-sol", "effort": "medium"},
+        "reviewer": {"model": "gpt-6-astra", "effort": "high"}
+      },
       "safety_factor": 1.5, "primary_cap": 100,
       "initial_cost_primary": 8.0, "initial_cost_secondary": 1.5, "blocked_cooldown_hours": 6,
       "schedule": null
     },
     "claude": {
       "enabled": false,
-      "orchestrator_model": "claude-opus-5-5", "orchestrator_effort": "medium", "fable_cap": 80,
+      "orchestrator_model": "claude-sonnet-5-5", "orchestrator_effort": "medium", "fable_cap": 80,
+      "roles": {
+        "planner": {"model": "claude-opus-5-5", "effort": "high"},
+        "implementer": {"model": "claude-sonnet-5-5", "effort": "medium"},
+        "reviewer": {"model": "claude-opus-5-5", "effort": "high"}
+      },
       "safety_factor": 1.5, "primary_cap": 100,
       "initial_cost_primary": 8.0, "initial_cost_secondary": 1.5, "blocked_cooldown_hours": 6,
       "schedule": {"start": "fri 19:00", "end": "sun 03:00", "start_margin_minutes": 15}

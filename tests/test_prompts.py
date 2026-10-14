@@ -3,6 +3,8 @@ import unittest
 
 import helpers
 
+OLD_ROLE = "plan" + "-reviewer"  # the removed role, spelled so a grep for it stays clean
+
 ROOT = helpers.ROOT
 
 
@@ -30,7 +32,7 @@ class PromptsTest(unittest.TestCase):
     def test_no_plan_reviewer_in_the_protocol(self):
         files = [*(ROOT / "prompts").glob("*.md"), ROOT / "claude-agents.json", *(ROOT / "codex-agents").glob("*.toml")]
         for path in files:
-            self.assertNotIn("plan-reviewer", path.read_text(), path.name)
+            self.assertNotIn(OLD_ROLE, path.read_text(), path.name)
 
     def test_unit_checks_the_plan_itself(self):
         unit = (ROOT / "prompts" / "unit.md").read_text()

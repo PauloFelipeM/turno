@@ -10,6 +10,8 @@ from unittest import mock
 
 import helpers
 
+OLD_ROLE = "plan" + "-reviewer"  # the removed role, spelled so a grep for it stays clean
+
 CODEX_SNAP = {"limit_id": "codex", "primary": {"used_percent": 99.0, "resets_at": 0},
               "secondary": {"used_percent": 50.0, "resets_at": 0}}
 PREMIUM_SNAP = {"limit_id": "premium", "primary": None, "secondary": None}
@@ -86,7 +88,7 @@ class CodexRolesTest(unittest.TestCase):
         for name in names:
             text = (self.engines.CODEX_AGENTS / name).read_text()
             self.assertNotIn("model", text.split("developer_instructions")[0])
-            self.assertNotIn("plan-reviewer", text)
+            self.assertNotIn(OLD_ROLE, text)
 
     def test_command_writes_the_roles_from_the_config(self):
         self.command()
@@ -110,10 +112,10 @@ class CodexRolesTest(unittest.TestCase):
 
     def test_other_files_are_left_alone(self):
         self.agents.mkdir(parents=True)
-        (self.agents / "plan-reviewer.toml").write_text("old\n")
+        (self.agents / f"{OLD_ROLE}.toml").write_text("old\n")
         (self.agents / "mine.toml").write_text("mine\n")
         self.command()
-        self.assertEqual((self.agents / "plan-reviewer.toml").read_text(), "old\n")
+        self.assertEqual((self.agents / f"{OLD_ROLE}.toml").read_text(), "old\n")
         self.assertEqual((self.agents / "mine.toml").read_text(), "mine\n")
 
     def test_write_failure_is_logged_and_the_unit_still_runs(self):
