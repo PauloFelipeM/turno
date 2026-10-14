@@ -574,6 +574,21 @@ def compose(path, *args):
 
 
 DOCKER_DESKTOP = Path("/mnt/c/Program Files/Docker/Docker/Docker Desktop.exe")
+DOCKER_START_SECONDS = 180  # how long a Docker Desktop that was just opened has to answer
+DOCKER_POLL_SECONDS = 10
+PROC = Path("/proc")  # the tests point it at a fake folder
+
+
+def platform_kind():
+    """"wsl", "macos" or "linux": what to do when Docker is down."""
+    if os.environ.get("WSL_DISTRO_NAME"):
+        return "wsl"
+    try:
+        if "microsoft" in (PROC / "version").read_text().lower():
+            return "wsl"
+    except OSError:
+        pass
+    return "macos" if sys.platform == "darwin" else "linux"
 
 
 def docker_up():
@@ -581,17 +596,32 @@ def docker_up():
 
 
 def ensure_docker(cfg):
-    """Makes sure the Docker daemon is up; opens Windows Docker Desktop if it is closed."""
+    """Makes sure the Docker daemon is up.
+
+    WSL opens Windows Docker Desktop and macOS opens Docker Desktop (`open -a Docker`), then both wait
+    for it. On Linux turno starts nothing (the daemon is a system service): it logs and the caller waits.
+    """
     if docker_up():
         return True
-    if DOCKER_DESKTOP.exists():
-        log("Docker is down; opening Docker Desktop")
-        subprocess.Popen([str(DOCKER_DESKTOP)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        for _ in range(18):
-            time.sleep(10)
-            if docker_up():
-                log("Docker is up")
-                return True
+    kind = platform_kind()
+    if kind == "linux":
+        log("Docker is down; turno does not start it on Linux (start the Docker service)")
+        return False
+    if kind == "wsl" and not DOCKER_DESKTOP.exists():
+        return False
+    cmd = [str(DOCKER_DESKTOP)] if kind == "wsl" else ["open", "-a", "Docker"]
+    log("Docker is down; opening Docker Desktop")
+    try:
+        subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    except OSError as e:
+        log(f"could not open Docker Desktop: {e}")
+        return False
+    deadline = time.monotonic() + DOCKER_START_SECONDS
+    while time.monotonic() < deadline:
+        time.sleep(DOCKER_POLL_SECONDS)
+        if docker_up():
+            log("Docker is up")
+            return True
     return False
 
 
@@ -1290,9 +1320,13 @@ def cmd_run(args):
         ntfy(cfg, say(cfg, "conflict_title", engine=engine.label), say(cfg, "conflict_body", project=name),
              priority=4, tags=["warning"])
     save_state(state)
-    while True:
-        cfg, wait = loop_turn(cfg, engine, state)
-        nap(cfg, state, wait)
+    write_instance_info(engine.name)
+    try:
+        while True:
+            cfg, wait = loop_turn(cfg, engine, state)
+            nap(cfg, state, wait)
+    finally:  # Ctrl+C, stop and a crash all leave through here (sys.exit raises SystemExit)
+        remove_instance_info(engine.name)
 
 
 def status_lines(cfg, engine, state, limits, win, now):
@@ -1361,6 +1395,36 @@ def instance_lock(name):
     return handle
 
 
+def instance_info_name(name):
+    return f"instance-{name}.json"
+
+
+def write_instance_info(name):
+    """`shared/instance-<engine>.json`: tells the panel, where /proc is missing (macOS), that this pid
+    handles SIGUSR1. Written atomically; a failure is logged and never stops the loop."""
+    try:
+        path = coord.shared_dir() / instance_info_name(name)
+        tmp = path.with_name(f"{path.name}.{os.getpid()}.tmp")
+        try:
+            tmp.write_text(json.dumps({"pid": os.getpid(), "sigusr1": True, "started_at": time.time()}))
+            tmp.replace(path)
+        finally:
+            tmp.unlink(missing_ok=True)
+    except OSError as e:
+        log(f"could not write {instance_info_name(name)}: {e}; where /proc is missing the panel cannot interrupt this loop")
+
+
+def remove_instance_info(name):
+    """Removes the file at the loop's exit, unless it belongs to another pid."""
+    try:
+        path = coord.shared_dir() / instance_info_name(name)
+        info = json.loads(path.read_text())
+        if isinstance(info, dict) and info.get("pid") == os.getpid():
+            path.unlink()
+    except (OSError, ValueError):
+        pass
+
+
 def running_pid(name):
     """The engine loop's pid if it is running; None if the lock is free."""
     handle = coord.try_lock(f"instance-{name}")
@@ -1400,17 +1464,31 @@ def is_loop(argv, engine):
     return given == engine
 
 
+def process_table():
+    """(pid, argv) of the running processes: from /proc, or from `ps` where /proc has no process
+    folders (macOS). `ps` gives the command line as one string, split on spaces here."""
+    procs = list(PROC.glob("[0-9]*"))
+    if procs:
+        for proc in procs:
+            try:
+                argv = (proc / "cmdline").read_bytes().decode(errors="replace").split("\0")[:-1]
+            except OSError:
+                continue
+            yield int(proc.name), argv
+        return
+    try:
+        out = subprocess.run(["ps", "-axo", "pid=,command="], capture_output=True, text=True, timeout=10).stdout
+    except (OSError, subprocess.SubprocessError):
+        return
+    for line in out.splitlines():
+        pid, _, command = line.strip().partition(" ")
+        if pid.isdigit():
+            yield int(pid), command.split()
+
+
 def loop_pids(engine):
     """Loops of this engine already running, including those started the old way (`--config`)."""
-    pids = []
-    for proc in Path("/proc").glob("[0-9]*"):
-        try:
-            argv = (proc / "cmdline").read_bytes().decode(errors="replace").split("\0")[:-1]
-        except OSError:
-            continue
-        if int(proc.name) != os.getpid() and is_loop(argv, engine):
-            pids.append(int(proc.name))
-    return pids
+    return [pid for pid, argv in process_table() if pid != os.getpid() and is_loop(argv, engine)]
 
 
 def tmux(*args):

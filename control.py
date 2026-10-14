@@ -25,6 +25,7 @@ import panel
 import repo_setup as setup
 
 MAX_BODY = 64 * 1024
+PROC = Path("/proc")  # the tests point it at a missing folder to play macOS
 LOCK_WAIT = 5.0  # seconds answering a decision waits for shared/decisions.lock
 
 
@@ -126,21 +127,22 @@ def project_action(home, name, action):
     return 200, {"ok": True}
 
 
-def _running_pid(home, name):
+def _running(home, name):
+    """(pid, engine) of the loop running a unit on the project; (None, None) when there is none."""
     for inst in panel.configured(home):
         state = panel.read_json(inst["state"]) or {}
         loop = _dict(state.get("_loop"))
         if loop.get("phase") == "running" and loop.get("project") == name:
             pid = panel.loop_pid(home, inst["engine"])
             if pid:
-                return pid
-    return None
+                return pid, inst["engine"]
+    return None, None
 
 
 def _caught_signals(pid):
     """The mask of signals the process has a handler for (`SigCgt` in /proc/<pid>/status); None if unknown."""
     try:
-        for line in Path(f"/proc/{pid}/status").read_text().splitlines():
+        for line in (PROC / str(pid) / "status").read_text().splitlines():
             if line.startswith("SigCgt:"):
                 return int(line.split()[1], 16)
     except (OSError, ValueError, IndexError):
@@ -148,23 +150,30 @@ def _caught_signals(pid):
     return None
 
 
-def _handles_sigusr1(pid):
-    """Whether SIGUSR1 reaches a handler. Without one the signal's default action would end the loop."""
-    mask = _caught_signals(pid)
-    return mask is not None and bool(mask & (1 << (signal.SIGUSR1 - 1)))
+def _handles_sigusr1(home, engine, pid):
+    """Whether SIGUSR1 reaches a handler. Without one the signal's default action would end the loop.
+
+    With /proc the kernel's mask decides. Without it (macOS) the loop's own word does: the
+    `shared/instance-<engine>.json` it writes at startup, for this very pid. A loop from before that
+    file existed has none and is refused, as before."""
+    if (PROC / "self" / "status").exists():
+        mask = _caught_signals(pid)
+        return mask is not None and bool(mask & (1 << (signal.SIGUSR1 - 1)))
+    info = panel.read_json(Path(home) / "shared" / f"instance-{engine}.json")
+    return bool(info) and info.get("pid") == pid and info.get("sigusr1") is True
 
 
 def interrupt(home, name):
-    pid = _running_pid(home, name)
+    pid, engine = _running(home, name)
     if not pid:
         raise ApiError(409, "not_running", "no unit is running on this project")
-    if not _handles_sigusr1(pid):
+    if not _handles_sigusr1(home, engine, pid):
         # A loop started before this control existed (or one whose handlers cannot be read).
         raise ApiError(409, "restart_needed",
                        "this loop cannot take the interrupt request; stop and start it again first")
     _set_project(home, name, paused=True)  # before the signal: the loop must not pick the project again
-    pid = _running_pid(home, name)  # both checks are repeated right before the signal
-    if pid and _handles_sigusr1(pid):
+    pid, engine = _running(home, name)  # both checks are repeated right before the signal
+    if pid and _handles_sigusr1(home, engine, pid):
         try:
             os.kill(pid, signal.SIGUSR1)
         except ProcessLookupError:

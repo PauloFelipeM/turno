@@ -331,5 +331,61 @@ class ControlApiTest(unittest.TestCase):
         self.assertEqual(self.ov(), {})
 
 
+    # interrupt where /proc is missing (macOS)
+
+    def no_proc(self):
+        patch = mock.patch.object(self.control, "PROC", self.home / "no-proc")
+        patch.start()
+        self.addCleanup(patch.stop)
+
+    def instance_file(self, kind, **info):
+        (self.home / "shared" / f"instance-{kind}.json").write_text(json.dumps({"sigusr1": True, "started_at": 1, **info}))
+
+    def running_on_my-app(self):
+        (self.home / "state.json").write_text(json.dumps({"_loop": {"phase": "running", "project": "my-app"}}))
+
+    def test_interrupt_without_proc_trusts_the_loops_instance_file(self):
+        proc, marker = self.start_loop("codex", handler=True)
+        self.running_on_my-app()
+        self.instance_file("codex", pid=proc.pid)
+        self.no_proc()
+        self.assertEqual(self.post("/api/projects/my-app/interrupt")[0], 202)
+        self.assertTrue(self.ov()["projects"]["my-app"]["paused"])
+        for _ in range(50):
+            if marker.exists():
+                break
+            time.sleep(0.1)
+        self.assertTrue(marker.exists())
+
+    def test_interrupt_without_proc_refuses_a_loop_without_the_file(self):
+        proc, marker = self.start_loop("codex", handler=True)  # started by a version that does not write it
+        self.running_on_my-app()
+        self.no_proc()
+        status, body = self.post("/api/projects/my-app/interrupt")
+        self.assertEqual((status, body["error"]), (409, "restart_needed"))
+        self.assertEqual(self.ov(), {})
+        self.assertFalse(marker.exists())
+
+    def test_interrupt_without_proc_refuses_a_file_that_does_not_match(self):
+        proc, marker = self.start_loop("codex", handler=True)
+        self.running_on_my-app()
+        self.no_proc()
+        for info in ({"pid": proc.pid + 1}, {"pid": proc.pid, "sigusr1": False}, {"pid": str(proc.pid)}):
+            self.instance_file("codex", **info)
+            self.assertEqual(self.post("/api/projects/my-app/interrupt")[0], 409, info)
+        (self.home / "shared" / "instance-codex.json").write_text("not json")
+        self.assertEqual(self.post("/api/projects/my-app/interrupt")[0], 409)
+        self.assertEqual(self.ov(), {})
+
+    def test_with_proc_the_kernel_mask_wins_over_the_file(self):
+        proc, marker = self.start_loop("codex")  # no handler: SIGUSR1 would kill it
+        self.running_on_my-app()
+        self.instance_file("codex", pid=proc.pid)
+        status, body = self.post("/api/projects/my-app/interrupt")
+        self.assertEqual((status, body["error"]), (409, "restart_needed"))
+        time.sleep(0.3)
+        self.assertIsNone(proc.poll())
+
+
 if __name__ == "__main__":
     unittest.main()
