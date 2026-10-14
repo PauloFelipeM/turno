@@ -23,8 +23,8 @@ backlog is left.
   are in priority order; a project that does not fit does not hold up a cheaper one.
 - **Nothing left half-done.** An interrupted unit (usage limit, error, end of a time window) is
   resumed before anything else, once its wait is over: after an error or a usage limit the project
-  rests for a while (longer after repeated errors, until the reset after a usage limit), and
-  nothing you click in the panel shortens that.
+  rests for a while (longer after repeated errors, until the reset after a usage limit). Only an
+  explicit reset ends that wait early.
 - **Two engines.** One instance runs Codex, another runs Claude Code (by default only on weekends).
   They never work on the same project, or on two projects that share Docker ports, at the same time.
   A unit cut at the end of the Claude window is handed over (the "baton") to whichever engine runs
@@ -126,7 +126,7 @@ It also controls the loops:
 | Pause / resume (project card) | A paused project is skipped by the loop, even if it has an interrupted unit; the unit waits for the resume |
 | Next (project card) | The next *new* unit goes to that project, if it fits the quota; interrupted units and batons still go first |
 | Interrupt (project card) | Pauses the project and stops its running unit (`SIGUSR1`); resume it to continue |
-| Project panel | A message to the agents, and the project's caps |
+| Project panel | A message to the agents, the project's caps and, while the project waits to retry, "Tentar agora" |
 | "Order and caps" window | Project order, weekly caps per engine and the 5-hour cap |
 
 The panel never edits state or config. It writes three kinds of file: its requests to the loops, in
@@ -137,11 +137,13 @@ messages to the agents, in the same notes as the phone. The loops re-read `overr
 turn and, while asleep, check it every 5 seconds. A unit interrupted from the panel, or by `stop`,
 appears in the history as `stopped`. Write requests need the `X-Turno: 1` header and a local origin.
 
-Two things a click does not do:
+Two things an ordinary click does not do:
 
 - **It does not shorten a wait.** After an error, a usage limit or Docker ports held by another
-  project's uncommitted work, the project has a retry time (`retry_at` in the state file). A click
-  wakes the loop, which then works on the other projects; that one stays out until its time comes.
+  project's uncommitted work, the project has a retry time (`retry_at` in the state file), shown
+  on its card. A click wakes the loop, which then works on the other projects; that one stays out
+  until its time comes. Only a reset clears it: "Reativar" in the strip, "Tentar agora" in the
+  project panel, or `autopilot.py reset <project>`.
 - **It does not interrupt a loop started by an older version.** Interrupt needs a loop that handles
   `SIGUSR1`; the panel checks first, and if the loop does not, it refuses and asks you to stop and
   start that loop again. Nothing is paused or signalled in that case.

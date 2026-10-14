@@ -101,8 +101,9 @@ Each instance has an engine (`[engine] kind`, `codex` by default). On every turn
 `retry_at` (per project, in the state file) is the wait after an error, a usage limit or a busy
 Docker. Waking early does not cancel it: a click on the panel wakes the loop, but `pick` still skips
 the project, even to resume its interrupted unit, until that time. It goes back to 0 when the unit
-closes and when a later run ends another way (unfinished, cut, stopped); the panel's reactivate and
-`autopilot.py reset` do not touch it.
+closes, when a later run ends another way (unfinished, cut, stopped) and on a reset: the panel's
+"Reativar" and "Tentar agora" (both write `reset`) and `autopilot.py reset` clear it. The panel
+shows it on the project card ("tenta de novo ...").
 
 At the start of each turn the loop re-reads `overrides.json` and applies it over the config: project
 order, `paused` (a paused project is skipped, even with an interrupted unit, which waits for the resume), the
@@ -147,7 +148,8 @@ Invariants a change must not break:
   the unit closes, including while interrupted; the group lock holds while the CLI runs.
 - **The baton goes first.** A unit cut at the end of the window becomes an `any` claim, carrying the
   `unit_id`: any engine resumes it before starting another, even with a dirty tree, in a new session
-  from the ledger.
+  from the ledger. An engine's own `retry_at` for that project (error, usage limit or busy Docker)
+  holds the baton too until it passes; a reset clears it.
 - **Claude only works inside its window and with the quota read.** Outside it, it does not even query
   the quota.
 - **What the panel writes.** `overrides.json` (under `shared/overrides.lock`), decision answers in
@@ -159,7 +161,8 @@ Invariants a change must not break:
 - **The panel's controls:** start and stop per engine; the "Needs you" strip, with the pending
   decisions (answer, with an optional comment) and the blocked projects (reactivate, which writes
   `reset`); pause, next and interrupt on each project card; the project panel with a message to the
-  agents and the caps; and the "Order and caps" window.
+  agents, the caps and, while the project waits on a `retry_at`, "Tentar agora" (also `reset`); and
+  the "Order and caps" window.
 - **History per run.** Every finished run becomes one line in `history-<engine>.jsonl`; summary and
   cost only on the run that closes the unit.
 
