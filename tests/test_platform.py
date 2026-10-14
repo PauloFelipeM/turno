@@ -124,6 +124,15 @@ class LoopDetectionTest(PlatformBase):
             self.assertEqual(self.ap.loop_pids("codex"), [102])
         self.assertEqual(run.call_args.args[0], ["ps", "-axo", "pid=,command="])
 
+    def test_ps_fallback_with_a_path_that_has_a_space(self):
+        out = ("  201 /usr/bin/python3 /Users/Ana Lima/turno/autopilot.py --engine claude run\n"
+               "  202 python3 /Users/Ana Lima/turno/autopilot.py run\n"
+               "  203 python3 /x/not autopilot.py.bak run\n")
+        done = subprocess.CompletedProcess(["ps"], 0, stdout=out, stderr="")
+        with mock.patch.object(self.ap.subprocess, "run", return_value=done):
+            self.assertEqual(self.ap.loop_pids("claude"), [201])
+            self.assertEqual(self.ap.loop_pids("codex"), [202])
+
     def test_without_proc_or_ps_finds_nothing(self):
         with mock.patch.object(self.ap.subprocess, "run", side_effect=FileNotFoundError("ps")):
             self.assertEqual(self.ap.loop_pids("codex"), [])

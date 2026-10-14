@@ -1464,6 +1464,15 @@ def is_loop(argv, engine):
     return given == engine
 
 
+def _split_command(command):
+    """A `ps` command line as an argv: `<interpreter> <path>/autopilot.py <args...>`; the script's path
+    may have spaces (the whole path up to `autopilot.py` is one argument)."""
+    m = re.match(r"\s*(\S+)\s+(.*?autopilot\.py)(?=\s|$)(.*)$", command)
+    if m:
+        return [m.group(1), m.group(2), *m.group(3).split()]
+    return command.split()
+
+
 def process_table():
     """(pid, argv) of the running processes: from /proc, or from `ps` where /proc has no process
     folders (macOS). `ps` gives the command line as one string, split on spaces here."""
@@ -1483,7 +1492,7 @@ def process_table():
     for line in out.splitlines():
         pid, _, command = line.strip().partition(" ")
         if pid.isdigit():
-            yield int(pid), command.split()
+            yield int(pid), _split_command(command)
 
 
 def loop_pids(engine):
