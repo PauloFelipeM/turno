@@ -68,7 +68,7 @@ messages follow the project's own rules.
    "tasks": {"done": <n>, "total": <n>}}]}`. `todo` = no approved spec, `spec` = spec approved,
    `plan` = plan approved, `doing` = tasks under way, `done` = item finished. `tasks` goes only on
    `doing` items, counted from the active plan and its ledger. The file is outside git: never commit it.
-   Set `milestone` (a few words, e.g. "Chat spec approved", "Stock integrated and shipped") only when
+   Set `milestone` (`"<a few words naming the step reached, in the owner's language>"`) only when
    a backlog item's spec or plan was approved or the item was finished; it is sent to the owner's
    phone. Use `idle` only when docs/autopilot.md says there is nothing left. Then end your turn. Do
    not start a second unit; the scheduler decides what runs next.

@@ -1,3 +1,4 @@
+import re
 import json
 import sys
 import tempfile
@@ -116,8 +117,12 @@ class OwnerLanguageTest(unittest.TestCase):
             self.assertIn("{owner_language}", (ROOT / "prompts" / name).read_text(), name)
         for path in [*(ROOT / "prompts").glob("*.md"), ROOT / "claude-agents.json", *(ROOT / "codex-agents").glob("*.toml")]:
             text = path.read_text()
-            for word in ("pt-BR", "Portuguese", "Spec do chat"):
+            for word in ("pt-BR", "Portuguese", "Spec do chat", "Chat spec approved", "Stock integrated"):
                 self.assertNotIn(word, text, path.name)
+        # No literal example of a milestone in any language: it would pull the owner's text towards it.
+        unit = (ROOT / "prompts" / "unit.md").read_text()
+        self.assertIsNone(re.search(r'milestone`\s*\(a few words,\s*e\.g\.', unit))
+        self.assertNotRegex(unit, r'e\.g\.\s*"[^"<]')
 
     def test_english(self):
         prompt = self.prompt("en")
