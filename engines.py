@@ -140,7 +140,8 @@ def snapshots(path):
     return out
 
 
-def find_codex():
+def locate_codex():
+    """Path of the Codex CLI, or None when it is not installed."""
     if os.environ.get("CODEX_BIN"):
         return os.environ["CODEX_BIN"]
     found = shutil.which("codex")
@@ -152,7 +153,14 @@ def find_codex():
                   key=lambda p: [int(x) for x in re.findall(r"\d+", p.parts[-4])])
     if bins:
         return str(bins[-1])
-    sys.exit("codex not found; set CODEX_BIN")
+    return None
+
+
+def find_codex():
+    found = locate_codex()
+    if found is None:
+        sys.exit("codex not found; set CODEX_BIN")
+    return found
 
 
 
@@ -292,13 +300,52 @@ FABLE_LIMIT = re.compile(r"fable[^\n]{0,300}?(usage limit|rate limit|limit reach
                          r"|(usage limit|rate limit|limit reached)[^\n]{0,300}?fable", re.I)
 
 
-def find_claude():
+def locate_claude():
+    """Path of the Claude Code CLI, or None when it is not installed."""
     if os.environ.get("CLAUDE_BIN"):
         return os.environ["CLAUDE_BIN"]
     found = shutil.which("claude") or (Path.home() / ".local" / "bin" / "claude")
     if Path(found).exists():
         return str(found)
-    sys.exit("claude not found; set CLAUDE_BIN")
+    return None
+
+
+def find_claude():
+    found = locate_claude()
+    if found is None:
+        sys.exit("claude not found; set CLAUDE_BIN")
+    return found
+
+
+CLI_VERSION_TIMEOUT = 5  # seconds for `<bin> --version`
+CLI_CACHE = {}  # engine -> (time.monotonic() of the reading, status)
+LOCATORS = {"codex": locate_codex, "claude": locate_claude}
+
+
+def cli_status(engine_name, max_age=60):
+    """Whether the engine's CLI is installed and its version; never raises or exits.
+
+    Cached per engine for `max_age` seconds, since the panel asks often.
+    """
+    locate = LOCATORS.get(engine_name)
+    if locate is None:
+        return {"found": False, "path": None, "version": None}
+    cached = CLI_CACHE.get(engine_name)
+    if cached and time.monotonic() - cached[0] < max_age:
+        return dict(cached[1])
+    path = locate()
+    version = None
+    if path:
+        try:
+            out = subprocess.run([path, "--version"], capture_output=True, text=True,
+                                 timeout=CLI_VERSION_TIMEOUT, stdin=subprocess.DEVNULL).stdout
+            lines = out.strip().splitlines()
+            version = lines[0].strip() if lines else None
+        except (OSError, subprocess.SubprocessError, ValueError):
+            version = None
+    status = {"found": path is not None, "path": path, "version": version}
+    CLI_CACHE[engine_name] = (time.monotonic(), status)
+    return dict(status)
 
 
 def to_limits(info):
