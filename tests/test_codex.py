@@ -1,9 +1,12 @@
 import json
+import os
 import sys
 import tempfile
 import time
+import tomllib
 import unittest
 from pathlib import Path
+from unittest import mock
 
 import helpers
 
@@ -56,6 +59,81 @@ class CodexEngineTest(unittest.TestCase):
         cmd, env = engine.command({}, {"name": "x", "path": "/tmp"}, {"session": "t1"}, True, self.tmp / "stem")
         self.assertEqual(cmd[:3], [sys.executable, "exec", "resume"])
         self.assertIn("t1", cmd)
+
+
+class CodexRolesTest(unittest.TestCase):
+    ROLES = {"planner": {"model": "gpt-6-astra", "effort": "xhigh"},
+             "implementer": {"model": "gpt-6-sol", "effort": "medium"},
+             "reviewer": {"model": "gpt-6-astra", "effort": "high"}}
+
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp())
+        self.ap = helpers.load(self.tmp)
+        self.engines = self.ap.engines
+        self.home = self.tmp / "codex-home"  # never the real CODEX_HOME
+        self.cfg = {"defaults": {"orchestrator_model": "m", "orchestrator_effort": "medium", "max_subagents": 2,
+                                 "roles": json.loads(json.dumps(self.ROLES))}}
+        self.engine = self.engines.CodexEngine(self.cfg, home=self.home)
+        self.engine.binary = sys.executable
+        self.agents = self.home / "agents"
+
+    def command(self):
+        return self.engine.command({}, {"name": "x", "path": "/tmp"}, {"session": None}, False, self.tmp / "stem")
+
+    def test_templates_exist_without_model_lines_or_plan_reviewer(self):
+        names = sorted(p.name for p in self.engines.CODEX_AGENTS.glob("*.toml"))
+        self.assertEqual(names, ["implementer.toml", "planner.toml", "reviewer.toml"])
+        for name in names:
+            text = (self.engines.CODEX_AGENTS / name).read_text()
+            self.assertNotIn("model", text.split("developer_instructions")[0])
+            self.assertNotIn("plan-reviewer", text)
+
+    def test_command_writes_the_roles_from_the_config(self):
+        self.command()
+        for role, conf in self.ROLES.items():
+            data = tomllib.loads((self.agents / f"{role}.toml").read_text())
+            self.assertEqual((data["name"], data["model"], data["model_reasoning_effort"]),
+                             (role, conf["model"], conf["effort"]))
+            self.assertTrue(data["developer_instructions"].strip())
+        self.assertEqual(tomllib.loads((self.agents / "reviewer.toml").read_text())["sandbox_mode"], "read-only")
+
+    def test_a_new_config_rewrites_and_an_unchanged_one_does_not(self):
+        self.command()
+        planner = self.agents / "planner.toml"
+        before = planner.stat().st_mtime_ns
+        self.command()
+        self.assertEqual(planner.stat().st_mtime_ns, before)
+        self.cfg["defaults"]["roles"]["planner"]["effort"] = "low"
+        self.command()
+        self.assertEqual(tomllib.loads(planner.read_text())["model_reasoning_effort"], "low")
+        self.assertEqual(list(self.agents.glob("*.tmp")), [])
+
+    def test_other_files_are_left_alone(self):
+        self.agents.mkdir(parents=True)
+        (self.agents / "plan-reviewer.toml").write_text("old\n")
+        (self.agents / "mine.toml").write_text("mine\n")
+        self.command()
+        self.assertEqual((self.agents / "plan-reviewer.toml").read_text(), "old\n")
+        self.assertEqual((self.agents / "mine.toml").read_text(), "mine\n")
+
+    def test_write_failure_is_logged_and_the_unit_still_runs(self):
+        self.home.mkdir()
+        (self.home / "agents").write_text("a file, not a folder")
+        messages = []
+        self.engines.log = messages.append
+        cmd, _ = self.command()
+        self.assertEqual(cmd[:2], [sys.executable, "exec"])
+        self.assertTrue(any("Could not write the Codex role" in m for m in messages))
+
+    def test_effort_with_quotes_stays_valid_toml(self):
+        self.cfg["defaults"]["roles"]["planner"]["effort"] = 'a"b'
+        self.command()
+        self.assertEqual(tomllib.loads((self.agents / "planner.toml").read_text())["model_reasoning_effort"], 'a"b')
+
+    def test_codex_home_env_is_the_default_home(self):
+        with mock.patch.dict(os.environ, {"CODEX_HOME": str(self.home)}):
+            engine = self.engines.CodexEngine(self.cfg)
+        self.assertEqual(engine.home, self.home)
 
 
 class DirtyTreeTest(unittest.TestCase):

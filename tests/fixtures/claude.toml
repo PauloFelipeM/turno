@@ -14,7 +14,7 @@ start_margin_minutes = 15
 [defaults]
 orchestrator_model = "claude-opus-5-5"
 orchestrator_effort = "medium"
-# Cap of the Fable quota, in %: above it the planner and plan-reviewer use Opus until the reset,
+# Cap of the Fable quota, in %: above it the roles on Fable use Opus until the reset,
 # so some Fable is left for you. A unit with planning can spend up to 15 points.
 fable_cap = 80
 safety_factor = 1.5

@@ -14,6 +14,8 @@ MODULES = ("autopilot", "coord", "engines", "schedule", "paths", "history", "bac
 
 def load(tmp):
     os.environ["TURNO_HOME"] = str(tmp)
+    # A test never reaches the real ~/.codex (the Codex engine writes its role files there).
+    os.environ["CODEX_HOME"] = str(Path(tmp) / "codex-home")
     for name in MODULES:
         sys.modules.pop(name, None)
     import autopilot as ap

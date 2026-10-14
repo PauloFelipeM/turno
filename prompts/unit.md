@@ -25,13 +25,16 @@ option ids, file names and commit messages follow the project's own rules.
       implementer (at most 5 rounds).
    c. All tasks of the active plan done: final review of the item's whole range with a `reviewer`,
       fixes, full verification, then the finishing step in docs/autopilot.md.
-   d. Backlog item with a spec but no plan: the `planner` writes the plan; the `plan-reviewer` reviews
-      it until APPROVED (at most 3 rounds; after that you rule and record the ruling).
-   e. Next backlog item with no spec: the `planner` writes the spec; `plan-reviewer` as in (d).
+   d. Backlog item with a spec but no plan: the `planner` writes the plan. You read it and check that
+      it covers the spec or the backlog item, that the tasks are small with the tests first, and that
+      every task has its exact files and exact verification commands. If something is missing, send
+      the planner back once with the list; after that you rule and record the ruling. Then commit it.
+   e. Next backlog item with no spec: the `planner` writes the spec; you check it against the backlog
+      item and the project rules as in (d), then commit it.
    f. No backlog: follow docs/autopilot.md (it says whether to propose one or to go idle).
 4. Before starting a task, write `IN PROGRESS <task> BASE <sha>` in the ledger. When it ends, record
    the result, the rulings (with reason and cost if wrong) and any deferred minor.
-5. Subagents do the real work: `planner`, `plan-reviewer`, `implementer`, `reviewer`. You coordinate,
+5. Subagents do the real work: `planner`, `implementer`, `reviewer`. You coordinate,
    rule and keep the ledger; you do not implement. If a role's model is unavailable, use the
    fallback the engine notes give and record the substitution in the ledger.
 6. Product decisions come in two sizes:

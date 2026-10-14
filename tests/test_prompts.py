@@ -20,17 +20,28 @@ class PromptsTest(unittest.TestCase):
         self.assertIn("subagent_type", claude)
         self.assertIn('model: "opus"', claude)
 
-    def test_claude_roles(self):
+    def test_claude_roles_have_only_description_and_prompt(self):
         roles = json.loads((ROOT / "claude-agents.json").read_text())
-        self.assertEqual(set(roles), {"planner", "plan-reviewer", "implementer", "reviewer"})
-        for name in ("planner", "plan-reviewer"):
-            self.assertEqual(roles[name]["model"], "claude-fable-5-1")
-            self.assertEqual(roles[name]["fallback_model"], "claude-opus-5-5")
-        for name in ("implementer", "reviewer"):
-            self.assertEqual(roles[name]["model"], "claude-opus-5-5")
-            self.assertNotIn("fallback_model", roles[name])
+        self.assertEqual(set(roles), {"planner", "implementer", "reviewer"})
         for role in roles.values():
+            self.assertEqual(set(role), {"description", "prompt"})
             self.assertTrue(role["description"] and role["prompt"])
+
+    def test_no_plan_reviewer_in_the_protocol(self):
+        files = [*(ROOT / "prompts").glob("*.md"), ROOT / "claude-agents.json", *(ROOT / "codex-agents").glob("*.toml")]
+        for path in files:
+            self.assertNotIn("plan-reviewer", path.read_text(), path.name)
+
+    def test_unit_checks_the_plan_itself(self):
+        unit = (ROOT / "prompts" / "unit.md").read_text()
+        self.assertIn("`planner`, `implementer`, `reviewer`", unit)
+        self.assertIn("planner back once", " ".join(unit.split()))
+        self.assertIn("exact verification commands", unit)
+
+    def test_claude_note_generic_model_fallback(self):
+        claude = (ROOT / "prompts" / "engine-claude.md").read_text()
+        self.assertNotIn("Fable", claude)
+        self.assertIn("its own usage limit", claude)
 
     def test_prompts_ask_for_backlog_json(self):
         unit = (ROOT / "prompts" / "unit.md").read_text()

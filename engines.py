@@ -171,6 +171,21 @@ def thread_id(out):
     return None
 
 
+CODEX_AGENTS = Path(__file__).resolve().parent / "codex-agents"
+
+
+def agent_toml(template, model, effort):
+    """The role template with the `model` and `model_reasoning_effort` lines after its description."""
+    extra = []
+    if model:
+        extra.append(f"model = {json.dumps(model)}")
+    if effort:
+        extra.append(f"model_reasoning_effort = {json.dumps(effort)}")
+    lines = template.splitlines(keepends=True)
+    at = next((i + 1 for i, line in enumerate(lines) if line.startswith("description =")), 0)
+    return "".join(lines[:at]) + "".join(x + "\n" for x in extra) + "".join(lines[at:])
+
+
 class CodexEngine:
     name = "codex"
     label = "Codex"
@@ -212,7 +227,7 @@ class CodexEngine:
 
     def __init__(self, cfg, home=None):
         self.cfg = cfg
-        self.home = home or Path.home() / ".codex"
+        self.home = home or Path(os.environ.get("CODEX_HOME") or Path.home() / ".codex")
         self.binary = None
 
     def _bin(self):
@@ -241,8 +256,38 @@ class CodexEngine:
     def begin(self, s, resume):
         pass  # the Codex session id only shows up in the output
 
+    def write_agents(self):
+        """Writes `<codex home>/agents/<role>.toml` from `codex-agents/` plus the configured model and effort.
+
+        Atomic, and only when the content differs. Other files in that folder are left alone. A failure
+        is logged and the unit still runs with the files already there.
+        """
+        configured = self.cfg.get("defaults", {}).get("roles") or {}
+        target = self.home / "agents"
+        for template in sorted(CODEX_AGENTS.glob("*.toml")):
+            role = template.stem
+            conf = configured.get(role) or {}
+            try:
+                text = agent_toml(template.read_text(), conf.get("model"), conf.get("effort"))
+                path = target / template.name
+                try:
+                    if path.read_text() == text:
+                        continue
+                except OSError:
+                    pass
+                target.mkdir(parents=True, exist_ok=True)
+                tmp = path.with_name(f"{path.name}.{os.getpid()}.tmp")
+                try:
+                    tmp.write_text(text)
+                    tmp.replace(path)
+                finally:
+                    tmp.unlink(missing_ok=True)
+            except OSError as e:
+                log(f"Could not write the Codex role {role}: {e}")
+
     def command(self, state, project, s, resume, stem):
         d = self.cfg["defaults"]
+        self.write_agents()
         flags = ["--json", "-m", d["orchestrator_model"],
                  "-c", f'model_reasoning_effort="{d["orchestrator_effort"]}"',
                  "-c", f"agents.max_concurrent_threads_per_session={d['max_subagents']}",
@@ -294,6 +339,7 @@ class CodexEngine:
 # --- Claude ------------------------------------------------------------------------------------
 
 ROLES = Path(__file__).resolve().parent / "claude-agents.json"
+FABLE_FALLBACK = "claude-opus-5-5"
 BASE_WINDOWS = {"five_hour", "seven_day"}
 LIMIT_TEXT = re.compile(r"usage limit|rate limit|limit reached|out of (extra )?usage", re.I)
 FABLE_LIMIT = re.compile(r"fable[^\n]{0,300}?(usage limit|rate limit|limit reached)"
@@ -490,7 +536,7 @@ class ClaudeEngine:
         if cache.get("fable_exhausted_until", 0) < until:
             cache["fable_exhausted_until"] = until
             log(f"Fable spared until {time.strftime('%F %T', time.localtime(until))} ({why}); "
-                f"planner and plan-reviewer move to Opus")
+                f"roles on Fable move to Opus")
 
     def fable_available(self, state):
         return self._cache(state).get("fable_exhausted_until", 0) <= time.time()
@@ -505,14 +551,22 @@ class ClaudeEngine:
             s["session"] = str(uuid.uuid4())
 
     def write_agents(self, state, path):
+        """The role definitions for `--agents`: prompts from the file, model and effort from the config."""
         roles = json.loads(Path(self.roles).read_text())
+        configured = self.cfg.get("defaults", {}).get("roles") or {}
         fable_ok = self.fable_available(state)
         out = {}
         for name, role in roles.items():
             role = dict(role)
-            fallback = role.pop("fallback_model", None)
-            if fallback and not fable_ok:
-                role["model"] = fallback
+            conf = configured.get(name) or {}
+            model, effort = conf.get("model"), conf.get("effort")
+            # Fable has its own limit: past the cap the role runs on Opus.
+            if model and "fable" in model and not fable_ok:
+                model = FABLE_FALLBACK
+            if model:
+                role["model"] = model
+            if effort:
+                role["effort"] = effort
             out[name] = role
         Path(path).write_text(json.dumps(out, indent=2, ensure_ascii=False))
 

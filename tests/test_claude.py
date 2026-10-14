@@ -8,9 +8,12 @@ from pathlib import Path
 import helpers
 
 FIXTURE = Path(__file__).parent / "fixtures" / "claude-fable-probe.jsonl"
-ROLES = {"planner": {"description": "d", "prompt": "p", "model": "claude-fable-5-1",
-                     "fallback_model": "claude-opus-5-5"},
-         "implementer": {"description": "d", "prompt": "p", "model": "claude-opus-5-5"}}
+ROLES = {"planner": {"description": "d", "prompt": "p"},
+         "implementer": {"description": "d", "prompt": "p"},
+         "reviewer": {"description": "d", "prompt": "p"}}
+CONFIGURED = {"planner": {"model": "claude-fable-5-1", "effort": "high"},
+              "implementer": {"model": "claude-sonnet-5-5", "effort": "medium"},
+              "reviewer": {"model": "claude-opus-5-5", "effort": "xhigh"}}
 
 
 def rate_event(status="allowed", five=0.2, week=0.4, extra=None, resets=None):
@@ -29,7 +32,8 @@ class ClaudeEngineTest(unittest.TestCase):
         self.engines = self.ap.engines
         roles = self.tmp / "roles.json"
         roles.write_text(json.dumps(ROLES))
-        self.cfg = {"defaults": {"orchestrator_model": "claude-opus-5-5", "orchestrator_effort": "medium"}}
+        self.cfg = {"defaults": {"orchestrator_model": "claude-opus-5-5", "orchestrator_effort": "medium",
+                              "roles": json.loads(json.dumps(CONFIGURED))}}
         self.engine = self.engines.ClaudeEngine(self.cfg, home=self.tmp / "claude-home", roles=roles)
         self.engine.binary = "claude"
         self.state = {}
@@ -62,6 +66,7 @@ class ClaudeEngineTest(unittest.TestCase):
         agents = json.loads(path.read_text())
         self.assertEqual(agents["planner"]["model"], "claude-opus-5-5")
         self.assertNotIn("fallback_model", agents["planner"])
+        self.assertEqual(agents["planner"]["effort"], "high")  # only the model changes
 
     def fable_reading(self, used, status="allowed"):
         resets = int(time.time()) + 86400
@@ -93,12 +98,32 @@ class ClaudeEngineTest(unittest.TestCase):
         self.engine.write_agents(self.state, path)
         self.assertEqual(json.loads(path.read_text())["planner"]["model"], "claude-opus-5-5")
 
-    def test_fresh_agents_keep_fable_and_drop_fallback_key(self):
+    def test_fresh_agents_get_model_and_effort_from_the_config(self):
         path = self.tmp / "agents.json"
         self.engine.write_agents(self.state, path)
         agents = json.loads(path.read_text())
-        self.assertEqual(agents["planner"]["model"], "claude-fable-5-1")
-        self.assertNotIn("fallback_model", agents["planner"])
+        self.assertEqual(set(agents), {"planner", "implementer", "reviewer"})
+        for name, conf in CONFIGURED.items():
+            self.assertEqual((agents[name]["model"], agents[name]["effort"]), (conf["model"], conf["effort"]))
+            self.assertEqual((agents[name]["description"], agents[name]["prompt"]), ("d", "p"))
+            self.assertNotIn("fallback_model", agents[name])
+
+    def test_only_fable_roles_fall_back_when_fable_is_out(self):
+        self.engine.cfg["defaults"]["roles"]["reviewer"]["model"] = "claude-fable-5-1"
+        self.fable_reading(0.95)
+        path = self.tmp / "agents.json"
+        self.engine.write_agents(self.state, path)
+        agents = json.loads(path.read_text())
+        self.assertEqual(agents["planner"]["model"], "claude-opus-5-5")
+        self.assertEqual(agents["reviewer"]["model"], "claude-opus-5-5")
+        self.assertEqual(agents["reviewer"]["effort"], "xhigh")
+        self.assertEqual(agents["implementer"]["model"], "claude-sonnet-5-5")
+
+    def test_a_role_without_config_keeps_the_file_as_it_is(self):
+        self.engine.cfg["defaults"].pop("roles")
+        path = self.tmp / "agents.json"
+        self.engine.write_agents(self.state, path)
+        self.assertEqual(json.loads(path.read_text()), ROLES)
 
     def test_fable_limit_in_a_subagent_result_marks_it_exhausted(self):
         tool_result = {"type": "user", "message": {"content": [{"type": "tool_result", "content": [
