@@ -29,13 +29,20 @@ def _lock(home):
         yield
 
 
-def read(home):
-    """The parsed overrides, or {} when missing, unreadable, invalid or not an object."""
+def load(home):
+    """(overrides, unreadable): `unreadable` is True when the file exists but is not a JSON object."""
     try:
         data = json.loads(_path(home).read_text())
+    except FileNotFoundError:
+        return {}, False
     except (OSError, ValueError):
-        return {}
-    return data if isinstance(data, dict) else {}
+        return {}, True
+    return (data, False) if isinstance(data, dict) else ({}, True)
+
+
+def read(home):
+    """The parsed overrides, or {} when missing, unreadable, invalid or not an object."""
+    return load(home)[0]
 
 
 def _write(home, data):
@@ -111,5 +118,3 @@ def resets(ov):
         if isinstance(v, (int, float)) and not isinstance(v, bool)
     }
 
-
-_cap = valid_cap  # old internal name

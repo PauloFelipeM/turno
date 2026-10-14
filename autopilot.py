@@ -23,7 +23,7 @@ Usage:
   autopilot.py decisions                  pending decisions
   autopilot.py answer NAME ID OPTION      answer a decision from the terminal
   autopilot.py test-notify                send a test notification
-  autopilot.py serve [--port 8765]        the panel at http://localhost:8765 (read-only; safe)
+  autopilot.py serve [--port 8765]        the panel at http://localhost:8765 (follows and controls the loops)
   autopilot.py --config claude.toml run   the Claude instance (see README)
 """
 
@@ -129,6 +129,7 @@ def load_state(cfg):
         s.setdefault("errors", 0)
         s.setdefault("early_ends", 0)
         s.setdefault("blocked_until", 0)
+        s.setdefault("retry_at", 0)  # no run on this project before this time (error, usage limit, busy Docker)
         s.setdefault("cost", {"primary": d["initial_cost_primary"], "secondary": d["initial_cost_secondary"]})
         s.setdefault("dirty_logged", False)
         s.setdefault("unit_start_limits", None)
@@ -192,6 +193,12 @@ def decision_files(project):
     return sorted(folder.glob("*.json")) if folder.is_dir() else []
 
 
+def read_decision(path):
+    """A decision file as a dict; None when it is missing, invalid JSON or not an object."""
+    d = read_json(path)
+    return d if isinstance(d, dict) else None
+
+
 def valid_decision(d, path):
     options = d.get("options")
     return (isinstance(options, list) and 1 <= len(options) <= 3
@@ -241,7 +248,7 @@ def open_decisions(project):
     """Decisions already sent to the phone and still unanswered: the only ones that accept an answer."""
     out = []
     for path in decision_files(project):
-        d = read_json(path)
+        d = read_decision(path)
         if d and "answer" not in d and d.get("notified_at") and valid_decision(d, path):
             out.append((path, d))
     return out
@@ -253,7 +260,7 @@ TYPED_REPLY = re.compile(r"(?:([\w-]+)[\s/:]+)?([a-z])\s*(?:$|[,.;:)\-–—])",
 
 
 def note_targets(projects, text):
-    """Projetos citados pelo nome na frase; nenhum citado = todos."""
+    """The projects named in the text; none named = all of them."""
     named = [p for name, p in projects.items() if re.search(rf"\b{re.escape(name)}\b", text, re.I)]
     return named or list(projects.values())
 
@@ -331,7 +338,7 @@ def poll_replies(cfg, notify):
             continue
         project = projects[m.group(1)]
         path = Path(project["path"]) / DECISIONS / f"{m.group(2)}.json"
-        d = read_json(path)
+        d = read_decision(path)
         # An answer to an unknown or already answered decision, or with an unlisted option, is ignored.
         if not d or "answer" in d or not valid_decision(d, path) or m.group(3) not in {o["id"] for o in d["options"]}:
             continue
@@ -351,7 +358,7 @@ def dispatch_decisions(cfg, notify):
     now = time.time()
     for p in cfg["project"]:
         for path in decision_files(p):
-            d = read_json(path)
+            d = read_decision(path)
             if d is None or "answer" in d:
                 continue
             if not valid_decision(d, path):
@@ -390,16 +397,20 @@ def process_decisions(cfg, state):
             coord.unlock(lock)
     for p in cfg["project"]:
         s = state[p["name"]]
-        pending = any(d and "answer" not in d for d in map(read_json, decision_files(p)))
+        pending = any(d and "answer" not in d for d in map(read_decision, decision_files(p)))
         if s["status"] == "waiting" and not pending:
             s["status"] = "active"
             log(f"{p['name']}: decisions resolved; project released")
 
 
 def next_deadline(project):
-    deadlines = [d.get("deadline", 0) for d in map(read_json, decision_files(project))
+    deadlines = [d.get("deadline", 0) for d in map(read_decision, decision_files(project))
                  if d and "answer" not in d and d.get("deadline")]
     return min(deadlines) if deadlines else time.time() + 300
+
+
+OVERRIDES_SEEN = None  # mtime of overrides.json when run_once last read it; nap compares against it
+OVERRIDES_WARNED = None  # mtime of the unreadable overrides.json already reported in the log
 
 
 def overrides_mtime():
@@ -409,13 +420,27 @@ def overrides_mtime():
         return 0
 
 
+def read_overrides():
+    """The overrides for this turn. Notes the file's mtime for `nap` and logs an unreadable file once per change."""
+    global OVERRIDES_SEEN, OVERRIDES_WARNED
+    # The mtime is taken before the read: a write landing in between wakes the next nap (one spare
+    # turn) instead of being missed.
+    OVERRIDES_SEEN = overrides_mtime()
+    ov, unreadable = overrides.load(HOME)
+    if unreadable and OVERRIDES_WARNED != OVERRIDES_SEEN:
+        OVERRIDES_WARNED = OVERRIDES_SEEN
+        log("overrides.json is unreadable; ignoring it")
+    return ov
+
+
 def nap(cfg, state, secs):
     """Sleeps in 5-second steps; wakes early when the overrides file changes or a waiting project is released.
 
-    Answers are read once a minute, and right away when the overrides change.
+    "Changes" means since `run_once` last read it, not since the nap started: a request written in
+    between is not lost. Answers are read once a minute, and right away when the overrides change.
     """
     end = time.time() + secs
-    seen = overrides_mtime()
+    seen = overrides_mtime() if OVERRIDES_SEEN is None else OVERRIDES_SEEN
     last = time.time()
     while (left := end - time.time()) > 0:
         time.sleep(min(5, left))
@@ -555,7 +580,10 @@ def request_interrupt(*_):
 
 
 def make_exit_handler(state):
-    """SIGINT/SIGTERM handler. With a unit running it only asks for the exit; run_unit does it."""
+    """SIGINT/SIGTERM handler. With a unit running it only asks for the exit; run_unit does it.
+
+    `state` is None before the loop holds the instance lock: there is nothing of its own to save yet.
+    """
     def on_signal(*_):
         global EXIT_REQUESTED
         proc = CURRENT
@@ -563,7 +591,8 @@ def make_exit_handler(state):
             EXIT_REQUESTED = True
             _term_group(proc)
             return
-        save_state(state)
+        if state is not None:
+            save_state(state)
         log("interrupted; run again to resume")
         sys.exit(130)
     return on_signal
@@ -578,9 +607,10 @@ def record_interrupted_run():
 
 
 def wait_until(proc, deadline):
-    """Espera o processo em fatias de 5 s; passado `deadline` (timestamp), encerra o grupo e devolve CUT.
+    """Waits for the process in 5-second steps; past `deadline` (a timestamp), ends the group and returns CUT.
 
-    Nunca espera sem timeout: os handlers de sinal só mandam SIGTERM, e aqui, 30 s depois, vem o SIGKILL.
+    It never waits without a timeout: the signal handlers only send SIGTERM, and the SIGKILL comes from
+    here, 30 s later.
     """
     while True:
         left = None if deadline is None else deadline - time.time()
@@ -663,6 +693,8 @@ def run_unit(cfg, engine, state, project, deadline=None):
             STOP_REQUESTED = EXIT_REQUESTED = False
     if exit_now:
         # Ctrl+C / SIGTERM during the unit: one history line, then out, from the main thread.
+        # after_run first: it reads the session id from the run's output, which the resume needs.
+        engine.after_run(state, s, out, resume)
         record_interrupted_run()
         CURRENT_UNIT = None
         save_state(state)
@@ -697,6 +729,7 @@ def after_unit(cfg, engine, state, project, out, err, code, unit_file):
     """Updates the project state and returns how many seconds to sleep before the next unit."""
     d = cfg["defaults"]
     s = state[project["name"]]
+    s["retry_at"] = 0  # only the usage_limit and error branches below set a wait
     if code == STOPPED:
         # Not closed: no cost, the session and the claim stay, `interrupted` stays True.
         record_run(engine, project, s, "stopped")
@@ -714,6 +747,7 @@ def after_unit(cfg, engine, state, project, out, err, code, unit_file):
         s["errors"] = 0
         wait = (reset - time.time() + 120) if reset else (1800 if hard else 300)
         wait = max(wait, 300)
+        s["retry_at"] = time.time() + wait  # waking early (a click on the panel) must not cancel the wait
         log(f"{project['name']}: usage limit; the unit continues after the reset "
             f"({time.strftime('%F %T', time.localtime(time.time() + wait))})")
         return wait
@@ -728,7 +762,9 @@ def after_unit(cfg, engine, state, project, out, err, code, unit_file):
             s["session"] = None
             ntfy(cfg, f"{project['name']}: erros seguidos",
                  f"{s['errors']} execuções com erro. Último log: {err}", priority=4, tags=["warning"])
-        return min(60 * 2 ** min(s["errors"], 5), 1800)
+        wait = min(60 * 2 ** min(s["errors"], 5), 1800)
+        s["retry_at"] = time.time() + wait
+        return wait
 
     s["errors"] = 0
     try:
@@ -753,7 +789,7 @@ def after_unit(cfg, engine, state, project, out, err, code, unit_file):
             s["cost"][key] = round((1 - EMA_ALPHA) * s["cost"][key] + EMA_ALPHA * cost[key], 3)
     record_run(engine, project, s, result.get("status", "worked"), result=result, cost=cost)
     engine.close_unit(s)
-    s.update(session=None, interrupted=False, early_ends=0, unit_id=None)
+    s.update(session=None, interrupted=False, early_ends=0, unit_id=None, retry_at=0)
     coord.release(project["name"], engine.name)
     if s["notes_sent"]:
         coord.mark_delivered(project["name"], s["notes_sent"])
@@ -798,6 +834,10 @@ def pick(cfg, engine, state, limits, next_project=None):
             continue
         if not (state[name]["interrupted"] or coord.is_handoff(name)) or coord.held_by_other(name, engine.name):
             continue
+        if state[name].get("retry_at", 0) > now:
+            # Still waiting after an error, a usage limit or a busy Docker: not even the resume runs.
+            waits.append(state[name]["retry_at"] - now)
+            continue
         lock = coord.try_lock(coord.group_of(p))
         if lock:
             return p, lock, None
@@ -813,6 +853,9 @@ def pick(cfg, engine, state, limits, next_project=None):
             continue
         if s["interrupted"] or coord.is_handoff(name):
             continue  # already handled above (the group was busy)
+        if s.get("retry_at", 0) > now:
+            waits.append(s["retry_at"] - now)
+            continue
         if s["status"] == "idle":
             continue
         if s["status"] == "waiting":
@@ -853,7 +896,7 @@ def pass_baton(engine, name, s):
     """End of the window: the work stays in the repository and the ledger, and any engine can resume it."""
     engine.close_unit(s)
     coord.hand_off(name, engine.name, s.get("unit_id"))
-    s.update(interrupted=False, session=None, early_ends=0, errors=0, unit_id=None)
+    s.update(interrupted=False, session=None, early_ends=0, errors=0, unit_id=None, retry_at=0)
 
 
 def hand_off_open_units(cfg, engine, state):
@@ -888,7 +931,7 @@ def run_once(cfg, engine, state, win=None, now=None):
     process_decisions(cfg, state)
     started = time.time()
     now = now or datetime.datetime.now()
-    ov = overrides.read(HOME)
+    ov = read_overrides()
     resets = state.setdefault("_resets", {})
     for name, ts in overrides.resets(ov).items():
         if name in state and name in {p["name"] for p in cfg["project"]} and ts > resets.get(name, 0):
@@ -944,8 +987,7 @@ def run_project(cfg, engine, state, project, limits, win):
     if not coord.claim(name, engine.name):
         log(f"{name}: claimed by the other engine; skipping")
         return 60
-    if not s["interrupted"] and not handoff:
-        overrides.take_next(HOME, name)
+    fresh = not s["interrupted"] and not handoff  # a new unit, not a resume
     if handoff:
         log(f"{name}: taking the baton left by {current.get('handoff_from')}")
         engine.close_unit(s)
@@ -960,8 +1002,14 @@ def run_project(cfg, engine, state, project, limits, win):
             ntfy(cfg, f"{engine.label}: Docker com problema",
                  f"Não consegui subir os containers de {name} ({docker}). Veja o log.", priority=4, tags=["warning"])
             state["_notify"]["docker_alerted"] = True
+        if docker == "busy":
+            # Only this project waits: the queue moves on to the next one on the following turn.
+            s["retry_at"] = time.time() + 600
+            return 5
         return 600
     state["_notify"]["docker_alerted"] = False
+    if fresh:
+        overrides.take_next(HOME, name)  # consumed only now that the unit really starts
     deadline = win.end_of(datetime.datetime.now()).timestamp() if win else None
     out, err, code, unit_file = run_unit(cfg, engine, state, project, deadline)
     wait = after_unit(cfg, engine, state, project, out, err, code, unit_file)
@@ -972,17 +1020,23 @@ def run_project(cfg, engine, state, project, limits, win):
 def cmd_run(args):
     cfg = load_config()
     engine = engines.make_engine(cfg)
+    # Handlers before the lock: once the pid is in the lock file the panel may send SIGUSR1, and the
+    # signal's default action would end the loop.
+    signal.signal(signal.SIGUSR1, request_interrupt)
+    early = make_exit_handler(None)
+    signal.signal(signal.SIGINT, early)
+    signal.signal(signal.SIGTERM, early)
     instance = instance_lock(engine.name)  # kept open while the loop runs
     if instance is None:
         sys.exit(f"the {engine.label} loop is already running (pid {running_pid(engine.name)})")
     state = load_state(cfg)
     win = schedule.from_config(cfg)
-
     on_signal = make_exit_handler(state)
-
     signal.signal(signal.SIGINT, on_signal)
     signal.signal(signal.SIGTERM, on_signal)
-    signal.signal(signal.SIGUSR1, request_interrupt)
+    # A loop that was killed leaves `running` behind; nothing runs until the first turn says so.
+    set_phase(state, "sleeping")
+    save_state(state)
     log(f"autopilot started ({engine.describe()}{', window ' + win.describe() if win else ''})")
     open_units = {p["name"]: state[p["name"]]["interrupted"] for p in cfg["project"]}
     for name in coord.reconcile(engine.name, open_units):
@@ -1034,7 +1088,7 @@ def status_lines(cfg, engine, state, limits, win, now):
         out.append(f"{p['name']:10} {s['status']:8} cap {p['weekly_cap']:>3}%  "
                    f"cost/unit {s['cost']['primary']:.1f}% (5 h) {s['cost']['secondary']:.2f}% (week)  "
                    f"{', '.join(flags)}")
-    pending = sum(1 for p in cfg["project"] for d in map(read_json, decision_files(p)) if d and "answer" not in d)
+    pending = sum(1 for p in cfg["project"] for d in map(read_decision, decision_files(p)) if d and "answer" not in d)
     if pending:
         out.append(f"\n{pending} pending decision(s): autopilot.py decisions")
     return out
@@ -1238,7 +1292,7 @@ def cmd_decisions(args):
     found = False
     for p in cfg["project"]:
         for path in decision_files(p):
-            d = read_json(path) or {}
+            d = read_decision(path) or {}
             if "answer" in d:
                 continue
             found = True
@@ -1257,7 +1311,7 @@ def cmd_answer(args):
     if not project:
         sys.exit(f"unknown project: {args.name}")
     path = Path(project["path"]) / DECISIONS / f"{args.id}.json"
-    d = read_json(path)
+    d = read_decision(path)
     if not d or "answer" in d:
         sys.exit("unknown or already answered decision")
     if args.option not in {o.get("id") for o in d.get("options") or []}:

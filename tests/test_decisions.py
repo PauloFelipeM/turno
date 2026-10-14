@@ -80,5 +80,24 @@ class DecisionsTest(unittest.TestCase):
         self.assertEqual((saved["since"], saved["since_typed"]), ("s-old", "t-old"))
 
 
+    def test_decision_file_that_is_not_an_object_is_ignored(self):
+        path = decision(self.project, "x1")
+        path.write_text("[1, 2]")
+        project = self.cfg["project"][0]
+        self.assertIsNone(self.ap.read_decision(path))
+        self.assertEqual(self.ap.open_decisions(project), [])
+        state = self.state()
+        state["my-app"]["status"] = "waiting"
+        self.ap.process_decisions(self.cfg, state)  # dispatch_decisions and the pending check
+        self.assertEqual(state["my-app"]["status"], "active")
+        self.assertEqual(path.read_text(), "[1, 2]")
+        self.assertEqual(self.titles(), [])
+        self.assertAlmostEqual(self.ap.next_deadline(project), time.time() + 300, delta=5)
+        self.ap.is_dirty = lambda p: False
+        self.cfg["project"][0]["weekly_cap"] = 90
+        lines = self.ap.status_lines(self.cfg, helpers.FakeEngine(["true"]), state, {}, None, None)
+        self.assertFalse([line for line in lines if "pending decision" in line])
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -1,6 +1,11 @@
+import json
+import os
+import signal
+import sys
 import threading
 import time
 import unittest
+from pathlib import Path
 
 import helpers
 import overrides
@@ -119,6 +124,173 @@ class ControlLoopTest(unittest.TestCase):
         t = time.time()
         self.ap.nap(self.cfg, self.state, 30)
         self.assertLess(time.time() - t, 7)
+
+
+    # retry_at: the wait after an error, a usage limit or a busy Docker, which waking early must not cancel
+
+    def failing_engine(self, status="error"):
+        engine = helpers.FakeEngine(TRUE, limits=self.limits)
+        engine.classify = lambda out, err, code: (status, None, False)
+        return engine
+
+    def pick_wait(self, engine):
+        project, lock, wait = self.ap.pick(self.cfg, engine, self.state, self.limits)
+        if lock:
+            self.coord.unlock(lock)
+        return (project["name"] if project else None), wait
+
+    def test_load_state_starts_retry_at_at_zero(self):
+        self.assertEqual(self.state["my-api"]["retry_at"], 0)
+
+    def test_error_backoff_holds_the_interrupted_unit_until_retry_at(self):
+        self.state["my-app"]["status"] = self.state["side-project"]["status"] = "idle"
+        engine = self.failing_engine()
+        wait = self.ap.run_once(self.cfg, engine, self.state)
+        s = self.state["my-api"]
+        self.assertTrue(s["interrupted"])
+        self.assertAlmostEqual(s["retry_at"], time.time() + wait, delta=5)
+        name, again = self.pick_wait(engine)
+        self.assertIsNone(name)
+        self.assertAlmostEqual(again, wait, delta=5)
+        s["retry_at"] = time.time() - 1
+        self.assertEqual(self.pick_wait(engine)[0], "my-api")
+
+    def test_waking_early_three_times_does_not_rerun_a_failed_unit(self):
+        self.state["my-app"]["status"] = self.state["side-project"]["status"] = "idle"
+        engine = self.failing_engine()
+        for _ in range(3):  # three clicks on the panel: three turns in a row
+            self.ap.run_once(self.cfg, engine, self.state)
+        self.assertEqual(self.state["my-api"]["errors"], 1)
+        self.assertEqual(self.ap.LOG.read_text().count("my-api: new unit"), 1)
+        self.assertFalse([t for t, _ in self.ap.sent if "erros seguidos" in t])
+
+    def test_usage_limit_backoff_holds_the_interrupted_unit_until_retry_at(self):
+        self.state["my-app"]["status"] = self.state["side-project"]["status"] = "idle"
+        engine = self.failing_engine("usage_limit")
+        wait = self.ap.run_once(self.cfg, engine, self.state)
+        s = self.state["my-api"]
+        self.assertGreaterEqual(wait, 300)
+        self.assertAlmostEqual(s["retry_at"], time.time() + wait, delta=5)
+        self.assertIsNone(self.pick_wait(engine)[0])
+        s["retry_at"] = time.time() - 1
+        self.assertEqual(self.pick_wait(engine)[0], "my-api")
+
+    def test_retry_at_also_holds_a_project_without_an_interrupted_unit(self):
+        self.state["my-app"]["retry_at"] = time.time() + 300
+        self.assertEqual(self.pick_cfg(), "my-api")
+
+    def test_closing_the_unit_clears_retry_at(self):
+        project = self.projects[1]
+        unit = Path(project["path"]) / ".superpowers" / "autopilot" / "last-unit.json"
+        engine = helpers.FakeEngine([sys.executable, "-c",
+                                     f"import pathlib; p = pathlib.Path({str(unit)!r}); p.parent.mkdir(parents=True, exist_ok=True); "
+                                     "p.write_text('{\"status\": \"worked\", \"unit\": \"u\", \"summary\": \"s\"}')"],
+                                    limits=self.limits)
+        self.state["my-app"]["status"] = self.state["side-project"]["status"] = "idle"
+        self.state["my-api"].update(interrupted=True, retry_at=time.time() - 1)
+        self.ap.run_once(self.cfg, engine, self.state)
+        self.assertFalse(self.state["my-api"]["interrupted"])
+        self.assertEqual(self.state["my-api"]["retry_at"], 0)
+
+    def test_other_endings_of_a_run_clear_retry_at(self):
+        project = self.projects[1]
+        engine = helpers.FakeEngine(TRUE, limits=self.limits)
+        s = self.state["my-api"]
+        missing = Path(project["path"]) / "no-last-unit.json"
+        for code in (self.ap.STOPPED, 0, self.ap.CUT):  # stopped, unfinished, cut
+            self.coord.claim("my-api", "claude")
+            s["retry_at"] = 123.0
+            self.ap.after_unit(self.cfg, engine, self.state, project, "out", "err", code, missing)
+            self.assertEqual(s["retry_at"], 0, code)
+
+    # Docker
+
+    def test_docker_busy_lets_the_queue_move_on(self):
+        self.ap.prepare_docker = lambda cfg, project: "busy" if project["name"] == "my-app" else "ok"
+        engine = self.failing_engine()
+        wait = self.ap.run_once(self.cfg, engine, self.state)
+        self.assertLessEqual(wait, 5)
+        self.assertAlmostEqual(self.state["my-app"]["retry_at"], time.time() + 600, delta=5)
+        self.assertIsNone(self.coord.read_claim("my-app"))  # nothing started: the claim is released
+        self.assertEqual(self.ap.sent, [])  # busy is not a Docker problem: no alert
+        self.ap.run_once(self.cfg, engine, self.state)
+        text = self.ap.LOG.read_text()
+        self.assertIn("my-api: new unit", text)
+        self.assertNotIn("my-app: new unit", text)
+
+    def test_docker_down_still_makes_the_loop_wait_and_warns_once(self):
+        self.ap.prepare_docker = lambda cfg, project: "docker-down"
+        engine = self.failing_engine()
+        self.assertEqual(self.ap.run_once(self.cfg, engine, self.state), 600)
+        self.assertEqual(self.ap.run_once(self.cfg, engine, self.state), 600)
+        self.assertEqual(len([t for t, _ in self.ap.sent if "Docker" in t]), 1)
+        self.assertEqual(self.state["my-app"]["retry_at"], 0)
+
+    def test_next_is_only_consumed_when_docker_is_ready(self):
+        self.set_ov(lambda d: d.update(next="side-project"))
+        self.ap.prepare_docker = lambda cfg, project: "busy"
+        engine = self.failing_engine()
+        self.ap.run_once(self.cfg, engine, self.state)
+        self.assertEqual(overrides.read(self.tmp).get("next"), "side-project")
+        self.assertFalse(self.ap.LOG.exists() and "new unit" in self.ap.LOG.read_text())
+        self.ap.prepare_docker = lambda cfg, project: "ok"
+        self.state["side-project"]["retry_at"] = 0
+        self.ap.run_once(self.cfg, engine, self.state)
+        self.assertNotIn("next", overrides.read(self.tmp))
+        self.assertIn("side-project: new unit", self.ap.LOG.read_text())
+
+    # waking up, the start of the loop and a broken overrides file
+
+    def test_nap_wakes_for_a_change_made_between_the_read_and_the_nap(self):
+        for p in self.projects:
+            self.state[p["name"]]["status"] = "idle"
+        self.ap.run_once(self.cfg, helpers.FakeEngine(TRUE, limits=self.limits), self.state)  # reads the overrides
+        self.set_ov(lambda d: d.update(next="my-api"))  # a click that lands before the nap starts
+        t = time.time()
+        self.ap.nap(self.cfg, self.state, 14)
+        self.assertLess(time.time() - t, 8)
+
+    def test_unreadable_overrides_is_logged_once_per_change(self):
+        for p in self.projects:
+            self.state[p["name"]]["status"] = "idle"
+        engine = helpers.FakeEngine(TRUE, limits=self.limits)
+        count = lambda: self.ap.LOG.read_text().count("overrides.json is unreadable; ignoring it") if self.ap.LOG.exists() else 0
+        self.ap.run_once(self.cfg, engine, self.state)
+        self.assertEqual(count(), 0)  # a missing file is not an unreadable one
+        path = self.tmp / "overrides.json"
+        path.write_text("{nope")
+        self.ap.run_once(self.cfg, engine, self.state)
+        self.ap.run_once(self.cfg, engine, self.state)
+        self.assertEqual(count(), 1)
+        path.write_text("[1, 2]")
+        os.utime(path, ns=(1, path.stat().st_mtime_ns + 1_000_000))
+        self.ap.run_once(self.cfg, engine, self.state)
+        self.ap.run_once(self.cfg, engine, self.state)
+        self.assertEqual(count(), 2)
+
+    def test_cmd_run_installs_the_handlers_before_the_lock_and_clears_a_stale_phase(self):
+        for sig in (signal.SIGINT, signal.SIGTERM, signal.SIGUSR1):
+            self.addCleanup(signal.signal, sig, signal.getsignal(sig))
+        self.ap.set_phase(self.state, "running", "my-api")  # left behind by a loop that was killed
+        self.ap.save_state(self.state)
+        self.ap.load_config = lambda: self.cfg
+        self.ap.engines.make_engine = lambda cfg: helpers.FakeEngine(TRUE, name="codex")
+        seen = {}
+        real_lock = self.ap.instance_lock
+
+        def lock(name):
+            seen["handlers"] = [signal.getsignal(s) for s in (signal.SIGINT, signal.SIGTERM, signal.SIGUSR1)]
+            return real_lock(name)
+
+        def run_once(cfg, engine, state, win=None):
+            seen["phase"] = json.loads(self.ap.STATE.read_text())["_loop"]["phase"]
+            return None
+
+        self.ap.instance_lock, self.ap.run_once = lock, run_once
+        self.ap.cmd_run(None)
+        self.assertIs(seen["handlers"][2], self.ap.request_interrupt)
+        self.assertTrue(all(callable(h) and h is not signal.default_int_handler for h in seen["handlers"][:2]))
+        self.assertEqual(seen["phase"], "sleeping")
 
 
 if __name__ == "__main__":

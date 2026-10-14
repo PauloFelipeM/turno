@@ -132,5 +132,17 @@ class InterruptTest(unittest.TestCase):
         self.assertEqual(self.lines(), [])
 
 
+    def test_exit_signal_still_lets_the_engine_read_the_run(self):
+        calls = []
+        self.engine.after_run = lambda state, s, out, resume: calls.append((Path(out).name, resume))
+        old = signal.signal(signal.SIGTERM, self.ap.make_exit_handler(self.state))
+        self.addCleanup(signal.signal, signal.SIGTERM, old)
+        self.fire_when_running(signal.SIGTERM)
+        with self.assertRaises(SystemExit):
+            self.ap.run_unit(self.cfg, self.engine, self.state, self.project)
+        [line] = self.lines()
+        self.assertEqual(calls, [(line["run"] + ".jsonl", False)])
+
+
 if __name__ == "__main__":
     unittest.main()
