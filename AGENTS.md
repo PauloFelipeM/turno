@@ -233,7 +233,7 @@ Invariants a change must not break:
   symlink, at most 200 KB each.
 - **The panel's controls:** the settings screen ("⚙ Configurações"), with Projects (add, edit, reorder,
   remove; the name is never changed) and Engines (on/off, models, window, caps, and a check of the CLI
-  and the quota) and General (language, ntfy on/off, server, decision timeout); start and stop per engine; the "Needs you" strip, with the pending
+  and the quota) and General (language, ntfy on/off, server, decision timeout); start and stop per engine; the "Needs you" strip ("Precisa de você" in pt-BR), with the pending
   decisions (answer, with an optional comment) and the blocked projects (reactivate, which writes
   `reset`); pause, next and interrupt on each project card; the project panel with a message to the
   agents, the caps and, while the project waits on a `retry_at`, "Tentar agora" (also `reset`); "Preparar com um agente" in the settings screen for a project without `docs/autopilot.md`, and the setup review (approve, ask for changes, cancel) in the project panel.

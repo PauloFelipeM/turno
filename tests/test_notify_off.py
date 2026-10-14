@@ -59,10 +59,22 @@ class NotifyOffLoopTest(unittest.TestCase):
         self.assertEqual((self.ap.sent, self.fetched), ([], []))
 
     def test_turning_it_back_on_does_not_replay_what_was_typed_meanwhile(self):
-        self.ap.process_decisions(self.cfg, self.ap.load_state(self.cfg))
-        saved = json.loads((self.ap.coord.SHARED / "notify.json").read_text())
+        # Off for several turns, with an old read position; then on again.
+        coord = self.ap.coord
+        coord.save_notify({"since": "100", "since_typed": "100"})
+        for _ in range(3):
+            self.ap.process_decisions(self.cfg, self.ap.load_state(self.cfg))
+        off_at = int(time.time())
+        saved = json.loads((coord.SHARED / "notify.json").read_text())
         self.assertEqual(saved["since"], saved["since_typed"])
-        self.assertGreaterEqual(int(saved["since"]), int(time.time()) - 5)
+        self.assertGreaterEqual(int(saved["since"]), off_at - 5)
+        self.cfg["notify"]["enabled"] = True
+        seen = []
+        self.ap.fetch_messages = lambda cfg, topic, since, label: seen.append((topic, since)) or []
+        self.ap.process_decisions(self.cfg, self.ap.load_state(self.cfg))
+        self.assertEqual([t for t, _ in seen], ["T-reply", "T"])
+        for _, since in seen:
+            self.assertGreaterEqual(int(since), off_at - 5)  # never the old position
 
     def test_on_with_a_topic_still_sends(self):
         self.cfg["notify"]["enabled"] = True

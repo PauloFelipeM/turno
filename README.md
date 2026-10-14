@@ -145,7 +145,7 @@ legal matters, scope), the orchestrator writes it with two or three options and 
 project waits. You answer with the notification buttons or by typing the letter in the topic (`B`,
 or `myapp B` when several projects are waiting). Without an answer, the default applies at the
 deadline (`decision_timeout_hours`). Without ntfy (switched off, or on without a topic in
-`secrets.toml`) the question waits in the panel's "Precisa de você" strip; the deadline and the
+`secrets.toml`) the question waits in the panel's "Needs you" strip ("Precisa de você" in pt-BR); the deadline and the
 default still apply.
 
 Any other text you type in the topic becomes a message to the agents. It goes to the projects named
