@@ -39,7 +39,7 @@ panel's start, stop or interrupt endpoints (`/api/engines/<engine>/start|stop`,
 | `panel.py` | What the panel shows, assembled from the files (read-only) |
 | `overrides.py` | The panel's requests to the loops (`~/.turno/overrides.json`), read-modify-write under a lock |
 | `server.py` | The panel's HTTP server on 127.0.0.1: API, events (SSE) and `web/` |
-| `control.py` | What the panel's write routes do (pause, next, interrupt, start/stop, decisions, messages, settings); they need the `X-Turno: 1` header, JSON and a local `Host`/`Origin` |
+| `control.py` | What the panel's write routes do (pause, next, interrupt, reactivate, start/stop, decisions, messages, settings); they need the `X-Turno: 1` header, JSON and a local `Host`/`Origin` |
 | `web/` | Interface: `index.html`, `app.js`, `style.css`, `i18n/pt-BR.js` |
 | `prompts/unit.md` | Prompt of every new unit: the protocol the orchestrator follows |
 | `prompts/resume.md` | Prompt to resume an interrupted unit |
@@ -83,31 +83,53 @@ Each instance has an engine (`[engine] kind`, `codex` by default). On every turn
    project by priority that is not `idle`, `waiting` or in `blocked` cooldown, not claimed by the
    other engine, with a clean tree, and whose usage plus `safety_factor` × the learned cost fits under
    `weekly_cap` (week) and `primary_cap` (5 h). A project that does not fit does not hold up the line:
-   the next, cheaper one may run. It takes the group lock (`shared/<docker_group or name>.lock`);
+   the next, cheaper one may run. In both passes a project whose `retry_at` is still in the future
+   is skipped, interrupted unit or not. It takes the group lock (`shared/<docker_group or name>.lock`);
 5. `run_project`: writes the claim, `prepare_docker` (stops the stack of the other project in the
-   group unless it has uncommitted work, and brings this project's up);
+   group unless it has uncommitted work, and brings this project's up). If the ports are busy with
+   someone's uncommitted work, only this project waits (`retry_at`, 10 min) and the queue moves on
+   to the next one; if Docker is down or compose fails, the whole loop waits 10 min and warns once;
 6. `run_unit` (saves the state, including `unit_id`, `run` and the `_loop` phase, before starting
    the CLI; with a window, cuts at its end) and `after_unit`: classifies the output (`usage_limit`,
    `error`, `ok` or cut), writes one history line, learns the unit cost (exponential moving average),
-   releases or passes the claim and updates the state;
-7. `nap`: sleeps in 5-second steps; reads ntfy answers once a minute, and wakes at once when
-   `overrides.json` changes.
+   releases or passes the claim and updates the state. After `usage_limit` or `error` it writes
+   `retry_at`, the time before which the project does not run again;
+7. `nap`: sleeps in 5-second steps; reads ntfy answers once a minute, and wakes when
+   `overrides.json` has changed since `run_once` last read it (so a request written between the
+   read and the nap is not lost).
+
+`retry_at` (per project, in the state file) is the wait after an error, a usage limit or a busy
+Docker. Waking early does not cancel it: a click on the panel wakes the loop, but `pick` still skips
+the project, even to resume its interrupted unit, until that time. It goes back to 0 when the unit
+closes and when a later run ends another way (unfinished, cut, stopped); the panel's reactivate and
+`autopilot.py reset` do not touch it.
 
 At the start of each turn the loop re-reads `overrides.json` and applies it over the config: project
 order, `paused` (a paused project is skipped, even with an interrupted unit, which waits for the resume), the
-caps of the panel's "Order and caps" window, `next` (the project that goes first, consumed when it
-starts), `reset` (puts a project back to `active`) and `poke` (refreshed on every write, to wake
-the nap).
+caps of the panel's "Order and caps" window, `next` (the next *new* unit goes to this project if it
+fits the quota, after the interrupted units and the batons; the key is consumed when that unit
+really starts, with Docker up), `reset` (puts a project back to `active`) and `poke` (refreshed on
+every write, to wake the nap). A file that exists but is not a JSON object counts as no overrides
+and is reported in the log once per change of the file.
 
 `SIGUSR1` interrupts the running unit: the handler only notes the request and signals the unit's
-process group, and never waits. The panel pauses the project first, so the loop does not pick it
-again. The unit stays `interrupted` (no cost learned) and is resumed after the project is resumed. The outcome
-`stopped` (a history line) covers this and also `stop` (SIGINT/SIGTERM) in the middle of a unit.
+process group, and never waits. `cmd_run` installs the handlers before it takes the instance lock,
+so the pid in the lock file always belongs to a process that handles the signal. Before sending it,
+the panel checks in `/proc/<pid>/status` (`SigCgt`) that the loop has a `SIGUSR1` handler: without
+one the signal's default action would end the loop, so a loop started by an older version answers
+409 `restart_needed` and has to be stopped and started again before it accepts the interrupt. The
+order is: check, pause the project (so the loop does not pick it again), signal. The unit stays
+`interrupted` (no cost learned) and is resumed after the project is resumed. The outcome `stopped`
+(a history line) covers this and also `stop` (SIGINT/SIGTERM) in the middle of a unit.
 
 Invariants a change must not break:
 
 - **Nothing is left half-done.** `interrupted` only goes back to `False` when the unit closes with
-  `last-unit.json`. An interrupted unit is resumed before any other, even above the cap.
+  `last-unit.json`. An interrupted unit is resumed before any other, even above the cap. Two things
+  suspend "the interrupted unit goes first" for one project, without closing the unit: a pause from
+  the panel (until the owner resumes it) and a `retry_at` in the future.
+- **A wait is not cancelled by waking early.** After an error, a usage limit or a busy Docker the
+  project does not run before `retry_at`, however many times the panel wakes the loop.
 - **Someone else's work is not touched.** A project with a dirty tree and no interrupted unit is
   skipped, and its Docker stack is not stopped.
 - **Cost is measured once per unit**, only when it closes: a resume does not count twice.
@@ -128,14 +150,16 @@ Invariants a change must not break:
   from the ledger.
 - **Claude only works inside its window and with the quota read.** Outside it, it does not even query
   the quota.
-- **The panel writes only three things.** `overrides.json` (under `shared/overrides.lock`), decision
-  answers in the decision files (under `shared/decisions.lock`) and the owner's notes (through
-  `coord.add_note`). It also starts and stops the loops through tmux and signals. It never edits the
-  state files, the `.toml` files or the projects, and never loads `secrets.toml`. It listens only on
-  `127.0.0.1`; write routes need `X-Turno: 1`, a JSON body and a local `Host` and `Origin`.
-- **The panel's controls:** start and stop per engine; the "Needs you" strip (pending decisions and
-  messages); pause, next and interrupt on each project card; the project panel with a message and
-  caps; and the "Order and caps" window.
+- **What the panel writes.** `overrides.json` (under `shared/overrides.lock`), decision answers in
+  the decision files (under `shared/decisions.lock`) and the owner's notes (through
+  `coord.add_note`); answering a decision also adds a line to the log (`autopilot.answer_decision`).
+  It also starts and stops the loops through tmux and signals. It never edits the state files, the
+  `.toml` files or the projects, and never loads `secrets.toml`. It listens only on `127.0.0.1`;
+  write routes need `X-Turno: 1`, a JSON body and a local `Host` and `Origin`.
+- **The panel's controls:** start and stop per engine; the "Needs you" strip, with the pending
+  decisions (answer, with an optional comment) and the blocked projects (reactivate, which writes
+  `reset`); pause, next and interrupt on each project card; the project panel with a message to the
+  agents and the caps; and the "Order and caps" window.
 - **History per run.** Every finished run becomes one line in `history-<engine>.jsonl`; summary and
   cost only on the run that closes the unit.
 

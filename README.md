@@ -22,7 +22,9 @@ backlog is left.
   if the usage plus 1.5 times the unit's learned average cost fits under the project's cap. Projects
   are in priority order; a project that does not fit does not hold up a cheaper one.
 - **Nothing left half-done.** An interrupted unit (usage limit, error, end of a time window) is
-  resumed before anything else.
+  resumed before anything else, once its wait is over: after an error or a usage limit the project
+  rests for a while (longer after repeated errors, until the reset after a usage limit), and
+  nothing you click in the panel shortens that.
 - **Two engines.** One instance runs Codex, another runs Claude Code (by default only on weekends).
   They never work on the same project, or on two projects that share Docker ports, at the same time.
   A unit cut at the end of the Claude window is handed over (the "baton") to whichever engine runs
@@ -110,28 +112,39 @@ data).
 
 `serve` shows, on one screen: the quota of each engine with its cap and reset time, what each loop
 is doing, every project with its state and backlog progress, the running unit live (commands, file
-changes, which subagent was called) and the unit history with outcome, duration and cost. It only
-reads files for display: it can stay open while the loops run, and closing it affects nothing. It
-listens on 127.0.0.1 only and refuses requests from other origins.
+changes, which subagent was called) and the unit history with outcome, duration and cost. It can
+stay open while the loops run, and closing it affects nothing. It listens on 127.0.0.1 only and
+refuses requests from other origins.
 
 It also controls the loops:
 
 | Control | What it does |
 |---|---|
 | Start / Stop (per engine) | Starts the loop in tmux, or stops it like a Ctrl+C: the unit stops and is resumed on the next start |
-| "Needs you" strip | Pending decisions to answer, and messages to the agents |
-| Pause / resume (project card) | A paused project is skipped by the loop |
-| Next (project card) | That project goes first on the next turn |
+| "Needs you" strip | Pending decisions to answer (with an optional comment) and blocked projects to reactivate |
+| Reactivate (blocked project, in the strip) | Puts the project back to `active`, like `reset <project>` |
+| Pause / resume (project card) | A paused project is skipped by the loop, even if it has an interrupted unit; the unit waits for the resume |
+| Next (project card) | The next *new* unit goes to that project, if it fits the quota; interrupted units and batons still go first |
 | Interrupt (project card) | Pauses the project and stops its running unit (`SIGUSR1`); resume it to continue |
 | Project panel | A message to the agents, and the project's caps |
 | "Order and caps" window | Project order, weekly caps per engine and the 5-hour cap |
 
-The panel never edits state or config. Its requests go to `overrides.json` in `~/.turno`
-(`order`, `projects.<name>.paused`, `projects.<name>.weekly_cap.<engine>`, `primary_cap.<engine>`,
-`next`, `reset`, `poke`); the loops re-read it on every turn and, while asleep, check it every 5
-seconds. Decision answers and messages use the same files as the phone. A unit interrupted from
-the panel, or by `stop`, appears in the history as `stopped`. Write requests need the `X-Turno: 1`
-header and a local origin.
+The panel never edits state or config. It writes three kinds of file: its requests to the loops, in
+`overrides.json` in `~/.turno` (`order`, `projects.<name>.paused`,
+`projects.<name>.weekly_cap.<engine>`, `primary_cap.<engine>`, `next`, `reset`, `poke`); decision
+answers, in the same decision files the phone uses (each answer is also noted in the log); and
+messages to the agents, in the same notes as the phone. The loops re-read `overrides.json` on every
+turn and, while asleep, check it every 5 seconds. A unit interrupted from the panel, or by `stop`,
+appears in the history as `stopped`. Write requests need the `X-Turno: 1` header and a local origin.
+
+Two things a click does not do:
+
+- **It does not shorten a wait.** After an error, a usage limit or Docker ports held by another
+  project's uncommitted work, the project has a retry time (`retry_at` in the state file). A click
+  wakes the loop, which then works on the other projects; that one stays out until its time comes.
+- **It does not interrupt a loop started by an older version.** Interrupt needs a loop that handles
+  `SIGUSR1`; the panel checks first, and if the loop does not, it refuses and asks you to stop and
+  start that loop again. Nothing is paused or signalled in that case.
 
 ## What stops the loop
 
