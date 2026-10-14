@@ -97,6 +97,12 @@ class SetupApiTest(unittest.TestCase):
         self.setup.update(self.home, "side-project", lambda cur: {**cur, "status": "done"})
         self.assertEqual(self.call("POST", "/api/projects/side-project/setup", {"goal": "new"})[0], 200)
 
+    def test_create_refused_while_a_unit_is_open(self):
+        (self.home / "state.json").write_text(json.dumps({"side-project": {"interrupted": True}}))
+        status, out = self.call("POST", "/api/projects/side-project/setup", {"goal": "g"})
+        self.assertEqual((status, out["error"]), (409, "busy"))
+        self.assertIsNone(self.phase())
+
     # read
 
     def test_get_setup_has_the_request_and_the_draft_files(self):

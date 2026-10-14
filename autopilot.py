@@ -594,6 +594,18 @@ def owner_messages(messages):
 SETUP_MODES = {"requested": "draft", "approved": "apply"}
 
 
+EXCLUDE_LOGGED = set()
+
+
+def exclude_setup(name, path):
+    """`setup.ensure_excluded` with the failure logged once per project, not on every turn of the loop."""
+    def failed(message):
+        if name not in EXCLUDE_LOGGED:
+            EXCLUDE_LOGGED.add(name)
+            log(f"{name}: {message}")
+    return setup.ensure_excluded(path, on_error=failed)
+
+
 def setup_mode(name):
     """"draft" or "apply" while the project's setup request asks for a unit; None otherwise."""
     return SETUP_MODES.get(setup.phase(HOME, name))
@@ -752,9 +764,11 @@ def run_unit(cfg, engine, state, project, deadline=None):
     s = state[project["name"]]
     path = project["path"]
     resume = engine.resumable(s)
-    mode = setup_mode(project["name"])  # read on every run: a resume keeps the setup section
+    # A new unit takes its mode from the request now; a resume (or a baton) keeps the mode it started with,
+    # so a normal unit never turns into a setup one, nor a draft into a normal one, midway.
+    mode = s.get("setup") if s["interrupted"] else setup_mode(project["name"])
     if mode:
-        setup.ensure_excluded(path)  # also for a resume or a baton, which skip pick's clean-tree pass
+        exclude_setup(project["name"], path)  # also for a resume or a baton, which skip pick's clean-tree pass
     base = "resume.md" if resume else ("setup.md" if mode else "unit.md")
     # replace, not format: the prompts have JSON examples with braces.
     prompt = (PROMPTS / base).read_text().replace("{project}", project["name"])
@@ -1000,9 +1014,12 @@ def pick(cfg, engine, state, limits, next_project=None):
         if coord.held_by_other(name, engine.name):
             waits.append(600)
             continue
-        if setup_unit:
-            setup.ensure_excluded(p["path"])  # before the clean-tree check: the draft must not dirty the tree
-        if is_dirty(p["path"]):
+        dirty = is_dirty(p["path"])
+        if dirty and setup_unit:
+            # Only for the project about to run: the draft must not count as someone else's changes.
+            exclude_setup(name, p["path"])
+            dirty = is_dirty(p["path"])
+        if dirty:
             if not s["dirty_logged"]:
                 log(f"{name}: tree has changes that are not the autopilot's; skipping until it is clean")
                 s["dirty_logged"] = True

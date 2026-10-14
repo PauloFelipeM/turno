@@ -374,6 +374,8 @@ def request_setup(home, name, body):
         raise ApiError(400, "not_git", "the project folder is not a git repository")
     if (root / "docs" / "autopilot.md").exists():
         raise ApiError(409, "prepared", "the project already has docs/autopilot.md")
+    if panel.blocked_by(home, name):
+        raise ApiError(409, "busy", "the project has an open unit; try again when it closes")
 
     def fn(cur):
         if cur and cur["status"] in setup.OPEN:

@@ -22,7 +22,7 @@ export default {
     bad_request: "Pedido inválido. Confira os campos e tente de novo.",
     not_found: "Não encontrado: o projeto, o motor ou a decisão não existe mais.",
     already_running: "O loop já está rodando.",
-    busy: "O agendador está lendo as decisões agora; tente de novo em alguns segundos.",
+    busy: "O agendador está ocupado agora (lendo decisões ou com uma unidade aberta neste projeto); tente de novo mais tarde.",
     not_running: "Nada rodando para parar ou interromper.",
     paused: "O projeto está pausado; retome antes.",
     restart_needed: "Este loop precisa ser reiniciado para aceitar a interrupção.",

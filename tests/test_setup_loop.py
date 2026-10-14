@@ -201,6 +201,62 @@ class SetupLoopTest(unittest.TestCase):
         self.assertNotIn("Rascunho do alpha pronto para revisar", self.titles())
         self.assertNotEqual(self.state["alpha"]["status"], "blocked")
 
+    # the mode of a resumed unit
+
+    def test_a_normal_interrupted_unit_stays_normal_when_a_request_appears(self):
+        self.state["beta"].update(interrupted=True, session="s1", setup=None)
+        self.request("beta")
+        prompt = self.run_and_close("beta", ECHO, resumable=True)
+        self.assertIn("resumed after an interruption", prompt)
+        self.assertNotIn("Setup unit — mode", prompt)
+        self.assertIsNone(self.state["beta"]["setup"])
+        self.assertEqual(self.phase("beta"), "requested")
+
+    def test_an_interrupted_draft_stays_a_draft_and_a_cancelled_request_does_not_block(self):
+        self.request("alpha")
+        self.run_and_close("alpha", [sys.executable, "-c", "import sys; sys.exit(1)"])
+        self.assertEqual(self.state["alpha"]["setup"], "draft")
+        self.setup.delete(self.tmp, "alpha")  # the owner cancels while the unit is open
+        self.state["alpha"]["status"] = "active"
+        cmd = closer(self.unit_file("alpha"), "waiting")
+        cmd[2] = "import sys; print(sys.stdin.read())\n" + cmd[2]
+        prompt = self.run_and_close("alpha", cmd, resumable=True)
+        self.assertIn("Setup unit — mode: draft.", prompt)
+        self.assertIsNone(self.phase("alpha"))
+        self.assertFalse(self.state["alpha"]["interrupted"])
+        self.assertNotEqual(self.state["alpha"]["status"], "blocked")
+        self.assertNotIn("alpha: bloqueado", self.titles())
+
+    def test_a_tampered_request_does_not_break_the_prompt(self):
+        path = self.tmp / "setup" / "alpha.json"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps({**self.setup.new_request("g"), "feedback": 5}))
+        prompt = self.run_and_close("alpha", ECHO)
+        self.assertNotIn("Setup unit — mode", prompt)
+
+    def test_exclude_failure_is_logged_once_per_project(self):
+        self.ap.EXCLUDE_LOGGED.clear()
+        logged = []
+        self.ap.log = logged.append
+        real = self.setup.ensure_excluded
+        self.setup.ensure_excluded = lambda path, on_error=None: on_error("boom") and False
+        self.addCleanup(setattr, self.setup, "ensure_excluded", real)
+        for _ in range(3):
+            self.ap.exclude_setup("alpha", self.root("alpha"))
+        self.assertEqual([m for m in logged if "boom" in m], ["alpha: boom"])
+
+    def test_pick_does_not_touch_the_exclude_of_projects_that_do_not_run(self):
+        self.request("beta")
+        self.request("alpha")
+        (self.root("beta") / ".superpowers" / "sdd").mkdir(parents=True)
+        (self.root("beta") / ".superpowers" / "sdd" / "l.md").write_text("x")
+        calls = []
+        real = self.setup.ensure_excluded
+        self.setup.ensure_excluded = lambda path, on_error=None: calls.append(str(path)) or real(path)
+        self.addCleanup(setattr, self.setup, "ensure_excluded", real)
+        self.assertEqual(self.pick(), "alpha")  # first in the queue, clean: no exclude call at all
+        self.assertEqual(calls, [])
+
     # around the units
 
     def test_a_project_in_review_stays_waiting(self):
