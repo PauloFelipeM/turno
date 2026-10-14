@@ -344,7 +344,8 @@ def remove_project(home, name):
 
 
 ENGINE_FIELDS = ("enabled", "orchestrator_model", "orchestrator_effort", "max_subagents", "primary_cap", "fable_cap",
-                 "safety_factor", "blocked_cooldown_hours", "schedule")
+                 "safety_factor", "blocked_cooldown_hours", "schedule", "roles")
+ROLE_FIELDS = ("model", "effort")
 SCHEDULE_FIELDS = ("start", "end", "start_margin_minutes")
 DEFAULT_MARGIN = 15  # like schedule.from_config and the TOML import
 
@@ -363,9 +364,26 @@ def put_engine(home, engine, body):
             raise bad("schedule must be null or an object")
         _check_fields(sched, SCHEDULE_FIELDS)
         new["schedule"] = {"start_margin_minutes": DEFAULT_MARGIN, **sched}
+    roles = new.pop("roles", None)
+    if roles is not None:
+        if not isinstance(roles, dict):
+            raise bad("roles must be an object")
+        for role, v in roles.items():
+            if role in config.ROLES and isinstance(v, dict):
+                _check_fields(v, ROLE_FIELDS)
 
     def fn(d):
-        d["engines"].setdefault(engine, copy.deepcopy(config.ENGINE_DEFAULTS[engine])).update(new)
+        e = d["engines"].setdefault(engine, copy.deepcopy(config.ENGINE_DEFAULTS[engine]))
+        e.update(new)
+        if roles is not None:
+            # A partial body merges into the current roles (missing ones come from the defaults).
+            merged = config.full_roles(engine, e.get("roles"))
+            for role, v in roles.items():
+                if role in config.ROLES and isinstance(v, dict):
+                    merged[role].update(v)
+                else:
+                    merged[role] = v  # invalid: validation rejects it with the right message
+            e["roles"] = merged
     _save(home, fn)
     return 200, {"ok": True}
 

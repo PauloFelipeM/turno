@@ -304,6 +304,8 @@ def config_view(home):
         if kind in data["engines"]:
             engine_view[kind] = {**config.ENGINE_DEFAULTS[kind], **data["engines"][kind],
                                  "cli": engines.cli_status(kind)}
+            engine_view[kind]["roles"] = config.full_roles(kind, data["engines"][kind].get("roles"))
+            engine_view[kind]["known_models"] = list(config.KNOWN_MODELS[kind])
     return {"projects": projects, "engines": engine_view, "notify": dict(data["notify"])}
 
 

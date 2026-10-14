@@ -209,6 +209,35 @@ class ConfigApiTest(unittest.TestCase):
         self.assertEqual(self.call("PUT", "/api/engines/codex", {"max_subagents": 3})[0], 200)
         self.assertEqual(self.cfg()["engines"]["codex"]["max_subagents"], 3)
 
+    def test_put_engine_roles_merge_into_the_current_ones(self):
+        d = self.config.ENGINE_DEFAULTS
+        self.assertEqual(self.call("PUT", "/api/engines/claude", {"roles": {"planner": {"model": "claude-fable-5-1"}}})[0], 200)
+        roles = self.cfg()["engines"]["claude"]["roles"]
+        self.assertEqual(roles["planner"], {"model": "claude-fable-5-1", "effort": "high"})
+        self.assertEqual(roles["reviewer"], d["claude"]["roles"]["reviewer"])
+        self.assertEqual(self.call("PUT", "/api/engines/codex", {"roles": {"reviewer": {"effort": "low"}}})[0], 200)
+        roles = self.cfg()["engines"]["codex"]["roles"]
+        self.assertEqual(roles["reviewer"], {"model": "gpt-6-astra", "effort": "low"})
+        self.assertEqual(roles["planner"], d["codex"]["roles"]["planner"])
+
+    def test_put_engine_roles_errors_leave_the_file_alone(self):
+        before = self.raw()
+        bad = [{"roles": []}, {"roles": "x"}, {"roles": {"orchestrator": {"model": "m"}}},
+               {"roles": {"plan-reviewer": {"model": "m"}}}, {"roles": {"planner": "x"}},
+               {"roles": {"planner": {"model": ""}}}, {"roles": {"planner": {"model": "a b"}}},
+               {"roles": {"planner": {"effort": ""}}}, {"roles": {"planner": {"colour": "red"}}}]
+        for b in bad:
+            status, body = self.call("PUT", "/api/engines/codex", b)
+            self.assertEqual((status, body["error"]), (400, "bad_request"), b)
+        self.assertEqual(self.raw(), before)
+
+    def test_get_config_has_roles_and_known_models(self):
+        status, v = self.call("GET", "/api/config")
+        self.assertEqual(status, 200)
+        for engine in ("codex", "claude"):
+            self.assertEqual(v["engines"][engine]["roles"], self.config.ENGINE_DEFAULTS[engine]["roles"])
+            self.assertEqual(v["engines"][engine]["known_models"], self.config.KNOWN_MODELS[engine])
+
     def test_put_engine_errors_leave_the_file_alone(self):
         before = self.raw()
         bad = [("claude", {"schedule": {"start": "someday", "end": "sun 03:00"}}),

@@ -31,10 +31,22 @@ _COMMON = {
     "blocked_cooldown_hours": 6,
     "schedule": None,
 }
+# The orchestrator keeps `orchestrator_model` / `orchestrator_effort`; the other roles live in `roles`.
+ROLES = ("planner", "implementer", "reviewer")
+MODEL = re.compile(r"[A-Za-z0-9._:-]+")
 ENGINE_DEFAULTS = {
-    "codex": {**_COMMON, "orchestrator_model": "gpt-6-sol", "max_subagents": 2},
-    "claude": {**_COMMON, "orchestrator_model": "claude-opus-5-5", "fable_cap": 80},
+    "codex": {**_COMMON, "orchestrator_model": "gpt-6-sol", "max_subagents": 2,
+              "roles": {"planner": {"model": "gpt-6-astra", "effort": "xhigh"},
+                        "implementer": {"model": "gpt-6-sol", "effort": "medium"},
+                        "reviewer": {"model": "gpt-6-astra", "effort": "high"}}},
+    "claude": {**_COMMON, "orchestrator_model": "claude-sonnet-5-5", "fable_cap": 80,
+               "roles": {"planner": {"model": "claude-opus-5-5", "effort": "high"},
+                         "implementer": {"model": "claude-sonnet-5-5", "effort": "medium"},
+                         "reviewer": {"model": "claude-opus-5-5", "effort": "high"}}},
 }
+# Suggestions for the panel only: any valid model id is accepted.
+KNOWN_MODELS = {"claude": ["claude-fable-5-1", "claude-opus-5-5", "claude-sonnet-5-5", "claude-haiku-5-5"],
+                "codex": ["gpt-6-astra", "gpt-6-sol"]}
 
 
 class ConfigError(ValueError):
@@ -120,6 +132,35 @@ def _validate_schedule(where, s, problems):
         problems.append(f"{where}.start_margin_minutes must be a number >= 0")
 
 
+def full_roles(engine, roles):
+    """`roles` over the engine's defaults: a missing role or field takes the default."""
+    out = copy.deepcopy(ENGINE_DEFAULTS[engine]["roles"])
+    for role, v in (roles.items() if isinstance(roles, dict) else ()):
+        if role in out and isinstance(v, dict):
+            out[role].update(v)
+    return out
+
+
+def _validate_roles(where, roles, problems):
+    if not isinstance(roles, dict):
+        problems.append(f"{where} must be an object")
+        return
+    for role, v in roles.items():
+        if role not in ROLES:
+            problems.append(f"{where}.{role}: unknown role")
+        elif not isinstance(v, dict):
+            problems.append(f"{where}.{role} must be an object")
+        else:
+            for key in v:
+                if key not in ("model", "effort"):
+                    problems.append(f"{where}.{role}.{key}: unknown field")
+            # A missing field takes the default on load; a present one has to be valid.
+            if "model" in v and not (isinstance(v["model"], str) and MODEL.fullmatch(v["model"])):
+                problems.append(f"{where}.{role}.model must match [A-Za-z0-9._:-]+")
+            if "effort" in v and not _text(v["effort"]):
+                problems.append(f"{where}.{role}.effort must be a non-empty string")
+
+
 def _validate_engine(name, e, problems):
     where = f"engines.{name}"
     if not isinstance(e, dict):
@@ -130,6 +171,8 @@ def _validate_engine(name, e, problems):
     for key in ("orchestrator_model", "orchestrator_effort"):
         if not _text(e.get(key)):
             problems.append(f"{where}.{key} must be a non-empty string")
+    if "roles" in e:
+        _validate_roles(f"{where}.roles", e["roles"], problems)
     sf = e.get("safety_factor")
     if not (_num(sf) and sf > 0):
         problems.append(f"{where}.safety_factor must be a number > 0")
@@ -277,6 +320,7 @@ def for_engine(data, engine):
     """The config in the legacy shape the loop consumes (see `cfg` in autopilot.py)."""
     # The file's values over the defaults: a key missing from a hand-edited file still has a value.
     e = {**copy.deepcopy(ENGINE_DEFAULTS[engine]), **(data["engines"].get(engine) or {})}
+    e["roles"] = full_roles(engine, e.get("roles"))
     out = {
         "enabled": bool(e.get("enabled")),
         "defaults": {k: v for k, v in e.items() if k not in ("enabled", "schedule")},

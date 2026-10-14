@@ -32,6 +32,60 @@ class Base(unittest.TestCase):
             (self.home / n).write_text((FIX / n).read_text())
 
 
+class RolesTests(Base):
+    TABLE = {"claude": {"planner": ("claude-opus-5-5", "high"), "implementer": ("claude-sonnet-5-5", "medium"),
+                        "reviewer": ("claude-opus-5-5", "high")},
+             "codex": {"planner": ("gpt-6-astra", "xhigh"), "implementer": ("gpt-6-sol", "medium"),
+                       "reviewer": ("gpt-6-astra", "high")}}
+
+    def test_defaults_follow_the_table(self):
+        self.assertEqual(config.ROLES, ("planner", "implementer", "reviewer"))
+        for engine, roles in self.TABLE.items():
+            got = config.empty()["engines"][engine]["roles"]
+            self.assertEqual({r: (v["model"], v["effort"]) for r, v in got.items()}, roles)
+        self.assertEqual(config.ENGINE_DEFAULTS["claude"]["orchestrator_model"], "claude-sonnet-5-5")
+        self.assertEqual(config.ENGINE_DEFAULTS["codex"]["orchestrator_model"], "gpt-6-sol")
+
+    def test_known_models(self):
+        self.assertEqual(config.KNOWN_MODELS["claude"],
+                         ["claude-fable-5-1", "claude-opus-5-5", "claude-sonnet-5-5", "claude-haiku-5-5"])
+        self.assertEqual(config.KNOWN_MODELS["codex"], ["gpt-6-astra", "gpt-6-sol"])
+
+    def test_old_file_without_roles_loads_unchanged_and_fills_defaults(self):
+        data = config.empty()
+        for e in data["engines"].values():
+            del e["roles"]
+        text = json.dumps(data, indent=2)
+        (self.home / config.FILE).write_text(text)
+        loaded = config.load(self.home)
+        self.assertEqual(config.validate(loaded), [])
+        self.assertEqual((self.home / config.FILE).read_text(), text)  # not rewritten
+        for engine in config.ENGINES:
+            self.assertEqual(config.for_engine(loaded, engine)["defaults"]["roles"],
+                             config.ENGINE_DEFAULTS[engine]["roles"])
+
+    def test_partial_roles_are_filled_per_field(self):
+        data = config.empty()
+        data["engines"]["claude"]["roles"] = {"planner": {"model": "claude-haiku-5-5"}}
+        self.assertEqual(config.validate(data), [])
+        roles = config.for_engine(data, "claude")["defaults"]["roles"]
+        self.assertEqual(roles["planner"], {"model": "claude-haiku-5-5", "effort": "high"})
+        self.assertEqual(roles["reviewer"], config.ENGINE_DEFAULTS["claude"]["roles"]["reviewer"])
+
+    def test_for_engine_does_not_share_the_defaults(self):
+        config.for_engine(config.empty(), "codex")["defaults"]["roles"]["planner"]["model"] = "x"
+        self.assertEqual(config.ENGINE_DEFAULTS["codex"]["roles"]["planner"]["model"], "gpt-6-astra")
+
+    def test_toml_import_keeps_orchestrator_and_default_roles(self):
+        self.put("projects.toml", "claude.toml")
+        data = config.load(self.home)
+        for engine, name in (("codex", "projects.toml"), ("claude", "claude.toml")):
+            want = fixture(name)["defaults"]
+            e = data["engines"][engine]
+            self.assertEqual(e["orchestrator_model"], want["orchestrator_model"])
+            self.assertEqual(e["roles"], config.ENGINE_DEFAULTS[engine]["roles"])
+
+
 class ValidateTests(Base):
     def test_empty_is_valid(self):
         self.assertEqual(config.validate(config.empty()), [])
@@ -72,6 +126,16 @@ class ValidateTests(Base):
                 schedule={"start": "fri 19:00", "end": "fri 19:00", "start_margin_minutes": 15})),
             "schedule margin": mut(lambda d: d["engines"]["claude"].update(
                 schedule={"start": "fri 19:00", "end": "sun 03:00", "start_margin_minutes": -1})),
+            "roles type": mut(lambda d: d["engines"]["codex"].update(roles=[])),
+            "role unknown": mut(lambda d: d["engines"]["codex"]["roles"].update(orchestrator={"model": "m"})),
+            "role old": mut(lambda d: d["engines"]["claude"]["roles"].update(**{"plan-reviewer": {"model": "m"}})),
+            "role type": mut(lambda d: d["engines"]["codex"]["roles"].update(planner="x")),
+            "role field": mut(lambda d: d["engines"]["codex"]["roles"]["planner"].update(colour="red")),
+            "role model empty": mut(lambda d: d["engines"]["codex"]["roles"]["planner"].update(model="")),
+            "role model chars": mut(lambda d: d["engines"]["codex"]["roles"]["planner"].update(model="a b")),
+            "role model type": mut(lambda d: d["engines"]["codex"]["roles"]["planner"].update(model=3)),
+            "role effort empty": mut(lambda d: d["engines"]["codex"]["roles"]["reviewer"].update(effort=" ")),
+            "role effort type": mut(lambda d: d["engines"]["codex"]["roles"]["reviewer"].update(effort=3)),
             "notify": mut(lambda d: d.update(notify=[])),
             "notify server": mut(lambda d: d["notify"].update(server=1)),
             "notify timeout": mut(lambda d: d["notify"].update(decision_timeout_hours=0)),
@@ -135,6 +199,8 @@ class LoadTests(Base):
                 want = fixture(name)
                 want["notify"].pop("topic", None)
                 got = config.for_engine(data, engine)
+                roles = got["defaults"].pop("roles")
+                self.assertEqual(roles, config.ENGINE_DEFAULTS[engine]["roles"])  # the TOML has none: defaults
                 self.assertEqual(got["defaults"], want["defaults"])
                 self.assertEqual(got["project"], want["project"])
                 self.assertEqual(got.get("schedule"), want.get("schedule"))
@@ -310,7 +376,7 @@ class ForEngineTests(unittest.TestCase):
         del d["engines"]["claude"]
         got = config.for_engine(d, "claude")
         self.assertFalse(got["enabled"])
-        self.assertEqual(got["defaults"]["orchestrator_model"], "claude-opus-5-5")
+        self.assertEqual(got["defaults"]["orchestrator_model"], "claude-sonnet-5-5")
         self.assertEqual(got["defaults"]["fable_cap"], 80)
 
     def test_defaults_and_caps(self):
