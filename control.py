@@ -377,13 +377,15 @@ def check_engine(home, engine):
         cfg = config.for_engine(config.load(home), engine)
     except (config.ConfigError, OSError) as e:
         return 200, {"limits": None, "error": str(e)}
+    if not engines.cli_status(engine)["found"]:
+        return 200, {"limits": None, "error": "CLI not found"}
     messages = []
     with _log_lock:  # engines.log writes autopilot.log; here it only collects
         previous, engines.log = engines.log, messages.append
         try:
             limits = engines.ENGINES[engine](cfg).limits({}, max_age=0)
-        except Exception as e:
-            return 200, {"limits": None, "error": f"{type(e).__name__}: {e}"}
+        except (Exception, SystemExit) as e:  # the engines exit the process when their CLI is missing
+            return 200, {"limits": None, "error": str(e) if isinstance(e, SystemExit) else f"{type(e).__name__}: {e}"}
         finally:
             engines.log = previous
     if not limits:

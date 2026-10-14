@@ -259,6 +259,27 @@ class ConfigApiTest(unittest.TestCase):
             self.assertTrue(body["error"])
         self.assertEqual(self.call("POST", "/api/engines/gemini/check")[0], 404)
 
+    def test_check_engine_without_the_cli_does_not_build_the_engine(self):
+        built = []
+        before = self.snapshot()
+        with mock.patch.object(self.engines, "cli_status", lambda name, max_age=60: {"found": False, "path": None, "version": None}), \
+                mock.patch.dict(self.engines.ENGINES, {"claude": lambda cfg: built.append(cfg)}):
+            status, body = self.call("POST", "/api/engines/claude/check")
+        self.assertEqual((status, body), (200, {"limits": None, "error": "CLI not found"}))
+        self.assertEqual(built, [])
+        self.assertEqual(self.snapshot(), before)
+
+    def test_check_engine_survives_a_system_exit_and_restores_the_log(self):
+        class Exits(helpers.FakeEngine):
+            def limits(self, state, max_age=1800):
+                raise SystemExit("x")
+
+        original = self.engines.log
+        with mock.patch.dict(self.engines.ENGINES, {"claude": lambda cfg: Exits(["true"])}):
+            status, body = self.call("POST", "/api/engines/claude/check")
+        self.assertEqual((status, body), (200, {"limits": None, "error": "x"}))
+        self.assertIs(self.engines.log, original)
+
     # --- guard and pokes ------------------------------------------------------------------------
 
     def test_new_routes_need_the_guard(self):
