@@ -44,7 +44,7 @@ def isolate_git(test, tmp):
     from unittest import mock
     xdg = Path(tmp) / "xdg-config"
     xdg.mkdir(parents=True, exist_ok=True)
-    patch = mock.patch.dict(os.environ, {"GIT_CONFIG_GLOBAL": os.devnull, "XDG_CONFIG_HOME": str(xdg)})
+    patch = mock.patch.dict(os.environ, {"GIT_CONFIG_GLOBAL": os.devnull, "GIT_CONFIG_NOSYSTEM": "1", "XDG_CONFIG_HOME": str(xdg)})
     patch.start()
     test.addCleanup(patch.stop)
 

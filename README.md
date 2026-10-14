@@ -207,6 +207,9 @@ Write what the project should become and click "Pedir preparo":
    makes one commit `docs: prepare for turno` on the current branch (no push) and deletes the draft.
    From then on the project runs its backlog like the others.
 
+If an `approved` request cannot be applied (the unit keeps ending blocked), stop the loops and delete
+`~/.turno/setup/<project>.json` by hand; the project goes back to the normal queue.
+
 ## What stops the loop
 
 - **Sleep or hibernation** pauses everything. Keep the machine awake while it should work.

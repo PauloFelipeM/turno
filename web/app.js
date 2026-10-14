@@ -362,7 +362,10 @@ async function loadDetail(name) {
     return;
   }
   if (view.filter !== name) return;
-  view.detailSetup = su && su.request ? su.request.status : null;
+  // Remember the phase this load was for: when the request could not be fetched, the overview's phase,
+  // so the SSE handler does not reload in a loop.
+  const seen = view.overview && view.overview.projects.find((p) => p.name === name);
+  view.detailSetup = su ? (su.request ? su.request.status : null) : (seen && seen.setup) || null;
   box.hidden = false;
   fill(box,
     retryRow(name),

@@ -112,8 +112,9 @@ Each instance runs one engine (`--engine`, `codex` by default; the contract is i
    is skipped, interrupted unit or not.
    A project whose setup request is `review` is skipped; one whose request is `requested` or
    `approved` gets a setup unit (`prompts/setup.md`) instead of a normal one, even if it is `idle` or
-   `waiting`, and the loop first appends `.superpowers/` to its `.git/info/exclude` (unless git
-   already ignores it) so the draft does not dirty the tree.
+   `waiting`; an `approved` one runs its apply unit even with a dirty tree (the prompt decides). The
+   `.superpowers/` line goes into its `.git/info/exclude` (unless git already ignores it) in `run_unit`
+   and, in `pick`, only when the tree is dirty, so the draft does not count as someone else's changes.
    It takes the group lock (`shared/<docker_group or name>.lock`);
 5. `run_project`: writes the claim, `prepare_docker` (stops the stack of the other project in the
    group unless it has uncommitted work, and brings this project's up). If the ports are busy with
@@ -210,7 +211,8 @@ Invariants a change must not break:
   projects, and never loads `secrets.toml`. It never edits the legacy TOML files. It listens only on `127.0.0.1`;
   write routes need `X-Turno: 1`, a JSON body and a local `Host` and `Origin`.
 - **What turno changes in a project.** Only one line: `.superpowers/` in the clone's
-  `.git/info/exclude`, before a setup unit and only when git does not already ignore that folder.
+  `.git/info/exclude`, in `run_unit` before a setup unit (and in `pick` only when the tree is dirty), and
+  only when git does not already ignore that folder.
   Everything else in a project (the draft, the copied files, the commit) is written by the agent.
   The panel reads the draft files only inside `.superpowers/autopilot/setup/`, never through a
   symlink, at most 200 KB each.
