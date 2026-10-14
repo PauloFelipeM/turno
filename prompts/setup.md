@@ -13,6 +13,13 @@ The draft folder is `.superpowers/autopilot/setup/`. Git ignores it in this clon
 
 ## Draft unit
 
+These rules override the planner role's own instructions and the engine notes, and you pass them on in
+every request to the planner: `docs/autopilot.md` does not exist yet, so there is nothing to read
+there; make no commit, whatever the notes say about committing; write no decision file: doubts and
+pending decisions go into `notes.md`; run no command that writes in the repository (install, build,
+tests that generate files): to find the commands, read the files; write only in
+`.superpowers/autopilot/setup/`.
+
 1. Dispatch the `planner` to read the repository and the goal: the stack; the test, lint and build
    commands (package files, Makefile, CI files); the Docker files; the existing docs (`README`,
    `AGENTS.md`, `CLAUDE.md`, `docs/`); and the git branches and remotes (`git branch -a`,
@@ -59,10 +66,15 @@ The draft folder is `.superpowers/autopilot/setup/`. Git ignores it in this clon
 
 ## Apply unit
 
-1. Run `git status --porcelain`. If it lists anything, the tree has changes that are not the
-   draft's: finish as `blocked` and say which files.
-2. If `docs/autopilot.md` already exists, or the draft has an `AGENTS.md` and the project now has
-   one too, or any other destination below already exists (except `.gitignore`), finish as
+0. A session may be a new one that continues an apply unit cut earlier. If the last commit on the
+   current branch is `docs: prepare for turno` and `git status --porcelain` lists nothing but
+   `.superpowers/`, only delete `.superpowers/autopilot/setup/` and finish as `worked`.
+1. Run `git status --porcelain`. A change is a continuation, and you go on, when it is exactly one of
+   the destinations in step 3 with the same content as its draft file, or the `.superpowers/` line in
+   `.gitignore`. If it lists any other change, the tree has changes that are not the draft's: finish
+   as `blocked` and say which files.
+2. If a destination exists and is not such a continuation (for example `docs/autopilot.md` with other
+   content, or an `AGENTS.md` the draft also has when the project already had its own), finish as
    `blocked` and say which.
 3. Copy each draft file to its place: `autopilot.md` → `docs/autopilot.md`, `AGENTS.md` →
    `AGENTS.md`, and every other file except `notes.md` to the same path relative to the repository

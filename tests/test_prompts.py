@@ -74,6 +74,20 @@ class PromptsTest(unittest.TestCase):
         self.assertIn('"Setup unit" section', resume)
         self.assertIn("not steps 3 to 8", resume)
 
+    def test_setup_apply_survives_a_new_session(self):
+        flat = " ".join((ROOT / "prompts" / "setup.md").read_text().split())
+        for s in ("is a continuation", "same content as its draft file", "`.superpowers/` line in `.gitignore`",
+                  "`docs: prepare for turno` and `git status --porcelain` lists nothing but `.superpowers/`",
+                  "only delete `.superpowers/autopilot/setup/` and finish as `worked`", "say which files"):
+            self.assertIn(s, flat)
+
+    def test_setup_draft_overrides_the_role_and_the_engine_notes(self):
+        flat = " ".join((ROOT / "prompts" / "setup.md").read_text().split())
+        for s in ("override the planner role's own instructions and the engine notes", "does not exist yet",
+                  "make no commit", "write no decision file", "go into `notes.md`", "run no command that writes in the repository",
+                  "write only in `.superpowers/autopilot/setup/`", "you pass them on in every request to the planner"):
+            self.assertIn(s, flat)
+
 
 if __name__ == "__main__":
     unittest.main()
