@@ -1,0 +1,28 @@
+{
+  "version": 1,
+  "projects": [
+    {"name": "my-app", "path": "/home/me/projects/my-app", "docker_group": "web",
+     "weekly_cap": {"codex": 95, "claude": 90}},
+    {"name": "my-api", "path": "/home/me/projects/my-api", "docker_group": "web",
+     "weekly_cap": {"codex": 85, "claude": 90}},
+    {"name": "side-project", "path": "/home/me/projects/side-project",
+     "weekly_cap": {"codex": 60, "claude": 0}}
+  ],
+  "engines": {
+    "codex": {
+      "enabled": true,
+      "orchestrator_model": "gpt-6-sol", "orchestrator_effort": "medium", "max_subagents": 2,
+      "safety_factor": 1.5, "primary_cap": 100,
+      "initial_cost_primary": 8.0, "initial_cost_secondary": 1.5, "blocked_cooldown_hours": 6,
+      "schedule": null
+    },
+    "claude": {
+      "enabled": false,
+      "orchestrator_model": "claude-opus-5-5", "orchestrator_effort": "medium", "fable_cap": 80,
+      "safety_factor": 1.5, "primary_cap": 100,
+      "initial_cost_primary": 8.0, "initial_cost_secondary": 1.5, "blocked_cooldown_hours": 6,
+      "schedule": {"start": "fri 19:00", "end": "sun 03:00", "start_margin_minutes": 15}
+    }
+  },
+  "notify": {"server": "https://ntfy.sh", "decision_timeout_hours": 4}
+}

@@ -25,7 +25,7 @@ backlog is left.
   resumed before anything else, once its wait is over: after an error or a usage limit the project
   rests for a while (longer after repeated errors, until the reset after a usage limit). Only an
   explicit reset ends that wait early.
-- **Two engines.** One instance runs Codex, another runs Claude Code (by default only on weekends).
+- **Two engines.** One loop runs Codex, another runs Claude Code (by default only on weekends). Each engine is switched on or off in the config.
   They never work on the same project, or on two projects that share Docker ports, at the same time.
   A unit cut at the end of the Claude window is handed over (the "baton") to whichever engine runs
   next.
@@ -50,13 +50,14 @@ without a folder live there.
 
 ```bash
 mkdir -p ~/.turno
-cp projects.example.toml ~/.turno/projects.toml
-cp claude.example.toml ~/.turno/claude.toml
+cp config.example.json ~/.turno/config.json
 cp secrets.example.toml ~/.turno/secrets.toml
 ```
 
-Edit `projects.toml` and `claude.toml` with your projects (in priority order) and their weekly caps,
-and replace the `topic` in `secrets.toml` with a random name only you know. Then:
+Edit `config.json` with your projects (in priority order) and their weekly caps, switch on the
+engines you use (`"enabled": true`) and replace the `topic` in `secrets.toml` with a random name
+only you know. Or start without a `config.json` and add the projects and engines in the panel's
+"⚙ Configurações" screen. Then:
 
 ```bash
 python3 autopilot.py status   # check the config and the current quota
@@ -64,20 +65,54 @@ python3 autopilot.py start    # start both loops in the tmux session "autopilot"
 python3 autopilot.py serve    # the panel at http://localhost:8765
 ```
 
-`start` opens one tmux window per loop (`codex`, `claude`) and a `logs` window with both logs.
+`start` opens one tmux window per enabled engine (`codex`, `claude`) and a `logs` window with both logs.
 `stop` ends both loops like a Ctrl+C: the running unit stops, the state is saved and the next
 `start` resumes it. `start` never duplicates a loop that is already running.
 
+### Migrating from `projects.toml` and `claude.toml`
+
+Older setups kept the projects in `projects.toml` (Codex) and `claude.toml` (Claude). The first time
+turno loads its config and finds no `config.json`, it builds one from those files, writes it and
+leaves them as a copy. An engine whose file exists comes out enabled; projects that exist only in
+`claude.toml` are appended to the list. `overrides.json` is not changed. To migrate:
+
+1. Stop the old loops (`stop`), so none of them runs with the old code.
+2. Run `python3 autopilot.py status`: it creates `config.json`.
+3. Check the result in the panel's settings screen, then `start`.
+
+From then on only `config.json` is read; editing the TOML files has no effect. `secrets.toml` stays
+as it was.
+
+## The config
+
+`config.json` holds everything the panel's settings screen shows. The loops re-read it on every turn,
+so a change takes effect within one turn, with no restart (a model change applies to the next unit).
+An invalid file never stops a loop: it keeps the last good configuration and logs the problem.
+
+| Part | What it holds |
+|---|---|
+| `projects` | Name, path, optional `docker_group` and `weekly_cap` per engine. The order is the priority for every engine |
+| `engines.<engine>` | `enabled`, orchestrator model and effort, `primary_cap`, `safety_factor`, initial costs, `blocked_cooldown_hours`, `schedule` (window) and, per engine, `max_subagents` (Codex) or `fable_cap` (Claude) |
+| `notify` | ntfy server and the decision timeout. The topic stays in `secrets.toml` |
+
+A project's name is never changed after it is created: state, claims, notes and history use it.
+`config.example.json` is a complete example.
+
+A disabled engine starts nothing: its loop, if running, keeps the decisions flowing, passes its open
+units on to the other engine and sleeps. A loop does not end by itself: with every project `idle` it
+tells you once and sleeps until you reset a project or change the config. The engine contract, for
+adding another CLI, is in `docs/engines.md`.
+
 ## Commands
 
-All commands are `python3 autopilot.py <command>`; `--help` lists them. Add `--config claude.toml`
-to run a command against the Claude instance.
+All commands are `python3 autopilot.py <command>`; `--help` lists them. Add `--engine claude` to
+run a command against the Claude instance (the default is `codex`; `--config` is a deprecated alias).
 
 | Command | What it does |
 |---|---|
-| `start` / `stop` | Start or stop both loops in tmux |
-| `run` | Run a single loop in the foreground (the Codex one, or Claude's with `--config claude.toml`) |
-| `status` | Quota usage and each project's state; changes nothing |
+| `start` / `stop` | Start or stop the loops of the enabled engines in tmux (`stop` also stops a loop of an engine since switched off) |
+| `run` | Run a single loop in the foreground (`--engine codex` or `--engine claude`) |
+| `status` | Quota usage and each project's state (the first time, it also creates `config.json`) |
 | `check` | What the loop would do right now (reads the quota; runs nothing) |
 | `decisions` | Pending decisions, with deadline, default and options |
 | `answer <project> <id> <option>` | Answer a decision from the terminal |
@@ -127,14 +162,14 @@ It also controls the loops:
 | Next (project card) | The next *new* unit goes to that project, if it fits the quota; interrupted units and batons still go first |
 | Interrupt (project card) | Pauses the project and stops its running unit (`SIGUSR1`); resume it to continue |
 | Project panel | A message to the agents, the project's caps and, while the project waits to retry, "Tentar agora" |
-| "Order and caps" window | Project order, weekly caps per engine and the 5-hour cap |
+| "⚙ Configurações" screen | Projects: add, edit, reorder and remove (a project with an open unit, a claim or a running unit cannot be removed). Engines: on or off, orchestrator model and effort, caps, window, and a check that shows the CLI found, its version and the quota |
 
-The panel never edits state or config. It writes three kinds of file: its requests to the loops, in
-`overrides.json` in `~/.turno` (`order`, `projects.<name>.paused`,
-`projects.<name>.weekly_cap.<engine>`, `primary_cap.<engine>`, `next`, `reset`, `poke`); decision
+The panel never edits state. It writes four kinds of file: the configuration, in `config.json`
+(projects, order, caps, engines; validated before it replaces the file); its requests to the loops,
+in `overrides.json` in `~/.turno` (`projects.<name>.paused`, `next`, `reset`, `poke`); decision
 answers, in the same decision files the phone uses (each answer is also noted in the log); and
-messages to the agents, in the same notes as the phone. The loops re-read `overrides.json` on every
-turn and, while asleep, check it every 5 seconds. A unit interrupted from the panel, or by `stop`,
+messages to the agents, in the same notes as the phone. The loops re-read `config.json` and
+`overrides.json` on every turn and, while asleep, check both every 5 seconds. A unit interrupted from the panel, or by `stop`,
 appears in the history as `stopped`. Write requests need the `X-Turno: 1` header and a local origin.
 
 Two things an ordinary click does not do:
@@ -156,7 +191,7 @@ Two things an ordinary click does not do:
 
 ## Where to look when something goes wrong
 
-`autopilot.log` and `autopilot-claude.log`, plus the `.jsonl` and `.err` files of the latest runs in
+`autopilot.log` and `autopilot-claude.log` (the log says when `config.json` is invalid and the last good one is kept), plus the `.jsonl` and `.err` files of the latest runs in
 `runs/` and `runs-claude/`. The panel's history links each unit to its runs.
 
 ## Development

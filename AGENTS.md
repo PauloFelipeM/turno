@@ -5,7 +5,7 @@ of the subscriptions, plus a local web panel to follow it. It grew out of codex-
 becoming an open product. This folder is the tool itself; the projects live elsewhere, and the data
 (config, state, logs, runs) lives in `~/.turno` (or `$TURNO_HOME`). Here you maintain the scheduler;
 you do not work on the projects. Every data path in this file given without a folder (`shared/`,
-`state*.json`, `secrets.toml`, `claude.toml`, logs, `runs/`) lives in `~/.turno` (or `$TURNO_HOME`).
+`state*.json`, `config.json`, `secrets.toml`, logs, `runs/`) lives in `~/.turno` (or `$TURNO_HOME`).
 
 Language: everything in this repository is in English (code, comments, docstrings, logs, CLI output,
 docs, commit messages). The exception is what the owner receives at runtime, which stays in
@@ -14,11 +14,13 @@ Brazilian Portuguese until there is a language setting: ntfy notifications, deci
 
 ## Rule number one
 
-**Never run `autopilot.py start`, `autopilot.py run` or `autopilot.py --config claude.toml run` from a
+**Never run `autopilot.py start`, `autopilot.py run` or `autopilot.py --engine claude run` from a
 Codex or Claude Code session.** The loop starts other sessions, spends the same quota you do and dies
-with your session. The owner starts the loops, with `autopilot.py start` (see `README.md`). `status`,
-`decisions`, `test-notify` and `serve` (it starts nothing by itself) are safe; so is `check`, but it reads
-the quota (on Claude, with a minimal Haiku query). `stop`, `answer` and `reset` change state and only
+with your session. The owner starts the loops, with `autopilot.py start` (see `README.md`). `test-notify` and
+`serve` (it starts nothing by itself) are safe. So are `status`, `decisions` and `check`, with one
+caveat: the first time, when `config.json` does not exist yet, any command that loads the config
+imports `projects.toml` and `claude.toml` and writes `config.json` (see "The config"). `check` also
+reads the quota (on Claude, with a minimal Haiku query). `stop`, `answer` and `reset` change state and only
 run when the owner asks. Each engine has an instance lock (`~/.turno/shared/instance-<engine>.lock`,
 holding the pid): two loops of the same engine never run. From an agent session, never call the
 panel's start, stop or interrupt endpoints (`/api/engines/<engine>/start|stop`,
@@ -29,7 +31,8 @@ panel's start, stop or interrupt endpoints (`/api/engines/<engine>/start|stop`,
 | Path | What it is |
 |---|---|
 | `autopilot.py` | CLI, decisions and ntfy, Docker, project choice and the loop (`run_once`, `run_project`) |
-| `engines.py` | `CodexEngine` and `ClaudeEngine`: command, quota reading, output classification, cost, live feed translation |
+| `engines.py` | `CodexEngine` and `ClaudeEngine`: command, quota reading, output classification, cost, live feed translation (the contract is in `docs/engines.md`) |
+| `config.py` | `config.json`: validation, atomic writes under `shared/config.lock`, the one-time import of the old TOML files, `for_engine` |
 | `coord.py` | Claims, baton and locks between the instances, in `shared/` |
 | `schedule.py` | Weekly window (Claude's: Friday 19:00 to Sunday 03:00) |
 | `paths.py` | The data folder (`$TURNO_HOME` or `~/.turno`) |
@@ -39,17 +42,18 @@ panel's start, stop or interrupt endpoints (`/api/engines/<engine>/start|stop`,
 | `panel.py` | What the panel shows, assembled from the files (read-only) |
 | `overrides.py` | The panel's requests to the loops (`~/.turno/overrides.json`), read-modify-write under a lock |
 | `server.py` | The panel's HTTP server on 127.0.0.1: API, events (SSE) and `web/` |
-| `control.py` | What the panel's write routes do (pause, next, interrupt, reactivate, start/stop, decisions, messages, settings); they need the `X-Turno: 1` header, JSON and a local `Host`/`Origin` |
-| `web/` | Interface: `index.html`, `app.js`, `style.css`, `i18n/pt-BR.js` |
+| `control.py` | What the panel's write routes do (pause, next, interrupt, reactivate, start/stop, decisions, messages, projects, engines, settings); they need the `X-Turno: 1` header, JSON and a local `Host`/`Origin` |
+| `web/` | Interface: `index.html`, `app.js`, `style.css`, `i18n/pt-BR.js` (including the settings screen, with Projects and Engines) |
+| `docs/engines.md` | The engine contract: what the loop calls on an engine, and what a CLI must offer |
 | `prompts/unit.md` | Prompt of every new unit: the protocol the orchestrator follows |
 | `prompts/resume.md` | Prompt to resume an interrupted unit |
 | `prompts/engine-*.md` | Engine note appended to the prompt (what is specific to Codex or Claude) |
 | `claude-agents.json` | Claude roles (`planner`, `plan-reviewer`, `implementer`, `reviewer`), passed with `--agents` |
-| `*.example.toml` | Config examples; the real `projects.toml`, `claude.toml` and `secrets.toml` live in `~/.turno` |
-| `projects.toml` | Codex instance: projects in priority order, caps, models |
-| `claude.toml` | Claude instance: `[instance]`, `[engine]`, `[schedule]`, 90% cap |
-| `secrets.toml` | ntfy topic, read by both instances (outside git) |
-| `overrides.json` | Panel requests: `order`, `projects.<name>.paused`, `projects.<name>.weekly_cap.<engine>`, `primary_cap.<engine>`, `next`, `reset`, `poke` (generated; under `shared/overrides.lock`) |
+| `config.json` | The configuration, written by the panel and re-read by the loops on every turn: projects (their order is the priority, weekly cap per engine) and a section per engine (on/off, orchestrator model and effort, window, caps, costs). Under `shared/config.lock` |
+| `config.example.json` | An example config with generic projects; the real one lives in `~/.turno` |
+| `secrets.toml`, `secrets.example.toml` | ntfy topic, read by both instances (outside git; the panel never loads it) |
+| `projects.toml`, `claude.toml` | Legacy. Imported once, when `config.json` does not exist, and kept as a copy; nothing reads them afterwards |
+| `overrides.json` | Panel requests: `projects.<name>.paused`, `next`, `reset`, `poke` (generated; under `shared/overrides.lock`). Order and caps used to live here; they are in `config.json` now, and the import leaves this file untouched |
 | `state.json`, `state-claude.json` | State of each instance (generated; do not edit while the loop runs) |
 | `autopilot.log`, `autopilot-claude.log` | Log of each instance (generated) |
 | `runs/`, `runs-claude/` | JSONL and stderr of the latest runs (generated) |
@@ -59,8 +63,24 @@ panel's start, stop or interrupt endpoints (`/api/engines/<engine>/start|stop`,
 | `<project>/docs/autopilot.md` | Each project's rules: backlog, paths, verification, git |
 | `<project>/.superpowers/autopilot/` | `last-unit.json`, `backlog.json` and `decisions/`, written by the orchestrator |
 
-The owner's projects, their priority and caps are in `projects.toml` and `claude.toml`. Projects that
-bind the same Docker ports share a `docker_group`.
+## The config
+
+The owner's projects, their priority and caps, and each engine's settings are in `config.json`. Each
+project is registered once: the order of the list is the priority for every engine, and `weekly_cap`
+is per engine (a missing value means 100; 0 means the engine never starts a new unit there). Projects
+that bind the same Docker ports share a `docker_group`. `config.load` validates the file; the loops
+call it on every turn.
+
+- **First run.** When `config.json` does not exist and `projects.toml` does, `config.load` imports
+  `projects.toml` (Codex) and `claude.toml` (Claude, when present), writes `config.json` and leaves the
+  TOML files as a copy. The engine whose file exists is enabled. `overrides.json` is not changed.
+- **Invalid file.** A `config.json` that does not validate never stops a loop: it keeps the last good
+  configuration and logs the problems once per change of the file. The panel's writes are validated
+  before they replace the file.
+- **Engine off.** A disabled engine starts no unit. Its loop, if running, sleeps with phase `disabled`,
+  keeps the ntfy decisions flowing and passes its open units on as batons.
+- **Loops.** `autopilot.py --engine codex|claude run` runs one loop (`--config` is a deprecated alias
+  of `--engine`). `start` and `stop` use the engines enabled in the config.
 
 ## How it works
 
@@ -70,11 +90,11 @@ unit is a short CLI session, and the orchestrator ends it by writing
 `<project>/.superpowers/autopilot/last-unit.json` with the status `worked`, `waiting`, `idle` or
 `blocked`, plus `backlog.json`.
 
-Each instance has an engine (`[engine] kind`, `codex` by default). On every turn, `run_once`:
+Each instance runs one engine (`--engine`, `codex` by default; the contract is in `docs/engines.md`). On every turn, `run_once`:
 
 1. `process_decisions`: under `shared/decisions.lock`, sends new decisions to ntfy, reads the answers
    and applies the default when the deadline passes (the read position lives in `shared/notify.json`);
-2. with `[schedule]`, outside the window or in its last `start_margin_minutes`, it only sleeps: the
+2. with a `schedule` in the engine's config, outside the window or in its last `start_margin_minutes`, it only sleeps: the
    quota is not even queried;
 3. `engine.limits`: usage of the 5-hour and weekly windows. Codex: the most recent session log in
    `~/.codex/sessions`. Claude: the `rate_limit_event` of the last run, or a minimal Haiku query
@@ -105,9 +125,9 @@ closes, when a later run ends another way (unfinished, cut, stopped) and on a re
 "Reativar" and "Tentar agora" (both write `reset`) and `autopilot.py reset` clear it. The panel
 shows it on the project card ("tenta de novo ...").
 
-At the start of each turn the loop re-reads `overrides.json` and applies it over the config: project
-order, `paused` (a paused project is skipped, even with an interrupted unit, which waits for the resume), the
-caps of the panel's "Order and caps" window, `next` (the next *new* unit goes to this project if it
+At the start of each turn the loop re-reads `config.json` (projects, order, caps and engine settings;
+model and effort apply to the next unit) and `overrides.json`, and applies the latter over the former:
+`paused` (a paused project is skipped, even with an interrupted unit, which waits for the resume), `next` (the next *new* unit goes to this project if it
 fits the quota, after the interrupted units and the batons; the key is consumed when that unit
 really starts, with Docker up), `reset` (puts a project back to `active`) and `poke` (refreshed on
 every write, to wake the nap). A file that exists but is not a JSON object counts as no overrides
@@ -148,21 +168,29 @@ Invariants a change must not break:
   the unit closes, including while interrupted; the group lock holds while the CLI runs.
 - **The baton goes first.** A unit cut at the end of the window becomes an `any` claim, carrying the
   `unit_id`: any engine resumes it before starting another, even with a dirty tree, in a new session
-  from the ledger. An engine's own `retry_at` for that project (error, usage limit or busy Docker)
+  from the ledger. Two exceptions: a disabled engine passes its open units on as batons instead of
+  resuming them, and an engine does not take the baton of a project whose cap is 0 for it. An engine's own `retry_at` for that project (error, usage limit or busy Docker)
   holds the baton too until it passes; a reset clears it.
+- **A paused project keeps its claim.** Pausing skips the project but does not release the claim of
+  its open unit: the other engine does not start work there. The exception is a disabled engine,
+  which passes the claim on (as a baton) even for a paused project.
+- **The loop never ends by itself.** With every project `idle`, or no project at all, it warns once
+  (never for an empty list) and keeps sleeping; a reset or a change in the config wakes it.
 - **Claude only works inside its window and with the quota read.** Outside it, it does not even query
   the quota.
-- **What the panel writes.** `overrides.json` (under `shared/overrides.lock`), decision answers in
+- **What the panel writes.** `config.json` (under `shared/config.lock`; validated before it
+  replaces the file) and `overrides.json` (under `shared/overrides.lock`), decision answers in
   the decision files (under `shared/decisions.lock`) and the owner's notes (through
   `coord.add_note`); answering a decision also adds a line to the log (`autopilot.answer_decision`).
   It also starts and stops the loops through tmux and signals. It never edits the state files, the
-  `.toml` files or the projects, and never loads `secrets.toml`. It listens only on `127.0.0.1`;
+  projects, and never loads `secrets.toml`. It never edits the legacy TOML files. It listens only on `127.0.0.1`;
   write routes need `X-Turno: 1`, a JSON body and a local `Host` and `Origin`.
-- **The panel's controls:** start and stop per engine; the "Needs you" strip, with the pending
+- **The panel's controls:** the settings screen ("⚙ Configurações"), with Projects (add, edit, reorder,
+  remove; the name is never changed) and Engines (on/off, models, window, caps, and a check of the CLI
+  and the quota); start and stop per engine; the "Needs you" strip, with the pending
   decisions (answer, with an optional comment) and the blocked projects (reactivate, which writes
   `reset`); pause, next and interrupt on each project card; the project panel with a message to the
-  agents, the caps and, while the project waits on a `retry_at`, "Tentar agora" (also `reset`); and
-  the "Order and caps" window.
+  agents, the caps and, while the project waits on a `retry_at`, "Tentar agora" (also `reset`).
 - **History per run.** Every finished run becomes one line in `history-<engine>.jsonl`; summary and
   cost only on the run that closes the unit.
 
@@ -178,6 +206,8 @@ The `topic` in `secrets.toml` is a secret: never print it in logs, commits or me
 
 ## When changing something
 
+- **Engine changes** (a new engine, or a change in what the loop calls): keep `docs/engines.md`,
+  `engines.ENGINES`, `config.ENGINES`/`ENGINE_DEFAULTS` and `tests/helpers.FakeEngine` consistent.
 - **Protocol changes** (`prompts/`, roles, `last-unit.json`, `backlog.json`, decision files): keep
   `prompts/unit.md`, the engine notes (`prompts/engine-*.md`), the roles in `~/.codex/agents/` and
   `claude-agents.json`, and each project's `docs/autopilot.md` consistent.
@@ -188,7 +218,9 @@ The `topic` in `secrets.toml` is a secret: never print it in logs, commits or me
   containers. Never run `autopilot.py` commands without `TURNO_HOME` pointing at a temporary folder,
   except the safe ones above against the real data.
 - After editing: the tests,
-  `python3 -m py_compile autopilot.py coord.py engines.py schedule.py paths.py history.py backlog.py feed.py panel.py server.py overrides.py control.py`,
-  `python3 autopilot.py status` and `python3 autopilot.py --config claude.toml status`.
+  `python3 -m py_compile autopilot.py config.py coord.py engines.py schedule.py paths.py history.py backlog.py feed.py panel.py server.py overrides.py control.py`,
+  `python3 autopilot.py status` and `python3 autopilot.py --engine claude status`, both with
+  `TURNO_HOME` pointing at a temporary folder (or at the real data, if the owner's `config.json`
+  already exists).
 - If the loop is running, a change only applies after the owner restarts it. Tell them.
 - This folder is under git. Large changes go on a branch.
