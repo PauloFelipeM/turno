@@ -213,7 +213,6 @@ def _load_locked(home):
         if problems:
             raise ConfigError(problems)
         _write(home, data)
-        _fold_overrides_cleanup(home)
         return data
     return empty()
 
@@ -243,7 +242,8 @@ def save(home, fn):
 
 def for_engine(data, engine):
     """The config in the legacy shape the loop consumes (see `cfg` in autopilot.py)."""
-    e = data["engines"].get(engine) or copy.deepcopy(ENGINE_DEFAULTS[engine])
+    # The file's values over the defaults: a key missing from a hand-edited file still has a value.
+    e = {**copy.deepcopy(ENGINE_DEFAULTS[engine]), **(data["engines"].get(engine) or {})}
     out = {
         "enabled": bool(e.get("enabled")),
         "defaults": {k: v for k, v in e.items() if k not in ("enabled", "schedule")},
@@ -274,7 +274,11 @@ def _toml(home, name):
 
 def import_toml(home):
     """Builds the config from `projects.toml` (Codex) and `claude.toml` (Claude), folding in the
-    order and caps of `overrides.json` (the caller removes them from that file afterwards)."""
+    order and caps of `overrides.json`.
+
+    The overrides file is left as it is: loops started before the change still read those keys,
+    and the loops that read `config.json` ignore them.
+    """
     data = empty()
     files = {"codex": _toml(home, "projects.toml"), "claude": _toml(home, "claude.toml")}
     by_name = {}
@@ -334,21 +338,3 @@ def import_toml(home):
         if eng in ENGINES and overrides.valid_cap(v):
             data["engines"][eng]["primary_cap"] = v
     return data
-
-
-def _fold_overrides_cleanup(home):
-    """Removes from overrides.json what `import_toml` folded into the config."""
-    ov = overrides.read(home)
-    projects = ov.get("projects") if isinstance(ov.get("projects"), dict) else {}
-    if not ("order" in ov or "primary_cap" in ov
-            or any(isinstance(m, dict) and "weekly_cap" in m for m in projects.values())):
-        return
-
-    def clean(d):
-        d.pop("order", None)
-        d.pop("primary_cap", None)
-        for m in (d.get("projects") or {}).values():
-            if isinstance(m, dict):
-                m.pop("weekly_cap", None)
-
-    overrides.update(home, clean)

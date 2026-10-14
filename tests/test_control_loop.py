@@ -287,8 +287,17 @@ class ControlLoopTest(unittest.TestCase):
             seen["phase"] = json.loads(self.ap.STATE.read_text())["_loop"]["phase"]
             return None
 
-        self.ap.instance_lock, self.ap.run_once = lock, run_once
-        self.ap.cmd_run(None)
+        class EndOfTest(Exception):
+            pass
+
+        def nap(cfg, state, secs):  # the loop no longer ends by itself: the test leaves at the first nap
+            seen["nap"] = secs
+            raise EndOfTest
+
+        self.ap.instance_lock, self.ap.run_once, self.ap.nap = lock, run_once, nap
+        with self.assertRaises(EndOfTest):
+            self.ap.cmd_run(None)
+        self.assertEqual(seen["nap"], 600)  # nothing to do is a wait, not the end of the loop
         self.assertIs(seen["handlers"][2], self.ap.request_interrupt)
         self.assertTrue(all(callable(h) and h is not signal.default_int_handler for h in seen["handlers"][:2]))
         self.assertEqual(seen["phase"], "sleeping")

@@ -1,4 +1,6 @@
+import contextlib
 import datetime as dt
+import io
 import json
 import sys
 import tempfile
@@ -192,9 +194,87 @@ class ReloadTest(unittest.TestCase):
         self.assertEqual(self.state["_loop"]["phase"], "sleeping")
         self.assertAlmostEqual(self.state["_loop"]["until"], time.time() + wait, delta=5)
 
-    def test_turn_returns_none_when_every_project_is_idle(self):
+    # the loop does not end by itself
+
+    def fim(self):
+        return [title for title, _ in self.ap.sent if title.endswith(": fim")]
+
+    def test_empty_project_list_is_a_wait_without_a_notice(self):
+        self.write([])
+        self.assertEqual(self.turn(), 600)
+        self.assertEqual(self.turn(), 600)
+        self.assertEqual(self.ap.sent, [])
+        self.assertNotIn("all projects idle", self.log())
+        self.assertEqual(self.state["_loop"]["phase"], "sleeping")
+        self.assertFalse(self.state["_idle_notified"])
+
+    def test_all_idle_is_a_wait_and_is_announced_once(self):
         self.state["alpha"]["status"] = self.state["beta"]["status"] = "idle"
-        self.assertIsNone(self.turn())
+        self.assertEqual(self.turn(), 600)
+        self.assertEqual(self.turn(), 600)
+        self.assertEqual(self.fim(), ["Fake: fim"])
+        self.assertEqual(self.log().count("all projects idle; done"), 1)
+        self.assertTrue(json.loads(self.ap.STATE.read_text())["_idle_notified"])
+        self.assertAlmostEqual(self.state["_loop"]["until"], time.time() + 600, delta=5)
+
+    def test_reset_clears_the_idle_mark_and_the_project_is_picked(self):
+        self.state["alpha"]["status"] = self.state["beta"]["status"] = "idle"
+        self.turn()
+        overrides.update(self.tmp, lambda d: d.setdefault("reset", {}).update(beta=time.time()))
+        self.turn()
+        self.assertIn("beta: new unit", self.log())
+        self.assertFalse(self.state["_idle_notified"])
+        self.state["beta"].update(status="idle", interrupted=False, session=None)
+        self.ap.coord.release("beta", "codex")
+        self.turn()
+        self.assertEqual(self.fim(), ["Fake: fim", "Fake: fim"])  # idle again: a new notice
+
+    def test_project_added_after_all_idle_is_picked_without_a_restart(self):
+        self.state["alpha"]["status"] = self.state["beta"]["status"] = "idle"
+        self.turn()
+        (self.tmp / "gamma").mkdir()
+        self.write(self.entries + [{"name": "gamma", "path": str(self.tmp / "gamma")}])
+        self.turn()
+        self.assertIn("gamma: new unit", self.log())
+
+    def test_run_once_still_returns_none_when_every_project_is_idle(self):
+        self.state["alpha"]["status"] = self.state["beta"]["status"] = "idle"
+        self.assertIsNone(self.ap.run_once(self.cfg, self.engine, self.state))
+        self.assertIsNone(self.ap.run_once(self.cfg, self.engine, self.state))
+        self.assertEqual(self.fim(), ["Fake: fim"])
+
+    # malformed files
+
+    def test_config_with_bytes_that_are_not_utf8_keeps_the_last_good_config(self):
+        (self.tmp / "config.json").write_bytes(b'{"version": 1, "x": "\xff\xfe"}')
+        for _ in range(2):
+            cfg, changed = self.ap.current_config(self.cfg)
+            self.assertIs(cfg, self.cfg)
+            self.assertFalse(changed)
+        self.assertEqual(self.log().count(INVALID), 1)
+        self.turn()  # and a whole turn survives it
+        self.assertIn("alpha: new unit", self.log())
+
+    def test_secrets_whose_notify_is_not_a_table_are_ignored(self):
+        for text in ('notify = "x"\n', "notify = 5\n", "notify = [1, 2]\n"):
+            (self.tmp / "secrets.toml").write_text(text)
+            cfg = self.ap.load_config()
+            self.assertNotIn("topic", cfg["notify"], text)
+            self.assertEqual(cfg["notify"]["server"], "https://ntfy.sh")
+            got, _ = self.ap.current_config(self.cfg)
+            self.assertEqual(got, cfg)
+        self.assertEqual(self.log(), "")
+
+    def test_any_value_or_type_error_while_loading_keeps_the_last_good_config(self):
+        for error in (ValueError("bad value"), TypeError("bad type"), UnicodeDecodeError("utf-8", b"\xff", 0, 1, "x")):
+            def boom(error=error):
+                raise error
+            self.ap.load_config = boom
+            self.ap.CONFIG_WARNED = None
+            cfg, changed = self.ap.current_config(self.cfg)
+            self.assertIs(cfg, self.cfg)
+            self.assertFalse(changed)
+        self.assertEqual(self.log().count("keeping the last good configuration"), 3)
 
     # disabled engine
 
@@ -208,14 +288,106 @@ class ReloadTest(unittest.TestCase):
         self.assertNotIn("new unit", self.log())
         self.assertEqual(self.decisions, [["alpha", "beta"]])  # decisions keep flowing
 
-    def test_disabled_engine_resumes_nothing(self):
-        self.state["alpha"].update(interrupted=True, session="s1")
+    def test_disabled_engine_resumes_nothing_and_passes_the_baton(self):
+        self.state["alpha"].update(interrupted=True, session="s1", unit_id="u-7")
         self.ap.coord.claim("alpha", "codex")
         self.write(enabled=("claude",))
         self.turn()
-        self.assertEqual(self.log(), "")
+        self.assertNotIn("alpha: resuming", self.log())
+        self.assertNotIn("new unit", self.log())
+        claim = self.ap.coord.read_claim("alpha")
+        self.assertEqual((claim["engine"], claim["handoff_from"], claim["unit_id"]), (self.ap.coord.ANY, "codex", "u-7"))
+        self.assertFalse(self.state["alpha"]["interrupted"])
+        self.assertIsNone(self.state["alpha"]["session"])
+        # The other engine resumes it before anything else.
+        project, lock, _ = self.ap.pick(self.cfg, helpers.FakeEngine(TRUE, name="claude"), self.state, self.limits)
+        self.ap.coord.unlock(lock)
+        self.assertEqual(project["name"], "alpha")
+
+    def test_disabled_engine_leaves_a_unit_claimed_by_the_other_engine_alone(self):
+        self.state["alpha"].update(interrupted=True, session="s1")
+        self.ap.coord.claim("alpha", "claude")
+        self.write(enabled=("claude",))
+        self.turn()
+        self.assertEqual(self.ap.coord.read_claim("alpha")["engine"], "claude")
         self.assertTrue(self.state["alpha"]["interrupted"])
-        self.assertEqual(self.ap.coord.read_claim("alpha")["engine"], "codex")
+
+    def test_disabling_and_enabling_are_logged_once_each(self):
+        self.state["alpha"]["status"] = self.state["beta"]["status"] = "waiting"
+        self.write(enabled=())
+        for _ in range(3):
+            self.turn()
+        self.assertEqual(self.log().count("Fake is disabled in the config; starting nothing"), 1)
+        self.assertNotIn("enabled again", self.log())
+        self.write()
+        for _ in range(3):
+            self.turn()
+        self.assertEqual(self.log().count("Fake is enabled again"), 1)
+        self.write(enabled=())
+        self.turn()
+        self.assertEqual(self.log().count("Fake is disabled in the config; starting nothing"), 2)
+
+    # a baton on a project this engine does not run (cap 0)
+
+    def pick(self):
+        project, lock, _ = self.ap.pick(self.cfg, self.engine, self.state, self.limits)
+        if lock:
+            self.ap.coord.unlock(lock)
+        return project["name"] if project else None
+
+    def zero_cap_on_alpha(self):
+        self.write(edit=lambda d: d["projects"][0].update(weekly_cap={"codex": 0}))
+        self.cfg, _ = self.ap.current_config(self.cfg)
+        self.assertEqual(self.cfg["project"][0]["weekly_cap"], 0)
+
+    def test_baton_on_a_project_with_cap_zero_is_not_taken(self):
+        self.zero_cap_on_alpha()
+        self.ap.coord.claim("alpha", "claude")
+        self.ap.coord.hand_off("alpha", "claude", "u-1")
+        self.assertEqual(self.pick(), "beta")
+        self.state["beta"]["status"] = "idle"
+        self.assertIsNone(self.pick())
+        self.assertEqual(self.ap.coord.read_claim("alpha")["engine"], self.ap.coord.ANY)  # still there for Claude
+
+    def test_baton_on_a_project_with_a_cap_is_still_taken_first(self):
+        self.ap.coord.claim("beta", "claude")
+        self.ap.coord.hand_off("beta", "claude", "u-1")
+        self.assertEqual(self.pick(), "beta")
+
+    def test_own_interrupted_unit_goes_first_even_with_cap_zero(self):
+        self.zero_cap_on_alpha()
+        self.state["alpha"].update(interrupted=True, session="s1")
+        self.ap.coord.claim("alpha", "codex")
+        self.assertEqual(self.pick(), "alpha")
+
+    # status and check
+
+    def test_status_says_when_the_engine_is_disabled(self):
+        now = dt.datetime(2026, 10, 2, 20, 0)
+        lines = self.ap.status_lines(self.cfg, self.engine, self.state, self.limits, None, now)
+        self.assertEqual(lines[0], "engine Fake")
+        self.assertFalse(any("disabled" in line for line in lines))
+        self.write(enabled=())
+        self.cfg, _ = self.ap.current_config(self.cfg)
+        lines = self.ap.status_lines(self.cfg, self.engine, self.state, self.limits, None, now)
+        self.assertEqual(lines[:2], ["engine Fake", "engine Fake: disabled in the config"])
+
+    def check(self):
+        self.ap.engines.make_engine = lambda cfg: self.engine
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            self.ap.cmd_check(None)
+        return out.getvalue()
+
+    def test_check_says_when_the_engine_is_disabled(self):
+        self.assertIn("now: would start a unit on alpha", self.check())
+        self.assertEqual(self.engine.max_ages, [0])
+        self.write(enabled=())
+        text = self.check()
+        self.assertIn("engine Fake: disabled in the config", text)
+        self.assertIn("now: the engine is disabled; no unit starts", text)
+        self.assertNotIn("would start", text)
+        self.assertEqual(self.engine.max_ages[-1], float("inf"))  # no fresh quota query for a disabled engine
 
     def test_enabling_the_engine_again_puts_it_back_to_work(self):
         self.write(enabled=())

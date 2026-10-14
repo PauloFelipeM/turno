@@ -124,7 +124,9 @@ def load_config():
     cfg = config.for_engine(config.load(HOME), ENGINE)
     if SECRETS.exists():
         with SECRETS.open("rb") as f:
-            cfg.setdefault("notify", {}).update(tomllib.load(f).get("notify") or {})
+            notify = tomllib.load(f).get("notify")
+        if isinstance(notify, dict):  # anything else is a malformed file: no topic, and no crash
+            cfg.setdefault("notify", {}).update(notify)
     return cfg
 
 
@@ -142,9 +144,9 @@ def config_mtime():
 def current_config(last):
     """The configuration for this turn, re-read from the files: (cfg, whether it differs from `last`).
 
-    A `config.json` (or `secrets.toml`) that cannot be read or is invalid never stops a loop: `last`,
-    the last good configuration, stays in use and the problem is logged once per change of the file.
-    Notes the file's mtime for `nap`.
+    A `config.json` (or `secrets.toml`) that cannot be read or is malformed in any way never stops a
+    loop: `last`, the last good configuration, stays in use and the problem is logged once per change
+    of the file. Notes the file's mtime for `nap`.
     """
     global CONFIG_SEEN, CONFIG_WARNED
     # The mtime is taken before the read, as in read_overrides: a write landing in between wakes the
@@ -152,7 +154,7 @@ def current_config(last):
     CONFIG_SEEN = config_mtime()
     try:
         cfg = load_config()
-    except (config.ConfigError, OSError, tomllib.TOMLDecodeError) as e:
+    except (ValueError, TypeError, OSError) as e:  # ConfigError, bad TOML and bad bytes are ValueErrors
         if CONFIG_WARNED != CONFIG_SEEN:
             CONFIG_WARNED = CONFIG_SEEN
             name = "secrets.toml" if isinstance(e, tomllib.TOMLDecodeError) else config.FILE
@@ -891,6 +893,8 @@ def pick(cfg, engine, state, limits, next_project=None):
             continue
         if not (state[name]["interrupted"] or coord.is_handoff(name)) or coord.held_by_other(name, engine.name):
             continue
+        if not state[name]["interrupted"] and p.get("weekly_cap") == 0:
+            continue  # a baton on a project this engine does not run (cap 0); its own open unit still goes first
         if state[name].get("retry_at", 0) > now:
             # Still waiting after an error, a usage limit or a busy Docker: not even the resume runs.
             waits.append(state[name]["retry_at"] - now)
@@ -984,7 +988,8 @@ def window_notice(cfg, engine, state, active):
 
 
 def run_once(cfg, engine, state, win=None, now=None):
-    """One turn of the loop. Returns how many seconds to sleep, or None when there is no more work."""
+    """One turn of the loop. Returns how many seconds to sleep, or None when there is no work at all
+    (every project idle, or no project): the loop then waits for the config or the overrides to change."""
     process_decisions(cfg, state)
     started = time.time()
     now = now or datetime.datetime.now()
@@ -1015,12 +1020,17 @@ def run_once(cfg, engine, state, win=None, now=None):
         return 600
     project, lock, wait = pick(
         cfg, engine, state, limits, next_project=ov.get("next") if isinstance(ov.get("next"), str) else None)
+    done = project is None and all(state[p["name"]]["status"] == "idle" for p in cfg["project"])
+    # Announced once, and again only after some project left `idle`; never for an empty project list.
+    announce = done and bool(cfg["project"]) and not state.get("_idle_notified")
+    state["_idle_notified"] = done and bool(cfg["project"])
     save_state(state)
-    if project is None:
-        if all(state[p["name"]]["status"] == "idle" for p in cfg["project"]):
+    if done:
+        if announce:
             log("all projects idle; done")
             ntfy(cfg, f"{engine.label}: fim", "Todos os projetos terminaram o backlog.", tags=["checkered_flag"])
-            return None
+        return None
+    if project is None:
         # Not logged: the log shows only work. The reason for the wait shows in `check`.
         return max(wait, 60)
     try:
@@ -1077,23 +1087,30 @@ def run_project(cfg, engine, state, project, limits, win):
 def loop_turn(cfg, engine, state):
     """One turn of `cmd_run`'s loop, with the config re-read first.
 
-    Returns (the config now in use, seconds to sleep or None when there is no more work).
+    Returns (the config now in use, seconds to sleep). The loop never ends by itself: with nothing
+    to do it sleeps, and `nap` wakes it when the config or the overrides change.
     """
     cfg, changed = current_config(cfg)
     if changed:
         ensure_state(cfg, state)  # a project added in the panel gets its entry; a removed one keeps its own
         engine.cfg = cfg  # the engine reads the model and effort from here: they apply to the next unit
     win = schedule.from_config(cfg)
+    was_disabled = (state.get("_loop") or {}).get("phase") == "disabled"
     if not cfg.get("enabled", True):
         # A disabled engine starts nothing and resumes nothing; only the decisions keep flowing.
+        if not was_disabled:
+            log(f"{engine.label} is disabled in the config; starting nothing")
         read_overrides()  # only to note the file's mtime: otherwise an old one would wake every nap
         process_decisions(cfg, state)
+        hand_off_open_units(cfg, engine, state)  # its open units become batons the other engine can resume
         set_phase(state, "disabled")
         save_state(state)
         return cfg, 60
+    if was_disabled:
+        log(f"{engine.label} is enabled again")
     wait = run_once(cfg, engine, state, win)
     if wait is None:
-        return cfg, None
+        wait = 600  # every project idle, or none at all: a reset or a config change wakes the nap
     set_phase(state, idle_phase(win, datetime.datetime.now()), until=time.time() + wait)
     save_state(state)
     return cfg, wait
@@ -1128,13 +1145,13 @@ def cmd_run(args):
     save_state(state)
     while True:
         cfg, wait = loop_turn(cfg, engine, state)
-        if wait is None:
-            return
         nap(cfg, state, wait)
 
 
 def status_lines(cfg, engine, state, limits, win, now):
     out = [f"engine {engine.label}"]
+    if not cfg.get("enabled", True):
+        out.append(f"engine {engine.label}: disabled in the config")
     if win:
         if win.contains(now):
             out.append(f"window {win.describe()}: inside, closes {schedule.label(win.end_of(now))}")
@@ -1380,9 +1397,14 @@ def cmd_check(args):
     engine = engines.make_engine(cfg)
     win = schedule.from_config(cfg)
     now = datetime.datetime.now()
-    limits = engine.limits(state, max_age=0)  # fresh reading (on Claude, a minimal query)
+    disabled = not cfg.get("enabled", True)
+    # Fresh reading (on Claude, a minimal query), unless the engine is disabled: then the last one does.
+    limits = engine.limits(state, max_age=float("inf") if disabled else 0)
     print("\n".join(status_lines(cfg, engine, state, limits, win, now)))
     print()
+    if disabled:
+        print("now: the engine is disabled; no unit starts")
+        return
     if win and not win.can_start(now):
         print(f"now: no unit starts ({'last minutes of the window' if win.contains(now) else 'outside the window'})")
         return

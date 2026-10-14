@@ -160,13 +160,14 @@ class LoadTests(Base):
         self.assertEqual(config.for_engine(data, "claude")["schedule"],
                          {"start": "fri 19:00", "end": "sun 03:00", "start_margin_minutes": 15})
 
-    def test_overrides_folded_and_removed(self):
+    def test_overrides_folded_and_left_untouched(self):
         self.put("projects.toml", "claude.toml")
         overrides.update(self.home, lambda d: d.update(
             order=["side-project", "my-app"],
             projects={"my-api": {"paused": True, "weekly_cap": {"codex": 50}}},
             primary_cap={"claude": 70},
             next="my-app"))
+        before = (self.home / overrides.FILE).read_bytes()
         data = config.load(self.home)
         self.assertEqual([p["name"] for p in data["projects"]], ["side-project", "my-app", "my-api"])
         api = data["projects"][2]
@@ -174,13 +175,21 @@ class LoadTests(Base):
         self.assertEqual(api["weekly_cap"]["claude"], 90)
         self.assertEqual(data["engines"]["claude"]["primary_cap"], 70)
         self.assertEqual(data["engines"]["codex"]["primary_cap"], 100)
-        ov = overrides.read(self.home)
-        for key in ("order", "primary_cap"):
-            self.assertNotIn(key, ov)
-        self.assertNotIn("weekly_cap", ov["projects"]["my-api"])
-        self.assertTrue(ov["projects"]["my-api"]["paused"])
-        self.assertEqual(ov["next"], "my-app")
+        # Loops started before the change still read these keys: the import deletes nothing.
+        self.assertEqual((self.home / overrides.FILE).read_bytes(), before)
         self.assertEqual(config.validate(data), [])
+
+    def test_for_engine_fills_keys_missing_from_the_file(self):
+        data = config.empty()
+        del data["engines"]["codex"]["max_subagents"]
+        del data["engines"]["codex"]["safety_factor"]
+        data["engines"]["codex"]["orchestrator_model"] = "mine"
+        d = config.for_engine(data, "codex")["defaults"]
+        self.assertEqual((d["max_subagents"], d["safety_factor"], d["orchestrator_model"]), (2, 1.5, "mine"))
+        self.assertNotIn("max_subagents", config.for_engine(data, "claude")["defaults"])
+        self.assertNotIn("enabled", d)
+        self.assertNotIn("schedule", d)
+        self.assertEqual(data["engines"]["codex"].get("max_subagents"), None)  # the input is not changed
 
     def test_invalid_file_raises(self):
         for text in ("{not json", "[1]", json.dumps({"version": 2})):
