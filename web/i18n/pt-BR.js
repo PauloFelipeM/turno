@@ -13,8 +13,13 @@ export default {
   cancel: "Cancelar",
   stopConfirm: "Parar o {engine}?{unit}",
   stopConfirmUnit: " A unidade do {project} fica marcada e volta no próximo início.",
-  engineRequested: "Pedido enviado; o {engine} atende em até 5 s",
+  engineStarting: "Pedido enviado; o loop do {engine} está iniciando.",
+  engineStopping: "Pedido enviado; o loop do {engine} está parando; pode levar até 1 min.",
   requestError: "Não foi possível enviar o pedido. Tente de novo.",
+  // Server errors by code; a code without a text here shows the server's own message.
+  errors: {
+    restart_needed: "Este loop é de antes do botão de interromper. Pare e inicie o loop de novo; depois o ⏹ funciona.",
+  },
   attention: {
     title: "Precisa de você",
     comment: "Comentário (opcional)",
@@ -116,6 +121,7 @@ export default {
     error: "erro",
     cut: "cortada no fim da janela",
     unfinished: "não fechou; será retomada",
+    stopped: "interrompida; retoma depois",
   },
   unit: {
     runs: "Execuções",

@@ -76,7 +76,7 @@ button { font: inherit; color: inherit; }
 .bar i { position: absolute; inset: 0 auto 0 0; border-radius: 3px; background: var(--live); }
 .chip { display: inline-block; font-size: .78rem; padding: 0 8px; border-radius: 999px; background: var(--track); white-space: nowrap; }
 .st-blocked, .oc-error, .oc-blocked { color: var(--bad); }
-.st-waiting, .st-interrupted, .oc-usage_limit, .oc-cut, .oc-unfinished, .oc-waiting { color: var(--warn); }
+.st-waiting, .st-interrupted, .oc-usage_limit, .oc-cut, .oc-stopped, .oc-unfinished, .oc-waiting { color: var(--warn); }
 .project-detail { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 4px 12px 12px; margin-top: 8px; }
 .backlog { padding-left: 1.2em; margin: 0; }
 .backlog li { display: flex; justify-content: space-between; gap: 8px; padding: 2px 0; }

@@ -1,6 +1,6 @@
 """What the panel shows, assembled from turno's files.
 
-Read-only: it writes nothing, takes no locks and never loads secrets.toml (the ntfy topic never leaves it).
+Read-only (the writes live in control.py): it writes nothing, takes no locks and never loads secrets.toml (the ntfy topic never leaves it).
 """
 
 import datetime
@@ -215,14 +215,14 @@ def overview(home, cache, homes=None):
             entry["engines"][inst["engine"]] = info
     ov = overrides.read(home)
     ov_projects = _dict(ov.get("projects"))
-    blocked = None  # read lazily, once: the history of every engine
+    blocked = {}
+    if any(e["status"] == "blocked" for entry in projects.values() for e in entry["engines"].values()):
+        # The history of every engine, read once and only when some project is blocked.
+        for u in units(home, limit=10**9):  # newest first
+            if u["closed"] and u["outcome"] == "blocked":
+                blocked.setdefault(u["project"], u["summary"])
     out_projects = []
     for entry in projects.values():
-        if blocked is None:
-            blocked = {}
-            for u in units(home, limit=10**9):  # newest first
-                if u["closed"] and u["outcome"] == "blocked":
-                    blocked.setdefault(u["project"], u["summary"])
         claim = read_json(home / "shared" / "claims" / f"{entry['name']}.json")
         is_dir = Path(entry["path"]).is_dir()
         count = len(pending_decisions(entry["path"])) if is_dir else 0
@@ -302,7 +302,7 @@ def watched_files(home):
     """The files whose changes change the overview."""
     home = Path(home)
     files = [p for p in home.glob("*.toml") if p.name != "secrets.toml"]
-    files += list(home.glob("state*.json")) + list(home.glob("history-*.jsonl"))
+    files += list(home.glob("state*.json")) + list(home.glob("history-*.jsonl")) + [home / overrides.FILE]
     files += list((home / "shared" / "claims").glob("*.json")) + list((home / "shared").glob("instance-*.lock"))
     for inst in configured(home):
         for p in inst["cfg"]["project"]:
@@ -311,5 +311,3 @@ def watched_files(home):
             files += list((base / "decisions").glob("*.json"))
     return files
 
-
-_ok, _project_path = configured, project_path  # old internal names

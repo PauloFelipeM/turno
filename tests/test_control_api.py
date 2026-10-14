@@ -63,15 +63,23 @@ class ControlApiTest(unittest.TestCase):
         script = self.home / "fake" / "autopilot.py"
         script.parent.mkdir(exist_ok=True)
         marker = self.home / "usr1.marker"
+        ready = self.home / "fake" / "ready"
+        ready.unlink(missing_ok=True)
         script.write_text(
             "import signal, sys, time, pathlib\n"
             f"signal.signal(signal.SIGUSR1, lambda *a: pathlib.Path({str(marker)!r}).write_text('x'))\n"
-            "time.sleep(30)\n" if handler else "import time\ntime.sleep(30)\n")
+            f"pathlib.Path({str(ready)!r}).write_text('x')\n"
+            "time.sleep(30)\n" if handler else
+            f"import time, pathlib\npathlib.Path({str(ready)!r}).write_text('x')\ntime.sleep(30)\n")
         proc = subprocess.Popen([sys.executable, str(script), "run"])
         self.addCleanup(proc.wait)
         self.addCleanup(proc.kill)
         (self.home / "shared" / f"instance-{kind}.lock").write_text(str(proc.pid))
-        time.sleep(0.3)
+        for _ in range(100):  # the script says when it is up (and its handler installed)
+            if ready.exists():
+                break
+            time.sleep(0.05)
+        self.assertTrue(ready.exists())
         return proc, marker
 
     # guard
@@ -293,6 +301,34 @@ class ControlApiTest(unittest.TestCase):
         self.assertEqual(self.call("PUT", "/api/settings", {"order": ["side-project"]}, turno=None)[0], 403)
         self.assertEqual(self.call("DELETE", "/api/settings", turno=None)[0], 403)
         self.assertEqual(self.call("PUT", "/api/settings", raw=b'{"order": ["side-project"]}', ctype="text/plain")[0], 403)
+        self.assertEqual(self.ov(), {})
+
+
+    # interrupt against a loop that cannot take SIGUSR1
+
+    def test_hub_signature_changes_when_the_overrides_change(self):
+        before = self.hub.signature()
+        self.overrides.update(self.home, lambda d: None)
+        self.assertNotEqual(self.hub.signature(), before)
+
+    def test_interrupt_refuses_a_loop_without_a_sigusr1_handler(self):
+        proc, marker = self.start_loop("codex")  # an old loop: SIGUSR1 would kill it
+        (self.home / "state.json").write_text(json.dumps({"_loop": {"phase": "running", "project": "my-app"}}))
+        status, body = self.post("/api/projects/my-app/interrupt")
+        self.assertEqual(status, 409)
+        self.assertEqual(body["error"], "restart_needed")
+        self.assertTrue(body["message"])
+        time.sleep(0.5)
+        self.assertIsNone(proc.poll())  # still alive
+        self.assertEqual(self.ov(), {})  # not paused, nothing written
+
+    def test_interrupt_refuses_when_the_handlers_cannot_be_read(self):
+        proc, marker = self.start_loop("codex", handler=True)
+        (self.home / "state.json").write_text(json.dumps({"_loop": {"phase": "running", "project": "my-app"}}))
+        with mock.patch.object(self.control, "_caught_signals", return_value=None):
+            status, body = self.post("/api/projects/my-app/interrupt")
+        self.assertEqual((status, body["error"]), (409, "restart_needed"))
+        self.assertFalse(marker.exists())
         self.assertEqual(self.ov(), {})
 
 

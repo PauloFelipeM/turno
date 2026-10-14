@@ -261,5 +261,27 @@ class PanelTest(unittest.TestCase):
         self.panel.unit_detail(self.home, "u1")
 
 
+    def test_overrides_file_is_watched(self):
+        self.assertIn(self.home / "overrides.json", self.panel.watched_files(self.home))
+
+    def test_history_is_only_read_when_a_project_is_blocked(self):
+        calls = []
+        real = self.panel.units
+        self.panel.units = lambda *a, **k: calls.append(1) or real(*a, **k)
+        self.overview()
+        self.assertEqual(len(calls), 1)  # my-api is blocked in the fixture
+        state = json.loads((self.home / "state.json").read_text())
+        state["my-api"]["status"] = "active"
+        (self.home / "state.json").write_text(json.dumps(state))
+        calls.clear()
+        self.assertTrue(all(p["blocked_summary"] is None for p in self.overview()["projects"]))
+        self.assertEqual(calls, [])
+
+    def test_unused_aliases_are_gone(self):
+        import overrides
+        self.assertFalse(hasattr(self.panel, "_ok") or hasattr(self.panel, "_project_path"))
+        self.assertFalse(hasattr(overrides, "_cap"))
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -10,6 +10,7 @@ import signal
 import threading
 import time
 import traceback
+from pathlib import Path
 
 import autopilot
 import coord
@@ -123,12 +124,34 @@ def _running_pid(home, name):
     return None
 
 
+def _caught_signals(pid):
+    """The mask of signals the process has a handler for (`SigCgt` in /proc/<pid>/status); None if unknown."""
+    try:
+        for line in Path(f"/proc/{pid}/status").read_text().splitlines():
+            if line.startswith("SigCgt:"):
+                return int(line.split()[1], 16)
+    except (OSError, ValueError, IndexError):
+        pass
+    return None
+
+
+def _handles_sigusr1(pid):
+    """Whether SIGUSR1 reaches a handler. Without one the signal's default action would end the loop."""
+    mask = _caught_signals(pid)
+    return mask is not None and bool(mask & (1 << (signal.SIGUSR1 - 1)))
+
+
 def interrupt(home, name):
-    if not _running_pid(home, name):
+    pid = _running_pid(home, name)
+    if not pid:
         raise ApiError(409, "not_running", "no unit is running on this project")
-    _set_project(home, name, paused=True)  # first: the loop must not pick the project again
-    pid = _running_pid(home, name)  # the check is repeated right before the signal
-    if pid:
+    if not _handles_sigusr1(pid):
+        # A loop started before this control existed (or one whose handlers cannot be read).
+        raise ApiError(409, "restart_needed",
+                       "this loop cannot take the interrupt request; stop and start it again first")
+    _set_project(home, name, paused=True)  # before the signal: the loop must not pick the project again
+    pid = _running_pid(home, name)  # both checks are repeated right before the signal
+    if pid and _handles_sigusr1(pid):
         try:
             os.kill(pid, signal.SIGUSR1)
         except ProcessLookupError:

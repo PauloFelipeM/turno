@@ -48,7 +48,8 @@ async function getJSON(url) {
   return r.json();
 }
 
-// Sends a write request; resolves to the parsed JSON and throws an Error with the server's message otherwise.
+// Sends a write request; resolves to the parsed JSON and otherwise throws an Error with the text for the
+// server's error code or, when there is none, the server's own message.
 async function post(url, body, method = "POST") {
   let r;
   try {
@@ -62,7 +63,10 @@ async function post(url, body, method = "POST") {
   }
   let data = null;
   try { data = await r.json(); } catch { /* no body */ }
-  if (!r.ok) throw new Error((data && data.message) || t("requestError"));
+  if (!r.ok) {
+    const known = data && typeof data.error === "string" && Object.hasOwn(T.errors, data.error);
+    throw new Error(known ? t(`errors.${data.error}`) : (data && data.message) || t("requestError"));
+  }
   return data;
 }
 
@@ -136,7 +140,7 @@ function engineControls(e) {
   const name = engineName(e.engine);
   if (!running) {
     return h("button", { type: "button", class: "btn", "data-action": `start:${e.engine}`, onclick: (ev) =>
-      act(ev.currentTarget, () => post(`/api/engines/${enc(e.engine)}/start`), t("engineRequested", { engine: name })) }, t("start"));
+      act(ev.currentTarget, () => post(`/api/engines/${enc(e.engine)}/start`), t("engineStarting", { engine: name })) }, t("start"));
   }
   if (view.confirm !== key) {
     return h("button", { type: "button", class: "btn", "data-action": `stop:${e.engine}`, onclick: () => { view.confirm = key; renderEngines(); } }, t("stop"));
@@ -145,7 +149,7 @@ function engineControls(e) {
   return h("div", { class: "confirm", role: "group" },
     h("span", {}, t("stopConfirm", { engine: name, unit })),
     h("button", { type: "button", class: "btn danger", "data-action": `stop:${e.engine}`, onclick: async (ev) => {
-      if (await act(ev.currentTarget, () => post(`/api/engines/${enc(e.engine)}/stop`), t("engineRequested", { engine: name }))) view.confirm = null;
+      if (await act(ev.currentTarget, () => post(`/api/engines/${enc(e.engine)}/stop`), t("engineStopping", { engine: name }))) view.confirm = null;
       renderEngines();
     } }, t("stop")),
     h("button", { type: "button", class: "btn", onclick: () => { view.confirm = null; renderEngines(); } }, t("cancel")));
