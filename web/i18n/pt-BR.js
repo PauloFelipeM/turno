@@ -28,6 +28,7 @@ export default {
     restart_needed: "Este loop precisa ser reiniciado para aceitar a interrupção.",
     forbidden: "Pedido recusado: só o painel aberto neste computador pode enviar.",
     internal: "Erro interno do painel. Veja o terminal onde o painel está rodando.",
+    bad_path: "A pasta não existe ou não é uma pasta.",
     exists: "Já existe um projeto com esse nome.",
     in_use: "O projeto está em uso (unidade aberta, reserva ou rodando); não dá para remover agora.",
     disabled: "Este motor está desligado na configuração; ligue-o em Configurações antes de iniciar.",

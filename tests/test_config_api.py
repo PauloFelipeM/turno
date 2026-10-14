@@ -71,7 +71,9 @@ class ConfigApiTest(unittest.TestCase):
         self.addCleanup(proc.wait)
         self.addCleanup(proc.kill)
         (self.home / "shared" / f"instance-{kind}.lock").write_text(str(proc.pid))
-        time.sleep(0.2)
+        deadline = time.monotonic() + 5
+        while self.panel.loop_pid(self.home, kind) is None and time.monotonic() < deadline:
+            time.sleep(0.01)
 
     # --- GET /api/config ------------------------------------------------------------------
 
@@ -136,8 +138,10 @@ class ConfigApiTest(unittest.TestCase):
         before = self.raw()
         status, body = self.call("POST", "/api/projects", {"name": "my-app", "path": str(self.extra)})
         self.assertEqual((status, body["error"]), (409, "exists"))
-        bad = [{"name": "novo", "path": str(self.home / "nope")}, {"name": "novo", "path": str(self.home / "secrets.toml")},
-               {"name": "novo", "path": "relative"}, {"name": "novo"}, {"path": str(self.extra)},
+        for missing in (str(self.home / "nope"), str(self.home / "secrets.toml")):
+            status, body = self.call("POST", "/api/projects", {"name": "novo", "path": missing})
+            self.assertEqual((status, body["error"]), (400, "bad_path"), missing)
+        bad = [{"name": "novo", "path": "relative"}, {"name": "novo"}, {"path": str(self.extra)},
                {"name": "bad name", "path": str(self.extra)}, {"name": "novo", "path": str(self.extra), "x": 1},
                {"name": "novo", "path": str(self.extra), "weekly_cap": {"codex": 101}},
                {"name": "novo", "path": str(self.extra), "weekly_cap": {"gemini": 5}},
@@ -159,7 +163,9 @@ class ConfigApiTest(unittest.TestCase):
 
     def test_edit_cannot_rename_and_errors(self):
         before = self.raw()
-        for b in ({"name": "other"}, {"path": str(self.home / "nope")}, {"weekly_cap": {"codex": -1}}, {"weekly_cap": 5}):
+        status, body = self.call("PUT", "/api/projects/side-project", {"path": str(self.home / "nope")})
+        self.assertEqual((status, body["error"]), (400, "bad_path"))
+        for b in ({"name": "other"}, {"weekly_cap": {"codex": -1}}, {"weekly_cap": 5}):
             self.assertEqual(self.call("PUT", "/api/projects/side-project", b)[0], 400, b)
         status, body = self.call("PUT", "/api/projects/nope", {"path": str(self.extra)})
         self.assertEqual((status, body["error"]), (404, "not_found"))
@@ -217,13 +223,23 @@ class ConfigApiTest(unittest.TestCase):
         self.assertEqual(self.call("PUT", "/api/engines/gemini", {})[0], 404)
         self.assertEqual(self.raw(), before)
 
+    def test_start_and_stop_with_an_invalid_config_are_400_config(self):
+        helpers.write_config_text(self.home, "{broken")
+        for action in ("start", "stop"):
+            status, body = self.call("POST", f"/api/engines/codex/{action}")
+            self.assertEqual((status, body["error"]), (400, "config"), action)
+        (self.home / "config.json").write_bytes(b"\xff\xfe")
+        self.assertEqual(self.call("POST", "/api/engines/codex/start")[0], 400)
+
     def test_start_on_a_disabled_engine_is_409(self):
         helpers.write_config(self.home, [], enabled=("claude",))
         with mock.patch.object(self.ap, "start_loops") as start:
             status, body = self.call("POST", "/api/engines/codex/start")
             self.assertEqual((status, body["error"]), (409, "disabled"))
             self.assertEqual(self.call("POST", "/api/engines/claude/start")[0], 202)
-            time.sleep(0.2)
+            deadline = time.monotonic() + 5
+            while not start.called and time.monotonic() < deadline:
+                time.sleep(0.01)
         start.assert_called_once_with(["claude"])
 
     def test_check_engine_returns_limits_and_writes_no_file(self):

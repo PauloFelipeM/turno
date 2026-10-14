@@ -67,11 +67,15 @@ def _background(fn, engine):
 
 
 def engine_action(home, engine, action):
-    if engine not in _known(home)[1]:
+    insts = panel.instances(home)
+    if any("error" in i for i in insts):
+        raise ApiError(400, "config", "config.json is invalid; fix it before starting or stopping a loop")
+    inst = next((i for i in insts if i["engine"] == engine), None)
+    if inst is None:
         raise ApiError(404, "not_found", f"unknown engine: {engine}")
     running = panel.loop_pid(home, engine) is not None
     if action == "start":
-        if not next(i for i in panel.configured(home) if i["engine"] == engine)["enabled"]:
+        if not inst["enabled"]:
             raise ApiError(409, "disabled", "the engine is disabled in the configuration")
         if running:
             raise ApiError(409, "already_running", "the loop is already running")
@@ -260,7 +264,7 @@ def _folder(value):
     if not path.is_absolute():
         raise bad("path must be absolute")
     if not path.is_dir():
-        raise bad(f"path is not an existing directory: {path}")
+        raise ApiError(400, "bad_path", f"path is not an existing directory: {path}")
     return str(path)
 
 

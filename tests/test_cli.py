@@ -45,5 +45,18 @@ class StatusTest(unittest.TestCase):
         self.assertIn("closes dom 04/10 03:00", self.lines(win, dt.datetime(2026, 10, 2, 20, 0)))
 
 
+class RunWithInvalidConfigTest(unittest.TestCase):
+    def test_cmd_run_exits_with_a_message_and_writes_nothing(self):
+        tmp = Path(tempfile.mkdtemp())
+        ap = helpers.load(tmp)
+        helpers.write_config_text(tmp, '{"version": 2}')
+        before = sorted(str(p.relative_to(tmp)) for p in tmp.rglob("*"))
+        with self.assertRaises(SystemExit) as cm:
+            ap.cmd_run(None)
+        self.assertEqual(str(cm.exception.code),
+                         "config.json is invalid: version must be 1; projects must be a list; engines must be an "
+                         "object; notify must be an object; fix it in the panel or the file")
+        self.assertEqual(sorted(str(p.relative_to(tmp)) for p in tmp.rglob("*")), before)
+
 if __name__ == "__main__":
     unittest.main()

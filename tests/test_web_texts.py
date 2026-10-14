@@ -39,10 +39,11 @@ class WebTextsTest(unittest.TestCase):
         codes |= set(re.findall(r'\{"error": "(\w+)"', (root / "server.py").read_text()))
         self.assertEqual(codes, {"bad_option", "bad_request", "not_found", "already_running", "busy", "not_running",
                                  "paused", "restart_needed", "forbidden", "internal", "exists", "in_use", "disabled",
-                                 "config"})
+                                 "config", "bad_path"})
         block = self.block("errors")
         for code in codes:
             self.assertRegex(block, rf'\n?\s*{code}: "[^"]+",', code)
+        self.assertIn('bad_path: "A pasta não existe ou não é uma pasta."', block)
         self.assertIn('restart_needed: "Este loop precisa ser reiniciado para aceitar a interrupção."', block)
 
     def test_retry_wait_shows_on_the_card_and_can_be_cleared_from_the_project_panel(self):

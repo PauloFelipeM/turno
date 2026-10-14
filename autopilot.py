@@ -1117,7 +1117,10 @@ def loop_turn(cfg, engine, state):
 
 
 def cmd_run(args):
-    cfg = load_config()
+    try:
+        cfg = load_config()
+    except config.ConfigError as e:
+        sys.exit(f"config.json is invalid: {e}; fix it in the panel or the file")
     engine = engines.make_engine(cfg)
     # Handlers before the lock: once the pid is in the lock file the panel may send SIGUSR1, and the
     # signal's default action would end the loop.
