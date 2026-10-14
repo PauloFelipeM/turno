@@ -50,53 +50,10 @@ class ClaudeEngineTest(unittest.TestCase):
         limits = self.state["_engine"]["limits"]
         self.assertGreater(limits["secondary"]["used_percent"], 0)
         self.assertIn("seven_day_overage_included", limits["extra"])
-        self.assertTrue(self.engine.fable_available(self.state))  # 19%, longe de acabar
 
     def test_to_limits_converts_to_percent(self):
         limits = self.engines.to_limits(rate_event(five=0.16, week=0.36)["rate_limit_info"])
         self.assertEqual((limits["primary"]["used_percent"], limits["secondary"]["used_percent"]), (16.0, 36.0))
-
-    def test_exhausted_fable_window_switches_planner_to_opus(self):
-        resets = int(time.time()) + 7200
-        self.engine.record(self.state, [rate_event(extra={"seven_day_overage_included":
-                                                          {"utilization": 0.99, "resetsAt": resets}})["rate_limit_info"]])
-        self.assertFalse(self.engine.fable_available(self.state))
-        path = self.tmp / "agents.json"
-        self.engine.write_agents(self.state, path)
-        agents = json.loads(path.read_text())
-        self.assertEqual(agents["planner"]["model"], "claude-opus-5-5")
-        self.assertNotIn("fallback_model", agents["planner"])
-        self.assertEqual(agents["planner"]["effort"], "high")  # only the model changes
-
-    def fable_reading(self, used, status="allowed"):
-        resets = int(time.time()) + 86400
-        info = rate_event(status=status, extra={"seven_day_overage_included":
-                                                {"utilization": used, "resetsAt": resets}})["rate_limit_info"]
-        self.engine.record(self.state, [info])
-
-    def test_fable_below_its_cap_stays(self):
-        self.fable_reading(0.79)
-        self.assertTrue(self.engine.fable_available(self.state))
-
-    def test_fable_at_its_cap_switches_to_opus(self):
-        self.fable_reading(0.80)
-        self.assertFalse(self.engine.fable_available(self.state))
-
-    def test_fable_cap_comes_from_the_config(self):
-        self.engine.cfg["defaults"]["fable_cap"] = 60
-        self.fable_reading(0.65)
-        self.assertFalse(self.engine.fable_available(self.state))
-
-    def test_claude_code_warning_switches_to_opus_early(self):
-        self.fable_reading(0.50, status="allowed_warning")
-        self.assertFalse(self.engine.fable_available(self.state))
-
-    def test_saturday_sequence_plans_with_opus_after_the_90_percent_reading(self):
-        for used, status in ((0.58, "allowed"), (0.75, "allowed"), (0.90, "allowed_warning")):
-            self.fable_reading(used, status)
-        path = self.tmp / "agents.json"
-        self.engine.write_agents(self.state, path)
-        self.assertEqual(json.loads(path.read_text())["planner"]["model"], "claude-opus-5-5")
 
     def test_fresh_agents_get_model_and_effort_from_the_config(self):
         path = self.tmp / "agents.json"
@@ -108,16 +65,16 @@ class ClaudeEngineTest(unittest.TestCase):
             self.assertEqual((agents[name]["description"], agents[name]["prompt"]), ("d", "p"))
             self.assertNotIn("fallback_model", agents[name])
 
-    def test_only_fable_roles_fall_back_when_fable_is_out(self):
-        self.engine.cfg["defaults"]["roles"]["reviewer"]["model"] = "claude-fable-5-1"
-        self.fable_reading(0.95)
+    def test_a_fable_role_stays_on_fable_even_with_an_extra_window_at_95(self):
+        resets = int(time.time()) + 86400
+        self.engine.record(self.state, [rate_event(extra={"seven_day_overage_included":
+                                                          {"utilization": 0.95, "resetsAt": resets}})["rate_limit_info"]])
         path = self.tmp / "agents.json"
         self.engine.write_agents(self.state, path)
         agents = json.loads(path.read_text())
-        self.assertEqual(agents["planner"]["model"], "claude-opus-5-5")
+        self.assertEqual(agents["planner"]["model"], "claude-fable-5-1")
         self.assertEqual(agents["reviewer"]["model"], "claude-opus-5-5")
-        self.assertEqual(agents["reviewer"]["effort"], "xhigh")
-        self.assertEqual(agents["implementer"]["model"], "claude-sonnet-5-5")
+        self.assertNotIn("fable_exhausted_until", self.state["_engine"])
 
     def test_a_role_without_config_keeps_the_file_as_it_is(self):
         self.engine.cfg["defaults"].pop("roles")
@@ -125,19 +82,15 @@ class ClaudeEngineTest(unittest.TestCase):
         self.engine.write_agents(self.state, path)
         self.assertEqual(json.loads(path.read_text()), ROLES)
 
-    def test_fable_limit_in_a_subagent_result_marks_it_exhausted(self):
+    def test_fable_limit_in_a_subagent_result_changes_nothing(self):
         tool_result = {"type": "user", "message": {"content": [{"type": "tool_result", "content": [
             {"type": "text", "text": "Agent failed: claude-fable-5-1 usage limit reached"}]}]}}
         out, _ = self.write_run(rate_event(), tool_result)
         self.engine.after_run(self.state, {"unit_start_limits": None}, out, False)
-        self.assertFalse(self.engine.fable_available(self.state))
-
-    def test_orchestrator_text_about_fable_does_not_count(self):
-        said = {"type": "assistant", "message": {"content": [
-            {"type": "text", "text": "If the Fable usage limit is reached I will use opus."}]}}
-        out, _ = self.write_run(rate_event(), said)
-        self.engine.after_run(self.state, {"unit_start_limits": None}, out, False)
-        self.assertTrue(self.engine.fable_available(self.state))
+        self.assertNotIn("fable_exhausted_until", self.state["_engine"])
+        path = self.tmp / "agents.json"
+        self.engine.write_agents(self.state, path)
+        self.assertEqual(json.loads(path.read_text())["planner"]["model"], "claude-fable-5-1")
 
     def test_first_event_of_the_unit_is_its_starting_point(self):
         s = {"unit_start_limits": None}

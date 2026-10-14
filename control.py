@@ -343,7 +343,7 @@ def remove_project(home, name):
     return 200, {"ok": True}
 
 
-ENGINE_FIELDS = ("enabled", "orchestrator_model", "orchestrator_effort", "max_subagents", "primary_cap", "fable_cap",
+ENGINE_FIELDS = ("enabled", "orchestrator_model", "orchestrator_effort", "max_subagents", "primary_cap",
                  "safety_factor", "blocked_cooldown_hours", "schedule", "roles")
 ROLE_FIELDS = ("model", "effort")
 SCHEDULE_FIELDS = ("start", "end", "start_margin_minutes")

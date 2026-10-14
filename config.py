@@ -39,7 +39,7 @@ ENGINE_DEFAULTS = {
               "roles": {"planner": {"model": "gpt-6-astra", "effort": "xhigh"},
                         "implementer": {"model": "gpt-6-sol", "effort": "medium"},
                         "reviewer": {"model": "gpt-6-astra", "effort": "high"}}},
-    "claude": {**_COMMON, "orchestrator_model": "claude-sonnet-5-5", "fable_cap": 80,
+    "claude": {**_COMMON, "orchestrator_model": "claude-sonnet-5-5",
                "roles": {"planner": {"model": "claude-opus-5-5", "effort": "high"},
                          "implementer": {"model": "claude-sonnet-5-5", "effort": "medium"},
                          "reviewer": {"model": "claude-opus-5-5", "effort": "high"}}},
@@ -176,10 +176,8 @@ def _validate_engine(name, e, problems):
     sf = e.get("safety_factor")
     if not (_num(sf) and sf > 0):
         problems.append(f"{where}.safety_factor must be a number > 0")
-    for key in ("primary_cap", "fable_cap"):
-        if key in e or key == "primary_cap":
-            if not (_num(e.get(key)) and 0 <= e[key] <= 100):
-                problems.append(f"{where}.{key} must be a number between 0 and 100")
+    if not (_num(e.get("primary_cap")) and 0 <= e["primary_cap"] <= 100):
+        problems.append(f"{where}.primary_cap must be a number between 0 and 100")
     for key in ("initial_cost_primary", "initial_cost_secondary", "blocked_cooldown_hours"):
         if not (_num(e.get(key)) and e[key] >= 0):
             problems.append(f"{where}.{key} must be a number >= 0")
@@ -250,6 +248,10 @@ def _read_file(home):
         data = json.loads(text)
     except ValueError as e:
         raise ConfigError([f"{FILE} is not valid JSON: {e}"]) from e
+    # An old key that no longer exists: dropped on read; the file is only rewritten by a save.
+    for e in (data.get("engines") or {}).values() if isinstance(data, dict) else ():
+        if isinstance(e, dict):
+            e.pop("fable_cap", None)
     problems = validate(data)
     if problems:
         raise ConfigError(problems)
@@ -320,6 +322,7 @@ def for_engine(data, engine):
     """The config in the legacy shape the loop consumes (see `cfg` in autopilot.py)."""
     # The file's values over the defaults: a key missing from a hand-edited file still has a value.
     e = {**copy.deepcopy(ENGINE_DEFAULTS[engine]), **(data["engines"].get(engine) or {})}
+    e.pop("fable_cap", None)
     e["roles"] = full_roles(engine, e.get("roles"))
     out = {
         "enabled": bool(e.get("enabled")),
@@ -369,7 +372,7 @@ def import_toml(home):
             continue
         e = data["engines"][eng]
         e["enabled"] = True
-        e.update(cfg.get("defaults") or {})
+        e.update({k: v for k, v in (cfg.get("defaults") or {}).items() if k != "fable_cap"})
         if cfg.get("schedule"):
             # schedule.from_config defaults the margin to 15; the config file requires the key.
             e["schedule"] = {"start_margin_minutes": 15, **cfg["schedule"]}

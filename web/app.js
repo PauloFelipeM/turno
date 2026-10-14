@@ -427,7 +427,6 @@ function engineDraft(e) {
     noWindow: !s,
     start: s ? s.start : "", end: s ? s.end : "", margin: s ? String(s.start_margin_minutes ?? 15) : "15",
     primary_cap: e.primary_cap ?? "",
-    fable_cap: e.fable_cap ?? "",
   };
 }
 
@@ -521,7 +520,7 @@ function saveSteps() {
       if (Object.keys(ch).length) roles[r] = ch;
     }
     if (Object.keys(roles).length) body.roles = roles;
-    for (const f of k === "claude" ? ["primary_cap", "fable_cap"] : ["primary_cap"]) {
+    for (const f of ["primary_cap"]) {
       if (String(cur[f]).trim() === "") { if (String(was[f]).trim() !== "") return null; continue; }
       const n = parseCap(cur[f]);
       if (n == null) return null;
@@ -674,9 +673,7 @@ function engineBlock(k) {
       t("settings.enabled")),
     roleTable,
     h("div", { class: "cap-row" },
-      capInput(t("settings.primaryCap"), cur.primary_cap, (v) => { cur.primary_cap = v; }),
-      k === "claude" ? capInput(t("settings.fableCap"), cur.fable_cap, (v) => { cur.fable_cap = v; }) : null),
-    k === "claude" ? h("p", { class: "muted small" }, t("settings.fableHint")) : null,
+      capInput(t("settings.primaryCap"), cur.primary_cap, (v) => { cur.primary_cap = v; })),
     h("label", { class: "check" },
       h("input", { type: "checkbox", checked: cur.noWindow, "data-sf": `nowindow:${k}`, onchange: (ev) => { cur.noWindow = ev.target.checked; renderSettings(); } }),
       t("settings.noWindow")),

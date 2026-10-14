@@ -86,7 +86,7 @@ class ConfigApiTest(unittest.TestCase):
         p = v["projects"][0]
         self.assertEqual((p["weekly_cap"], p["removable"], p["blocked_by"]), ({"codex": 90, "claude": 90}, True, None))
         self.assertEqual(v["engines"]["codex"]["cli"], CLI)
-        self.assertEqual(v["engines"]["claude"]["fable_cap"], 80)
+        self.assertNotIn("fable_cap", v["engines"]["claude"])
         self.assertEqual(v["notify"]["server"], "https://ntfy.sh")
         self.assertNotIn("segredo-xyz", json.dumps(v))
 
@@ -201,10 +201,10 @@ class ConfigApiTest(unittest.TestCase):
 
     def test_put_engine(self):
         sched = {"start": "fri 19:00", "end": "sun 03:00"}
-        body = {"enabled": False, "orchestrator_model": "m2", "fable_cap": 70, "safety_factor": 2, "schedule": sched}
+        body = {"enabled": False, "orchestrator_model": "m2", "primary_cap": 70, "safety_factor": 2, "schedule": sched}
         self.assertEqual(self.call("PUT", "/api/engines/claude", body)[0], 200)
         e = self.cfg()["engines"]["claude"]
-        self.assertEqual((e["enabled"], e["orchestrator_model"], e["fable_cap"], e["safety_factor"]), (False, "m2", 70, 2))
+        self.assertEqual((e["enabled"], e["orchestrator_model"], e["primary_cap"], e["safety_factor"]), (False, "m2", 70, 2))
         self.assertEqual(e["schedule"], {**sched, "start_margin_minutes": 15})
         self.assertEqual(self.call("PUT", "/api/engines/claude", {"schedule": None})[0], 200)
         self.assertIsNone(self.cfg()["engines"]["claude"]["schedule"])
@@ -245,7 +245,7 @@ class ConfigApiTest(unittest.TestCase):
         bad = [("claude", {"schedule": {"start": "someday", "end": "sun 03:00"}}),
                ("claude", {"schedule": {"start": "fri 19:00", "end": "fri 19:00"}}),
                ("claude", {"schedule": "x"}), ("claude", {"schedule": {"start": "fri 19:00", "end": "sun 03:00", "x": 1}}),
-               ("claude", {"max_subagents": 2}), ("codex", {"fable_cap": 5}), ("codex", {"colour": "red"}),
+               ("claude", {"max_subagents": 2}), ("claude", {"fable_cap": 80}), ("codex", {"fable_cap": 5}), ("codex", {"colour": "red"}),
                ("codex", {"enabled": "yes"}), ("codex", {"primary_cap": 101}), ("codex", {"safety_factor": 0}),
                ("codex", {"orchestrator_model": ""})]
         for engine, b in bad:
@@ -287,7 +287,7 @@ class ConfigApiTest(unittest.TestCase):
             status, body = self.call("POST", "/api/engines/claude/check")
         self.assertEqual((status, body), (200, {"limits": limits}))
         self.assertEqual(fake[0][0].max_ages, [0])
-        self.assertEqual(fake[0][1]["defaults"]["fable_cap"], 80)
+        self.assertNotIn("fable_cap", fake[0][1]["defaults"])
         self.assertEqual(self.snapshot(), before)
         self.assertFalse((self.home / "state-claude.json").exists())
 

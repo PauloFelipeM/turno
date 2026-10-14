@@ -23,7 +23,7 @@
     },
     "claude": {
       "enabled": false,
-      "orchestrator_model": "claude-sonnet-5-5", "orchestrator_effort": "medium", "fable_cap": 80,
+      "orchestrator_model": "claude-sonnet-5-5", "orchestrator_effort": "medium",
       "roles": {
         "planner": {"model": "claude-opus-5-5", "effort": "high"},
         "implementer": {"model": "claude-sonnet-5-5", "effort": "medium"},

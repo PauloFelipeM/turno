@@ -60,7 +60,7 @@ class WebTextsTest(unittest.TestCase):
     def test_settings_edit_a_model_and_effort_per_role(self):
         settings = self.block("settings")
         for text in ('role: "Papel"', 'orchestrator: "Orquestrador"', 'planner: "Planejador"',
-                     'implementer: "Implementador"', 'reviewer: "Revisor"', 'fableHint: "O teto do Fable só vale para papéis no Fable."'):
+                     'implementer: "Implementador"', 'reviewer: "Revisor"'):
             self.assertIn(text, settings)
         self.assertNotIn(OLD_ROLE, self.i18n + self.app)
         self.assertIn('const ROLES = ["planner", "implementer", "reviewer"]', self.app)

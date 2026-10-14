@@ -121,7 +121,6 @@ class ValidateTests(Base):
             "effort": mut(lambda d: d["engines"]["codex"].update(orchestrator_effort=3)),
             "safety": mut(lambda d: d["engines"]["codex"].update(safety_factor=0)),
             "primary_cap": mut(lambda d: d["engines"]["codex"].update(primary_cap=101)),
-            "fable_cap": mut(lambda d: d["engines"]["claude"].update(fable_cap=-1)),
             "cost": mut(lambda d: d["engines"]["codex"].update(initial_cost_primary=-1)),
             "cooldown": mut(lambda d: d["engines"]["codex"].update(blocked_cooldown_hours="6")),
             "subagents": mut(lambda d: d["engines"]["codex"].update(max_subagents=0)),
@@ -205,6 +204,7 @@ class LoadTests(Base):
             with self.subTest(engine):
                 want = fixture(name)
                 want["notify"].pop("topic", None)
+                want["defaults"].pop("fable_cap", None)  # no longer imported
                 got = config.for_engine(data, engine)
                 roles = got["defaults"].pop("roles")
                 self.assertEqual(roles, config.ENGINE_DEFAULTS[engine]["roles"])  # the TOML has none: defaults
@@ -226,6 +226,14 @@ class LoadTests(Base):
         data = config.load(self.home)
         self.assertNotIn("topic", data["notify"])
         self.assertNotIn("secret-topic", (self.home / config.FILE).read_text())
+
+    def test_import_drops_fable_cap_from_claude_toml(self):
+        self.put("projects.toml", "claude.toml")
+        self.assertIn("fable_cap = 80", (self.home / "claude.toml").read_text())
+        data = config.load(self.home)
+        self.assertNotIn("fable_cap", data["engines"]["claude"])
+        self.assertNotIn("fable_cap", (self.home / config.FILE).read_text())
+        self.assertNotIn("fable_cap", config.for_engine(data, "claude")["defaults"])
 
     def test_claude_only_projects_are_appended(self):
         self.put("projects.toml", "claude.toml")
@@ -296,6 +304,19 @@ class LoadTests(Base):
                 config.load(self.home)
             self.assertTrue(cm.exception.problems)
             self.assertIsInstance(cm.exception, ValueError)
+
+
+class OldFableCapTests(Base):
+    def test_old_config_json_with_fable_cap_loads_and_the_file_is_not_rewritten(self):
+        data = config.empty()
+        data["engines"]["claude"]["fable_cap"] = 80
+        path = self.home / config.FILE
+        path.write_text(json.dumps(data))
+        before = path.read_text()
+        got = config.load(self.home)
+        self.assertNotIn("fable_cap", got["engines"]["claude"])
+        self.assertNotIn("fable_cap", config.for_engine(got, "claude")["defaults"])
+        self.assertEqual(path.read_text(), before)
 
 
 class BrokenFileTests(Base):
@@ -384,7 +405,7 @@ class ForEngineTests(unittest.TestCase):
         got = config.for_engine(d, "claude")
         self.assertFalse(got["enabled"])
         self.assertEqual(got["defaults"]["orchestrator_model"], "claude-sonnet-5-5")
-        self.assertEqual(got["defaults"]["fable_cap"], 80)
+        self.assertNotIn("fable_cap", got["defaults"])
 
     def test_defaults_and_caps(self):
         d = config.empty()

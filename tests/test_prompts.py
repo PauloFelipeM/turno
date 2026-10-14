@@ -20,7 +20,7 @@ class PromptsTest(unittest.TestCase):
         self.assertIn("spawn allowlist", codex)
         self.assertIn("list_agents", codex)
         self.assertIn("subagent_type", claude)
-        self.assertIn('model: "opus"', claude)
+        self.assertIn("usage limit", claude)
 
     def test_claude_roles_have_only_description_and_prompt(self):
         roles = json.loads((ROOT / "claude-agents.json").read_text())
@@ -40,10 +40,14 @@ class PromptsTest(unittest.TestCase):
         self.assertIn("planner back once", " ".join(unit.split()))
         self.assertIn("exact verification commands", unit)
 
-    def test_claude_note_generic_model_fallback(self):
-        claude = (ROOT / "prompts" / "engine-claude.md").read_text()
+    def test_claude_note_blocks_instead_of_switching_model(self):
+        claude = " ".join((ROOT / "prompts" / "engine-claude.md").read_text().split())
         self.assertNotIn("Fable", claude)
-        self.assertIn("its own usage limit", claude)
+        self.assertNotIn('model: "opus"', claude)
+        self.assertIn("its own usage limit, do not switch models", claude)
+        self.assertIn("end the unit as `blocked`", claude)
+        unit = " ".join((ROOT / "prompts" / "unit.md").read_text().split())
+        self.assertIn("follow the engine notes", unit)
 
     def test_prompts_ask_for_backlog_json(self):
         unit = (ROOT / "prompts" / "unit.md").read_text()

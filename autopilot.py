@@ -1166,9 +1166,6 @@ def status_lines(cfg, engine, state, limits, win, now):
         used, reset = window(limits, key)
         when = time.strftime("%F %T", time.localtime(reset)) if reset else "-"
         out.append(f"window {label:8} {used:5.1f}%   reset {when}")
-    if hasattr(engine, "fable_available") and not engine.fable_available(state):
-        until = state["_engine"]["fable_exhausted_until"]
-        out.append(f"Fable spared until {time.strftime('%F %T', time.localtime(until))}; planning on Opus")
     out.append("")
     claims = coord.claims()
     for p in cfg["project"]:

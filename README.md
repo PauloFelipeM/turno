@@ -92,7 +92,7 @@ An invalid file never stops a loop: it keeps the last good configuration and log
 | Part | What it holds |
 |---|---|
 | `projects` | Name, path, optional `docker_group` and `weekly_cap` per engine. The order is the priority for every engine |
-| `engines.<engine>` | `enabled`, orchestrator model and effort, `roles` (model and effort of `planner`, `implementer` and `reviewer`; the Settings screen edits them), `primary_cap`, `safety_factor`, initial costs, `blocked_cooldown_hours`, `schedule` (window) and, per engine, `max_subagents` (Codex) or `fable_cap` (Claude) |
+| `engines.<engine>` | `enabled`, orchestrator model and effort, `roles` (model and effort of `planner`, `implementer` and `reviewer`; the Settings screen edits them), `primary_cap`, `safety_factor`, initial costs, `blocked_cooldown_hours`, `schedule` (window) and, per engine, `max_subagents` (Codex) |
 | `notify` | ntfy server and the decision timeout. The topic stays in `secrets.toml` |
 
 A project's name is never changed after it is created: state, claims, notes and history use it.

@@ -339,11 +339,8 @@ class CodexEngine:
 # --- Claude ------------------------------------------------------------------------------------
 
 ROLES = Path(__file__).resolve().parent / "claude-agents.json"
-FABLE_FALLBACK = "claude-opus-5-5"
 BASE_WINDOWS = {"five_hour", "seven_day"}
 LIMIT_TEXT = re.compile(r"usage limit|rate limit|limit reached|out of (extra )?usage", re.I)
-FABLE_LIMIT = re.compile(r"fable[^\n]{0,300}?(usage limit|rate limit|limit reached)"
-                         r"|(usage limit|rate limit|limit reached)[^\n]{0,300}?fable", re.I)
 
 
 def locate_claude():
@@ -416,23 +413,6 @@ def to_limits(info):
 def rate_infos(events):
     return [e["rate_limit_info"] for e in events
             if e.get("type") == "rate_limit_event" and isinstance(e.get("rate_limit_info"), dict)]
-
-
-def tool_result_texts(events):
-    """Texts of tool results (including the subagents' answers), not the orchestrator's."""
-    for e in events:
-        if e.get("type") != "user":
-            continue
-        for c in (e.get("message") or {}).get("content") or []:
-            if not isinstance(c, dict) or c.get("type") != "tool_result":
-                continue
-            content = c.get("content")
-            if isinstance(content, str):
-                yield content
-            elif isinstance(content, list):
-                for part in content:
-                    if isinstance(part, dict) and isinstance(part.get("text"), str):
-                        yield part["text"]
 
 
 class ClaudeEngine:
@@ -517,29 +497,6 @@ class ClaudeEngine:
             merged.update(limits)
             merged.setdefault("extra", {}).update(extra)
         cache.update(limits=merged, limits_at=time.time())
-        # A window beyond the general ones = Fable's own quota (it shows up in runs with Fable). It
-        # has a cap like the weekly one: planning moves to Opus before it runs out, so the owner
-        # keeps some Fable. Claude Code's own warning (allowed_warning) also counts.
-        cap = float(self.cfg.get("defaults", {}).get("fable_cap", 80))
-        for info in infos:
-            warned = info.get("status") in ("allowed_warning", "rejected")
-            for key, w in to_limits(info).get("extra", {}).items():
-                if w["resets_at"] <= time.time():
-                    continue
-                if w["used_percent"] >= cap:
-                    self._fable_out(state, w["resets_at"], f"window {key} at {w['used_percent']:.0f}%, cap {cap:.0f}%")
-                elif warned:
-                    self._fable_out(state, w["resets_at"], f"Claude Code warning with window {key} at {w['used_percent']:.0f}%")
-
-    def _fable_out(self, state, until, why):
-        cache = self._cache(state)
-        if cache.get("fable_exhausted_until", 0) < until:
-            cache["fable_exhausted_until"] = until
-            log(f"Fable spared until {time.strftime('%F %T', time.localtime(until))} ({why}); "
-                f"roles on Fable move to Opus")
-
-    def fable_available(self, state):
-        return self._cache(state).get("fable_exhausted_until", 0) <= time.time()
 
     def resumable(self, s):
         sid = s.get("session")
@@ -554,15 +511,11 @@ class ClaudeEngine:
         """The role definitions for `--agents`: prompts from the file, model and effort from the config."""
         roles = json.loads(Path(self.roles).read_text())
         configured = self.cfg.get("defaults", {}).get("roles") or {}
-        fable_ok = self.fable_available(state)
         out = {}
         for name, role in roles.items():
             role = dict(role)
             conf = configured.get(name) or {}
             model, effort = conf.get("model"), conf.get("effort")
-            # Fable has its own limit: past the cap the role runs on Opus.
-            if model and "fable" in model and not fable_ok:
-                model = FABLE_FALLBACK
             if model:
                 role["model"] = model
             if effort:
@@ -587,20 +540,14 @@ class ClaudeEngine:
             self.record(state, infos)
             if s.get("unit_start_limits") is None:
                 s["unit_start_limits"] = to_limits(infos[0])
-        if any(FABLE_LIMIT.search(t) for t in tool_result_texts(events)):
-            extra = (self._cache(state).get("limits") or {}).get("extra") or {}
-            until = max((w["resets_at"] for w in extra.values()), default=0)
-            if until <= time.time():
-                until = schedule.next_occurrence("sun 04:00", datetime.datetime.now()).timestamp()
-            self._fable_out(state, until, "limit message in a subagent")
 
     def classify(self, out, err, code):
         events = read_events(out)
         result = next((e for e in reversed(events) if e.get("type") == "result"), None)
         if result and not result.get("is_error") and code == 0:
             return "ok", None, False  # ended fine: a "rejected" event of another model does not count
-        # Only a rejection that exhausted the general windows counts: another model's (a subagent's
-        # Fable) does not stop the orchestrator from going on.
+        # Only a rejection that exhausted the general windows counts: another model's (a subagent's)
+        # does not stop the orchestrator from going on.
         resets = []
         for info in rate_infos(events):
             if info.get("status") != "rejected":
