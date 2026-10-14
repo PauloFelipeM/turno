@@ -35,6 +35,19 @@ class WebTextsTest(unittest.TestCase):
         self.assertIn("restart_needed:", self.block("errors"))
         self.assertIn("errors.${", self.app)
 
+    def test_setup_texts_and_calls(self):
+        block = self.block("setup")
+        for text in ('prepare: "Preparar com um agente"', 'goalLabel: "O que este projeto deve virar"',
+                     'request: "Pedir preparo"', 'approve: "Aprovar"', 'changes: "Pedir mudanças"',
+                     'cancel: "Cancelar preparo"', 'chip: { requested: "preparando", approved: "preparando", review: "rascunho pronto" }'):
+            self.assertIn(text, block)
+        for call in ("/setup`, { goal:", "/setup/approve`", "/setup/changes`", '/setup`, undefined, "DELETE"'):
+            self.assertIn(call, self.app)
+        strip = self.app[self.app.index("function attentionItems"):self.app.index("function decisionItem")]
+        self.assertIn('p.setup === "review"', strip)
+        self.assertIn('t("setup.prepare")', self.app)
+        self.assertIn(".draft", self.css)
+
     def test_every_error_code_the_server_returns_has_a_text(self):
         root = WEB.parent
         codes = set(re.findall(r'ApiError\(\d+, "(\w+)"', (root / "control.py").read_text()))

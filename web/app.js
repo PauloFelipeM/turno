@@ -9,6 +9,7 @@ const view = {
   drafts: new Map(), // comment texts typed in the attention strip, kept across redraws
   attentionSig: null, // what the attention strip shows now, to redraw it only when that changes
   draft: null, // the settings dialog's working copy (see buildDraft)
+  detailSetup: null, // setup phase of the project panel on screen, to reload it when the loop moves it
 };
 
 function t(path, vars = {}) {
@@ -180,6 +181,7 @@ function attentionItems() {
   for (const p of view.overview.projects) {
     for (const d of p.decisions_open || []) items.push({ kind: "decision", project: p.name, d });
     if (Object.values(p.engines).some((e) => e.status === "blocked")) items.push({ kind: "blocked", project: p.name, summary: p.blocked_summary });
+    if (p.setup === "review") items.push({ kind: "setup", project: p.name });
   }
   return items;
 }
@@ -212,6 +214,14 @@ function blockedItem(project, summary) {
         act(ev.currentTarget, () => post(`/api/projects/${enc(project)}/reset`, {}), t("attention.reactivated", { project })) }, t("attention.reactivate"))));
 }
 
+function setupItem(project) {
+  return h("article", { class: "attn-item" },
+    h("p", {}, h("b", {}, project), " · ", t("setup.attention")),
+    h("div", { class: "btn-row" },
+      h("button", { type: "button", class: "btn", "data-action": `setup-review:${project}`,
+        onclick: () => { if (view.filter !== project) selectProject(project); } }, t("setup.review"))));
+}
+
 // Redrawn only when its content changes, so a typed comment and the focus survive the events.
 function renderAttention() {
   const items = attentionItems();
@@ -223,7 +233,8 @@ function renderAttention() {
   const live = new Set(items.filter((i) => i.kind === "decision").map((i) => `${i.project}/${i.d.id}`));
   for (const k of [...view.drafts.keys()]) if (!live.has(k)) view.drafts.delete(k);
   fill(box, h("h2", {}, t("attention.title")),
-    ...items.map((i) => (i.kind === "decision" ? decisionItem(i.project, i.d) : blockedItem(i.project, i.summary))));
+    ...items.map((i) => (i.kind === "decision" ? decisionItem(i.project, i.d)
+      : i.kind === "setup" ? setupItem(i.project) : blockedItem(i.project, i.summary))));
 }
 
 // --- projects ------------------------------------------------------------------------------
@@ -284,6 +295,10 @@ function projectActions(p, running) {
       { title: label("interrupt"), "aria-label": label("interrupt"), "data-action": `interrupt:${p.name}` }) : null);
 }
 
+function setupChip(phase) {
+  return phase && phase !== "done" ? h("span", { class: `chip setup-chip su-${phase}` }, t(`setup.chip.${phase}`)) : null;
+}
+
 function drawProjects() {
   const running = new Set(view.overview.live.map((l) => l.project));
   if (view.confirm && view.confirm.startsWith("project:") && !running.has(view.confirm.slice(8))) view.confirm = null;
@@ -298,7 +313,7 @@ function drawProjects() {
         "aria-pressed": String(view.filter === p.name),
         onclick: () => selectProject(p.name),
       },
-      h("span", { class: "row" }, h("b", {}, p.name), h("span", {}, p.paused ? h("span", { class: "chip paused-chip" }, t("card.pausedChip")) : null, statusChip(projectState(p)))),
+      h("span", { class: "row" }, h("b", {}, p.name), h("span", {}, p.paused ? h("span", { class: "chip paused-chip" }, t("card.pausedChip")) : null, setupChip(p.setup), statusChip(projectState(p)))),
       h("span", { class: "muted small" }, extra.filter(Boolean).join(" · ")),
       retryAt(projectState(p)) ? h("span", { class: "muted small" }, t("retry", { when: when(retryAt(projectState(p))) })) : null,
       progress(p.backlog)),
@@ -334,9 +349,11 @@ async function loadDetail(name) {
   const box = $("#project-detail");
   let d;
   let settings = null;
+  let su = null;
   try {
     d = await getJSON(`/api/projects/${encodeURIComponent(name)}`);
     settings = await getJSON("/api/settings").catch(() => null);
+    su = await getJSON(`/api/projects/${enc(name)}/setup`).catch(() => null);
   } catch {
     if (view.filter === name) {
       box.hidden = false;
@@ -345,9 +362,11 @@ async function loadDetail(name) {
     return;
   }
   if (view.filter !== name) return;
+  view.detailSetup = su && su.request ? su.request.status : null;
   box.hidden = false;
   fill(box,
     retryRow(name),
+    setupPanel(name, su),
     h("h3", {}, `${t("project.backlog")} · ${name}`),
     d.backlog.error
       ? h("p", { class: "muted" }, t(`backlog.${d.backlog.error}`))
@@ -430,6 +449,41 @@ function engineDraft(e) {
   };
 }
 
+// The setup request in the project panel: goal, phase and, in review, the draft files and the answers.
+function setupPanel(name, su) {
+  const r = su && su.request;
+  if (!r || r.status === "done") return null;
+  const reload = () => loadDetail(name);
+  const changes = h("textarea", { rows: "3", maxlength: "4000", "aria-label": t("setup.changesLabel"),
+    placeholder: t("setup.changesLabel"), "data-action": "setup-changes-text" });
+  const files = su.files || [];
+  return h("section", { class: "form setup", "data-setup-project": name },
+    h("h3", {}, `${t("setup.title")} · ${name}`),
+    h("p", {}, h("b", {}, `${t("setup.goal")}: `), r.goal),
+    h("p", { class: "muted small", "data-setup-phase": r.status }, t(`setup.phase.${r.status}`)),
+    r.feedback ? h("p", { class: "muted small" }, h("b", {}, `${t("setup.feedback")}: `), r.feedback) : null,
+    r.status === "review" ? [
+      h("h4", {}, t("setup.files")),
+      files.length
+        ? files.map((f) => h("article", { class: "draft-file", "data-file": f.path },
+          h("h4", {}, f.path),
+          f.text == null ? h("p", { class: "muted small" }, t("setup.tooLarge", { size: f.size })) : h("pre", { class: "draft" }, f.text)))
+        : h("p", { class: "muted small" }, t("setup.noFiles")),
+      changes,
+      h("div", { class: "btn-row" },
+        h("button", { type: "button", class: "btn", "data-action": "setup-approve", onclick: async (ev) => {
+          if (await act(ev.currentTarget, () => post(`/api/projects/${enc(name)}/setup/approve`, {}), t("setup.approved"))) reload();
+        } }, t("setup.approve")),
+        h("button", { type: "button", class: "btn", "data-action": "setup-changes", onclick: async (ev) => {
+          if (!changes.value.trim()) { toast(t("setup.changesEmpty"), "error"); return; }
+          if (await act(ev.currentTarget, () => post(`/api/projects/${enc(name)}/setup/changes`, { feedback: changes.value.trim() }), t("setup.changesSent"))) reload();
+        } }, t("setup.changes")))] : null,
+    r.status !== "approved" ? h("div", { class: "btn-row" },
+      h("button", { type: "button", class: "btn danger", "data-action": "setup-cancel", onclick: async (ev) => {
+        if (await act(ev.currentTarget, () => post(`/api/projects/${enc(name)}/setup`, undefined, "DELETE"), t("setup.cancelled"))) reload();
+      } }, t("setup.cancel"))) : null);
+}
+
 function buildDraft(cfg) {
   const d = {
     section: "projects", cfg, confirmRemove: null, checks: {},
@@ -440,6 +494,8 @@ function buildDraft(cfg) {
     }])),
     eng: Object.fromEntries(Object.entries(cfg.engines).map(([k, e]) => [k, engineDraft(e)])),
     add: { name: "", path: "", group: "", caps: {} },
+    setupOpen: null, // project whose "Preparar com um agente" box is open
+    setupGoal: "",
   };
   d.orig = [...d.order];
   d.origProj = clone(d.proj);
@@ -455,6 +511,8 @@ function mergeDraft(cfg) {
   d.section = old.section;
   d.add = old.add;
   d.checks = old.checks;
+  d.setupOpen = old.setupOpen;
+  d.setupGoal = old.setupGoal;
   const names = new Set(d.order);
   for (const n of d.order) {
     if (old.proj[n]) { d.proj[n] = old.proj[n]; d.origProj[n] = old.origProj[n]; }
@@ -549,6 +607,8 @@ async function saveSettings(steps) {
   view.draft.section = d.section;
   view.draft.add = d.add;
   view.draft.checks = d.checks;
+  view.draft.setupOpen = d.setupOpen;
+  view.draft.setupGoal = d.setupGoal;
   if (view.filter) loadDetail(view.filter);
 }
 
@@ -567,6 +627,36 @@ function textInput(value, onChange, attrs = {}) {
   return h("input", { type: "text", value: value ?? "", oninput: (ev) => onChange(ev.target.value), ...attrs });
 }
 
+// "Preparar com um agente": for a git project with no docs/autopilot.md and no open request.
+function setupBox(p) {
+  if (!p) return null;
+  if (p.setup && p.setup !== "done") return h("p", { class: "muted small" }, t("setup.pending", { phase: t(`setup.phase.${p.setup}`) }));
+  if (!p.checks.includes("no_autopilot_doc") || p.checks.includes("not_git") || p.checks.includes("missing_path")) return null;
+  const d = view.draft;
+  if (d.setupOpen !== p.name) {
+    return h("div", { class: "btn-row" },
+      h("button", { type: "button", class: "btn", "data-sf": `setup-open:${p.name}`,
+        onclick: () => { d.setupOpen = p.name; d.setupGoal = ""; renderSettings(); } }, t("setup.prepare")));
+  }
+  const goal = h("textarea", { rows: "3", maxlength: "4000", "aria-label": t("setup.goalLabel"), placeholder: t("setup.goalPlaceholder"),
+    "data-sf": `setup-goal:${p.name}`, oninput: (ev) => { d.setupGoal = ev.target.value; } });
+  goal.value = d.setupGoal || "";
+  return h("section", { class: "form" },
+    h("h4", {}, t("setup.goalLabel")),
+    goal,
+    h("div", { class: "btn-row" },
+      h("button", { type: "button", class: "btn", "data-sf": `setup-go:${p.name}`, onclick: (ev) => {
+        if (!goal.value.trim()) { toast(t("setup.goalEmpty"), "error"); return; }
+        return settingsAct(ev.currentTarget, async () => {
+          await post(`/api/projects/${enc(p.name)}/setup`, { goal: goal.value.trim() });
+          d.setupOpen = null;
+          d.setupGoal = "";
+          view.draft = mergeDraft(await getJSON("/api/config"));
+        }, t("setup.requested", { project: p.name }));
+      } }, t("setup.request")),
+      h("button", { type: "button", class: "btn", onclick: () => { d.setupOpen = null; renderSettings(); } }, t("cancel"))));
+}
+
 function projectRow(n, i) {
   const d = view.draft;
   const p = d.cfg.projects.find((x) => x.name === n);
@@ -580,6 +670,7 @@ function projectRow(n, i) {
       field(t("settings.group"), textInput(cur.group, (v) => { cur.group = v; }, { "data-sf": `group:${n}` })),
       Object.keys(cur.caps).map((e) => capInput(`${engineName(e)} (%)`, cur.caps[e], (v) => { cur.caps[e] = v; }))),
     p && p.checks.length ? h("ul", { class: "warns" }, p.checks.map((c) => h("li", {}, t(`settings.checks.${c}`)))) : null,
+    setupBox(p),
     h("span", { class: "btn-row" },
       actionBtn("↑", () => move(i, -1), { disabled: i === 0, title: t("settings.up", { project: n }), "aria-label": t("settings.up", { project: n }), "data-mv": `up:${n}` }),
       actionBtn("↓", () => move(i, 1), { disabled: i === d.order.length - 1, title: t("settings.down", { project: n }), "aria-label": t("settings.down", { project: n }), "data-mv": `down:${n}` }),
@@ -620,8 +711,15 @@ function addForm() {
         if (Object.keys(caps).length) body.weekly_cap = caps;
         return settingsAct(ev.currentTarget, async () => {
           await post("/api/projects", body);
-          view.draft = mergeDraft(await getJSON("/api/config"));
+          const fresh = await getJSON("/api/config");
+          view.draft = mergeDraft(fresh);
           view.draft.add = { name: "", path: "", group: "", caps: {} };
+          const added = fresh.projects.find((x) => x.name === body.name);
+          // A project without docs/autopilot.md gets the "Preparar com um agente" box right away.
+          if (added && added.checks.includes("no_autopilot_doc") && !added.checks.includes("not_git")) {
+            view.draft.setupOpen = body.name;
+            view.draft.setupGoal = "";
+          }
         }, t("settings.added", { project: body.name }));
       } }, t("settings.add"))));
 }
@@ -889,6 +987,8 @@ function connect() {
     renderAttention();
     renderProjects();
     renderLive();
+    const sel = view.filter && view.overview.projects.find((p) => p.name === view.filter);
+    if (sel && (sel.setup || null) !== view.detailSetup) loadDetail(view.filter); // the loop moved the request
     document.body.classList.remove("loading");
     if ([...runs].some((run) => !view.feeds.has(run))) {
       try {
