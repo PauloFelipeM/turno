@@ -9,7 +9,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-MODULES = ("autopilot", "coord", "engines", "schedule", "paths", "history", "backlog", "feed", "panel", "control", "server")
+MODULES = ("autopilot", "coord", "engines", "schedule", "paths", "history", "backlog", "feed", "panel", "control", "server",
+           "messages")
 
 
 def load(tmp):
@@ -25,6 +26,7 @@ def load(tmp):
     if "coord" in sys.modules:
         sys.modules["coord"].SHARED = tmp / "shared"
     ap.sent = []
+    ap.real_ntfy = ap.ntfy  # for the tests of the sender itself, with the network mocked
     ap.ntfy = lambda cfg, title, message, **kw: ap.sent.append((title, message))
     return ap
 

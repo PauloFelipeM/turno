@@ -122,13 +122,17 @@ def configure(engine=None, config_path=None):
 
 
 def load_config():
-    """This engine's view of `config.json`, in the shape the loop consumes, plus the ntfy topic."""
+    """This engine's view of `config.json`, in the shape the loop consumes, plus the ntfy topic.
+
+    With ntfy switched off in the config, `secrets.toml` is not even read.
+    """
     cfg = config.for_engine(config.load(HOME), ENGINE)
-    if SECRETS.exists():
+    if config.notify_enabled(cfg.get("notify")) and SECRETS.exists():
         with SECRETS.open("rb") as f:
             notify = tomllib.load(f).get("notify")
         if isinstance(notify, dict):  # anything else is a malformed file: no topic, and no crash
-            cfg.setdefault("notify", {}).update(notify)
+            # Whether ntfy is on is the config's choice; secrets.toml only adds the topic (and maybe the server).
+            cfg.setdefault("notify", {}).update({k: v for k, v in notify.items() if k != "enabled"})
     return cfg
 
 
@@ -206,6 +210,17 @@ def save_state(state):
 # --- notifications and decisions (ntfy) -------------------------------------------------------
 
 
+def notify_on(cfg):
+    """Whether ntfy is in use: on in the config (a config without the key is on) and with a topic.
+
+    Off, or on without a topic, nothing is sent or read: decisions and warnings reach the owner
+    through the panel and the log only.
+    """
+    notify = cfg.get("notify") or {}
+    topic = notify.get("topic")
+    return config.notify_enabled(notify) and isinstance(topic, str) and bool(topic.strip())
+
+
 def ntfy_server(cfg):
     return (cfg.get("notify") or {}).get("server", "https://ntfy.sh").rstrip("/")
 
@@ -220,10 +235,9 @@ def ntfy(cfg, title, message, priority=3, tags=(), actions=None):
 
     Titles and messages come from `say`, in the owner's language.
     """
-    topic = (cfg.get("notify") or {}).get("topic")
-    if not topic:
+    if not notify_on(cfg):
         return
-    body = {"topic": topic, "title": title, "message": message, "priority": priority, "tags": list(tags)}
+    body = {"topic": cfg["notify"]["topic"], "title": title, "message": message, "priority": priority, "tags": list(tags)}
     if actions:
         body["actions"] = actions
     req = urllib.request.Request(ntfy_server(cfg), data=json.dumps(body).encode(),
@@ -389,7 +403,7 @@ def poll_replies(cfg, notify):
 
     `notify` is the shared ntfy state (since, since_typed), the same for both instances.
     """
-    if not (cfg.get("notify") or {}).get("topic"):
+    if not notify_on(cfg):
         return
     now = str(int(time.time()))
     notify.setdefault("since", now)
@@ -416,9 +430,19 @@ def poll_replies(cfg, notify):
 
 
 def dispatch_decisions(cfg, notify):
-    """Reads answers, sends new decisions and applies the default once the deadline passes."""
+    """Reads answers, sends new decisions and applies the default once the deadline passes.
+
+    Without ntfy (off, or on without a topic) a new decision is only marked as sent, so its deadline
+    starts and the panel offers it; nothing goes to the network.
+    """
     hours = (cfg.get("notify") or {}).get("decision_timeout_hours", 4)
-    poll_replies(cfg, notify)
+    send = notify_on(cfg)
+    if send:
+        poll_replies(cfg, notify)
+    else:
+        # The read position follows the clock while ntfy is off: turning it back on must not replay
+        # what was typed in the topic meanwhile (a stale letter could answer a newer decision).
+        notify["since"] = notify["since_typed"] = str(int(time.time()))
     now = time.time()
     for p in cfg["project"]:
         for path in decision_files(p):
@@ -433,6 +457,9 @@ def dispatch_decisions(cfg, notify):
             elif not d.get("notified_at"):
                 d.update(notified_at=now, deadline=now + hours * 3600)
                 write_json(path, d)
+                if not send:
+                    log(f"{p['name']}: decision {d['id']} waits in the panel (no ntfy); deadline {hours} h")
+                    continue
                 lines = [f"{o['id'].upper()}) {o['label']}" for o in d["options"]]
                 actions = [{"action": "http", "label": o["label"][:40], "url": f"{ntfy_server(cfg)}/{reply_topic(cfg)}",
                             "method": "POST", "body": f"{p['name']}/{d['id']}/{o['id']}", "clear": True}
@@ -445,8 +472,9 @@ def dispatch_decisions(cfg, notify):
                 log(f"{p['name']}: decision {d['id']} sent; deadline {hours} h")
             elif now > d.get("deadline", 0):
                 label = answer_decision(p, path, d, d["default"], "timeout")
-                ntfy(cfg, say(cfg, "timeout_title", project=p["name"]),
-                     say(cfg, "timeout_body", question=d["question"], label=label), tags=["hourglass"])
+                if send:
+                    ntfy(cfg, say(cfg, "timeout_title", project=p["name"]),
+                         say(cfg, "timeout_body", question=d["question"], label=label), tags=["hourglass"])
 
 
 def process_decisions(cfg, state):
@@ -1272,6 +1300,10 @@ def status_lines(cfg, engine, state, limits, win, now):
     out = [f"engine {engine.label}"]
     if not cfg.get("enabled", True):
         out.append(f"engine {engine.label}: disabled in the config")
+    if not config.notify_enabled(cfg.get("notify")):
+        out.append("ntfy: off; decisions wait in the panel")
+    elif not notify_on(cfg):
+        out.append("ntfy: on, but secrets.toml has no topic (notify_no_topic); decisions wait in the panel")
     if win:
         if win.contains(now):
             out.append(f"window {win.describe(lang)}: inside, closes {schedule.label(win.end_of(now), lang)}")
@@ -1571,7 +1603,9 @@ def cmd_answer(args):
 
 def cmd_test_notify(args):
     cfg = load_config()
-    if not (cfg.get("notify") or {}).get("topic"):
+    if not config.notify_enabled(cfg.get("notify")):
+        sys.exit("ntfy is off in the config (notify.enabled); switch it on in the panel's settings, General tab")
+    if not notify_on(cfg):
         sys.exit("set [notify].topic in secrets.toml")
     ntfy(cfg, say(cfg, "test_title"), say(cfg, "test_body"), tags=["bell"])
     print(f"sent to {ntfy_server(cfg)} (topic in secrets.toml)")

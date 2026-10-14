@@ -9,6 +9,7 @@ and its setup request, never its folder or its draft.
 
 import copy
 import os
+import re
 import signal
 import threading
 import time
@@ -515,6 +516,30 @@ def put_settings(home, body):
     return 200, panel.settings(home)
 
 
+NOTIFY_FIELDS = ("enabled", "server", "decision_timeout_hours")  # never "topic": it lives in secrets.toml
+
+
+def put_general(home, body):
+    """The owner's language and the ntfy settings. A body that carries the topic is refused (unknown field)."""
+    _check_fields(body, ("language", "notify"))
+    notify = body.get("notify", {})
+    if not isinstance(notify, dict):
+        raise bad("notify must be an object")
+    _check_fields(notify, NOTIFY_FIELDS)
+    if "server" in notify:
+        server = notify["server"]
+        if not (isinstance(server, str) and re.fullmatch(r"https?://\S+", server.strip())):
+            raise bad("notify.server must start with http:// or https://")
+        notify = {**notify, "server": server.strip()}
+
+    def fn(d):
+        if "language" in body:
+            d["language"] = body["language"]  # validated by config.save, like everything else
+        d["notify"].update(notify)
+    _save(home, fn)
+    return 200, {"ok": True}
+
+
 def write_route(home, method, parts, body):
     """Dispatches a write request to its function: (status, body)."""
     n = len(parts)
@@ -549,4 +574,6 @@ def write_route(home, method, parts, body):
         return send_message(home, body)
     if parts == ["api", "settings"] and method == "PUT":
         return put_settings(home, body)
+    if parts == ["api", "settings", "general"] and method == "PUT":
+        return put_general(home, body)
     raise ApiError(404, "not_found")

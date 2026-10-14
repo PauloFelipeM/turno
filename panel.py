@@ -1,6 +1,8 @@
 """What the panel shows, assembled from turno's files.
 
-Read-only (the writes live in control.py): it writes nothing, takes no locks and never loads secrets.toml (the ntfy topic never leaves it). It reads the setup requests and the drafts, never through a symlink.
+Read-only (the writes live in control.py): it writes nothing and takes no locks. Of secrets.toml it only learns
+whether a topic exists (`paths.has_ntfy_topic`): the topic itself never reaches it. It reads the setup requests and
+the drafts, never through a symlink.
 """
 
 import datetime
@@ -17,6 +19,7 @@ import engines
 import feed
 import history
 import overrides
+import paths
 import schedule
 import repo_setup as setup
 
@@ -184,6 +187,16 @@ def live(home, homes=None):
     return out
 
 
+def general(home):
+    """The owner's language and whether ntfy is on and has a topic, for the page; defaults when the config is unreadable."""
+    try:
+        data = config.load(home)
+    except (config.ConfigError, OSError):
+        data = {}
+    return {"language": data.get("language", config.DEFAULT_LANGUAGE),
+            "notify": {"enabled": config.notify_enabled(data.get("notify")), "has_topic": paths.has_ntfy_topic(home)}}
+
+
 def overview(home, cache, homes=None):
     home = Path(home)
     now = time.time()
@@ -233,7 +246,7 @@ def overview(home, cache, homes=None):
             "setup": setup.phase(home, entry["name"]),
             "blocked_summary": blocked.get(entry["name"]) if any(
                 e["status"] == "blocked" for e in entry["engines"].values()) else None})
-    return {"engines": views, "projects": out_projects, "errors": errors, "now": now,
+    return {"engines": views, "projects": out_projects, "errors": errors, "now": now, **general(home),
             "live": [{k: v for k, v in r.items() if k not in ("path", "root")} for r in live_runs(home, homes)]}
 
 
@@ -308,7 +321,14 @@ def config_view(home):
                                  "cli": engines.cli_status(kind)}
             engine_view[kind]["roles"] = config.full_roles(kind, data["engines"][kind].get("roles"))
             engine_view[kind]["known_models"] = list(config.KNOWN_MODELS[kind])
-    return {"projects": projects, "engines": engine_view, "notify": dict(data["notify"])}
+    notify = data["notify"]
+    enabled, has_topic = config.notify_enabled(notify), paths.has_ntfy_topic(home)
+    # Only these keys: a topic written into config.json by hand is never sent to the page.
+    return {"projects": projects, "engines": engine_view,
+            "notify": {"enabled": enabled, "server": notify.get("server"),
+                       "decision_timeout_hours": notify.get("decision_timeout_hours"), "has_topic": has_topic},
+            "language": data.get("language", config.DEFAULT_LANGUAGE), "languages": list(config.LANGUAGES),
+            "warnings": ["notify_no_topic"] if enabled and not has_topic else []}
 
 
 def project_path(home, name):

@@ -349,5 +349,79 @@ class ConfigApiTest(unittest.TestCase):
         self.assertNotEqual(overrides.read(self.home).get("poke"), first)
 
 
+class GeneralSettingsTest(unittest.TestCase):
+    """PUT /api/settings/general and what the page learns about the language and ntfy."""
+
+    # The same server and data folder as ConfigApiTest, without running its tests a second time.
+    setUp, call, cfg, raw = ConfigApiTest.setUp, ConfigApiTest.call, ConfigApiTest.cfg, ConfigApiTest.raw
+
+    def put(self, body, **kw):
+        return self.call("PUT", "/api/settings/general", body, **kw)
+
+    def test_an_old_config_shows_pt_br_and_ntfy_on_and_is_not_rewritten(self):
+        before = self.raw()
+        v = self.call("GET", "/api/config")[1]
+        self.assertEqual((v["language"], v["languages"], v["warnings"]), ("pt-BR", ["pt-BR", "en"], []))
+        self.assertEqual(v["notify"], {"enabled": True, "server": "https://ntfy.sh", "decision_timeout_hours": 4,
+                                       "has_topic": True})
+        ov = self.call("GET", "/api/overview")[1]
+        self.assertEqual((ov["language"], ov["notify"]), ("pt-BR", {"enabled": True, "has_topic": True}))
+        self.assertEqual(self.raw(), before)
+
+    def test_saves_the_language_and_the_ntfy_settings(self):
+        body = {"language": "en", "notify": {"enabled": False, "server": " https://ntfy.example.org ",
+                                             "decision_timeout_hours": 2}}
+        self.assertEqual(self.put(body), (200, {"ok": True}))
+        data = self.cfg()
+        self.assertEqual(data["language"], "en")
+        self.assertEqual(data["notify"], {"server": "https://ntfy.example.org", "decision_timeout_hours": 2,
+                                          "enabled": False})
+        ov = self.call("GET", "/api/overview")[1]
+        self.assertEqual((ov["language"], ov["notify"]), ("en", {"enabled": False, "has_topic": True}))
+
+    def test_a_partial_body_changes_only_what_it_names(self):
+        self.assertEqual(self.put({"notify": {"enabled": False}})[0], 200)
+        data = self.cfg()
+        self.assertNotIn("language", data)
+        self.assertEqual(data["notify"], {"server": "https://ntfy.sh", "decision_timeout_hours": 4, "enabled": False})
+
+    def test_bad_values_are_refused_and_nothing_is_written(self):
+        before = self.raw()
+        for body in ({"language": "fr"}, {"language": 1}, {"notify": {"enabled": "no"}},
+                     {"notify": {"decision_timeout_hours": 0}}, {"notify": {"server": "ntfy.sh"}},
+                     {"notify": {"server": 5}}, {"notify": []}, {"theme": "dark"}, {"notify": {"topic": "x"}}):
+            status, out = self.put(body)
+            self.assertEqual((status, out["error"]), (400, "bad_request"), body)
+        self.assertEqual(self.raw(), before)
+
+    def test_the_topic_is_never_taken_or_returned(self):
+        status, out = self.put({"notify": {"topic": "segredo-xyz"}})
+        self.assertEqual(status, 400)
+        self.assertNotIn("segredo-xyz", json.dumps(out))
+        self.assertNotIn("segredo-xyz", self.raw().decode())
+        data = json.loads(self.raw())
+        data["notify"]["topic"] = "segredo-xyz"  # written by hand into config.json
+        helpers.write_config_text(self.home, json.dumps(data))
+        for path in ("/api/config", "/api/overview", "/api/settings"):
+            self.assertNotIn("segredo-xyz", json.dumps(self.call("GET", path)[1]), path)
+
+    def test_the_write_guard_applies(self):
+        self.assertEqual(self.put({"language": "en"}, turno=None)[0], 403)
+        self.assertNotIn("language", self.cfg())
+
+    def test_warns_when_ntfy_is_on_without_a_topic(self):
+        (self.home / "secrets.toml").unlink()
+        v = self.call("GET", "/api/config")[1]
+        self.assertEqual((v["warnings"], v["notify"]["has_topic"]), (["notify_no_topic"], False))
+        self.put({"notify": {"enabled": False}})
+        self.assertEqual(self.call("GET", "/api/config")[1]["warnings"], [])
+
+    def test_an_unreadable_config_gives_the_page_the_defaults(self):
+        helpers.write_config_text(self.home, json.dumps({**self.cfg(), "language": "fr"}))
+        ov = self.call("GET", "/api/overview")[1]
+        self.assertEqual(ov["language"], "pt-BR")
+        self.assertTrue(ov["errors"])
+
+
 if __name__ == "__main__":
     unittest.main()
