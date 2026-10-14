@@ -166,13 +166,14 @@ It also controls the loops:
 | Next (project card) | The next *new* unit goes to that project, if it fits the quota; interrupted units and batons still go first |
 | Interrupt (project card) | Pauses the project and stops its running unit (`SIGUSR1`); resume it to continue |
 | Project panel | A message to the agents, the project's caps and, while the project waits to retry, "Tentar agora" |
+| Preparar com um agente (settings, a project without `docs/autopilot.md`) | You write what the project should become; an agent drafts `docs/autopilot.md`, an `AGENTS.md` if missing and the initial backlog. The project panel shows the draft with "Aprovar", "Pedir mudanças" and "Cancelar preparo" |
 | "⚙ Configurações" screen | Projects: add, edit, reorder and remove (a project with an open unit, a claim or a running unit cannot be removed). Engines: on or off, orchestrator model and effort, caps, window, and a check that shows the CLI found, its version and the quota |
 
-The panel never edits state. It writes four kinds of file: the configuration, in `config.json`
+The panel never edits state. It writes five kinds of file: the configuration, in `config.json`
 (projects, order, caps, engines; validated before it replaces the file); its requests to the loops,
 in `overrides.json` in `~/.turno` (`projects.<name>.paused`, `next`, `reset`, `poke`); decision
 answers, in the same decision files the phone uses (each answer is also noted in the log); and
-messages to the agents, in the same notes as the phone. The loops re-read `config.json` and
+messages to the agents, in the same notes as the phone; and setup requests, in `setup/<project>.json` (the goal, the phase and your feedback). The loops re-read `config.json` and
 `overrides.json` on every turn and, while asleep, check both every 5 seconds. A unit interrupted from the panel, or by `stop`,
 appears in the history as `stopped`. Write requests need the `X-Turno: 1` header and a local origin.
 
@@ -186,6 +187,25 @@ Two things an ordinary click does not do:
 - **It does not interrupt a loop started by an older version.** Interrupt needs a loop that handles
   `SIGUSR1`; the panel checks first, and if the loop does not, it refuses and asks you to stop and
   start that loop again. Nothing is paused or signalled in that case.
+
+## Preparing a new project
+
+A repository that never ran turno needs `docs/autopilot.md` (the rules the agents follow: backlog,
+paths, verification, git) and `.superpowers/` ignored by git. In "⚙ Configurações", a git project
+without that file shows "Preparar com um agente" (it also opens right after you add such a project).
+Write what the project should become and click "Pedir preparo":
+
+1. A draft unit runs like any other unit (quota, claims, one engine per project). An agent reads the
+   repository and writes the proposed `docs/autopilot.md`, an `AGENTS.md` if there is none, the
+   initial backlog and a short `notes.md` for you, all in `.superpowers/autopilot/setup/`. Nothing
+   is committed. To keep that folder out of `git status`, turno adds `.superpowers/` to the clone's
+   `.git/info/exclude` (local, never committed); it is the only change turno itself makes in a project.
+2. Your phone gets "Rascunho do <projeto> pronto para revisar", and the project shows up in
+   "Precisa de você". Open it: the project panel shows the draft files. "Pedir mudanças" sends your
+   text back to a new draft unit; "Cancelar preparo" drops the request (the draft stays on disk).
+3. "Aprovar": the next unit copies the files to their places, adds `.superpowers/` to `.gitignore`,
+   makes one commit `docs: prepare for turno` on the current branch (no push) and deletes the draft.
+   From then on the project runs its backlog like the others.
 
 ## What stops the loop
 
