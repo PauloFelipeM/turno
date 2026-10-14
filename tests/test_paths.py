@@ -52,5 +52,37 @@ class PathsTest(unittest.TestCase):
         self.assertIn(f"TURNO_HOME={self.tmp} ", self.ap.loop_command("claude"))
 
 
+class NtfyTopicTest(unittest.TestCase):
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp())
+        import paths
+        self.paths = paths
+
+    def has(self, text=None):
+        if text is not None:
+            (self.tmp / "secrets.toml").write_text(text)
+        return self.paths.has_ntfy_topic(self.tmp)
+
+    def test_a_topic_is_found(self):
+        self.assertIs(self.has('[notify]\ntopic = "abc"\n'), True)
+
+    def test_anything_else_is_no_topic(self):
+        self.assertIs(self.has(), False)  # no file
+        for text in ('[notify]\ntopic = ""\n', '[notify]\ntopic = "  "\n', '[notify]\nserver = "x"\n',
+                     'notify = "abc"\n', '[notify]\ntopic = 5\n', "not toml [", ""):
+            self.assertIs(self.has(text), False, text)
+        (self.tmp / "secrets.toml").write_bytes(b"\xff\xfe")
+        self.assertIs(self.paths.has_ntfy_topic(self.tmp), False)
+
+    def test_the_value_is_never_printed(self):
+        import contextlib
+        import io
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(out):
+            self.has('[notify]\ntopic = "segredo-xyz"\n')
+            self.has('[notify]\ntopic = "segredo-xyz"\nbroken = [')
+        self.assertEqual(out.getvalue(), "")
+
+
 if __name__ == "__main__":
     unittest.main()

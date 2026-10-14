@@ -15,11 +15,16 @@ import tomllib
 from pathlib import Path
 
 import overrides
+import paths
 import schedule
 
 FILE = "config.json"
 ENGINES = ("codex", "claude")
 VERSION = 1
+# The owner's language: the panel, the phone texts and what the agents write for him. A config
+# without the key is pt-BR, as before the setting existed.
+LANGUAGES = ("pt-BR", "en")
+DEFAULT_LANGUAGE = "pt-BR"
 
 _COMMON = {
     "enabled": False,
@@ -62,6 +67,11 @@ def empty():
         "engines": copy.deepcopy(ENGINE_DEFAULTS),
         "notify": {"server": "https://ntfy.sh", "decision_timeout_hours": 4},
     }
+
+
+def notify_enabled(notify):
+    """Whether ntfy is switched on in a `notify` section; a section without `enabled` is on (as before the key existed)."""
+    return (notify or {}).get("enabled", True) is not False
 
 
 def _num(v):
@@ -211,6 +221,8 @@ def validate(data):
                 problems.append(f"engines.{name}: unknown engine")
             else:
                 _validate_engine(name, e, problems)
+    if "language" in data and data["language"] not in LANGUAGES:
+        problems.append(f"language must be one of {', '.join(LANGUAGES)}")
     notify = data.get("notify")
     if not isinstance(notify, dict):
         problems.append("notify must be an object")
@@ -220,6 +232,8 @@ def validate(data):
         t = notify.get("decision_timeout_hours")
         if not (_num(t) and t > 0):
             problems.append("notify.decision_timeout_hours must be a number > 0")
+        if "enabled" in notify and not isinstance(notify["enabled"], bool):
+            problems.append("notify.enabled must be true or false")
     return problems
 
 
@@ -330,6 +344,7 @@ def for_engine(data, engine):
         "project": [],
         "engine": {"kind": engine},
         "notify": dict(data["notify"]),
+        "language": data.get("language", DEFAULT_LANGUAGE),
     }
     for p in data["projects"]:
         item = {"name": p["name"], "path": p["path"],
@@ -399,6 +414,8 @@ def import_toml(home):
     notify = dict((primary or {}).get("notify") or {})
     notify.pop("topic", None)
     data["notify"].update(notify)
+    # ntfy is on when there is somewhere to send to; the topic itself never goes into config.json.
+    data["notify"]["enabled"] = paths.has_ntfy_topic(home)
 
     ov = overrides.read(home)
     order = ov.get("order")

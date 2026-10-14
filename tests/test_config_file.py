@@ -211,7 +211,9 @@ class LoadTests(Base):
                 self.assertEqual(got["defaults"], want["defaults"])
                 self.assertEqual(got["project"], want["project"])
                 self.assertEqual(got.get("schedule"), want.get("schedule"))
-                self.assertEqual(got["notify"], want["notify"])
+                notify = dict(got["notify"])
+                self.assertIs(notify.pop("enabled"), False)  # no secrets.toml here: nowhere to send to
+                self.assertEqual(notify, want["notify"])
                 self.assertEqual(got["engine"]["kind"], engine)
                 self.assertEqual(got.get("instance"), want.get("instance"))
                 self.assertTrue(got["enabled"])
@@ -420,6 +422,61 @@ class ForEngineTests(unittest.TestCase):
         self.assertNotIn("schedule", got["defaults"])
         self.assertEqual(config.for_engine(d, "claude")["project"][0]["weekly_cap"], 90)
         self.assertEqual(config.for_engine(d, "claude")["instance"], {"name": "claude"})
+
+
+class LanguageAndNotifyTests(Base):
+    def write(self, data):
+        (self.home / config.FILE).write_text(json.dumps(data))
+
+    def test_old_config_loads_as_pt_br_with_ntfy_on_and_is_not_rewritten(self):
+        self.write(config.empty())
+        before = (self.home / config.FILE).read_bytes()
+        loaded = config.load(self.home)
+        self.assertNotIn("language", loaded)
+        self.assertNotIn("enabled", loaded["notify"])
+        for engine in config.ENGINES:
+            cfg = config.for_engine(loaded, engine)
+            self.assertEqual(cfg["language"], "pt-BR")
+            self.assertTrue(config.notify_enabled(cfg["notify"]))
+        self.assertEqual((self.home / config.FILE).read_bytes(), before)
+
+    def test_language_is_validated(self):
+        for lang in config.LANGUAGES:
+            self.assertEqual(config.validate({**config.empty(), "language": lang}), [], lang)
+        for bad in ("fr", "pt", "", None, 1, ["en"]):
+            self.assertEqual(config.validate({**config.empty(), "language": bad}),
+                             ["language must be one of pt-BR, en"], bad)
+
+    def test_unknown_language_in_the_file_is_a_config_error(self):
+        self.write({**config.empty(), "language": "fr"})
+        with self.assertRaises(config.ConfigError) as cm:
+            config.load(self.home)
+        self.assertEqual(cm.exception.problems, ["language must be one of pt-BR, en"])
+
+    def test_for_engine_passes_the_language(self):
+        data = {**config.empty(), "language": "en"}
+        self.assertEqual(config.for_engine(data, "claude")["language"], "en")
+        self.assertEqual(config.for_engine(data, "codex")["language"], "en")
+
+    def test_notify_enabled_is_validated_and_defaults_to_on(self):
+        data = config.empty()
+        data["notify"]["enabled"] = "no"
+        self.assertEqual(config.validate(data), ["notify.enabled must be true or false"])
+        data["notify"]["enabled"] = False
+        self.assertEqual(config.validate(data), [])
+        self.assertFalse(config.notify_enabled(data["notify"]))
+        self.assertTrue(config.notify_enabled({"server": "https://ntfy.sh"}))
+        self.assertTrue(config.notify_enabled(None))
+
+    def test_import_switches_ntfy_on_only_with_a_topic(self):
+        self.put("projects.toml")
+        self.assertIs(config.load(self.home)["notify"]["enabled"], False)
+        (self.home / config.FILE).unlink()
+        (self.home / "secrets.toml").write_text('[notify]\ntopic = "secret-topic"\n')
+        data = config.load(self.home)
+        self.assertIs(data["notify"]["enabled"], True)
+        self.assertNotIn("topic", data["notify"])
+        self.assertNotIn("secret-topic", (self.home / config.FILE).read_text())
 
 
 if __name__ == "__main__":
