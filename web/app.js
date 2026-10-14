@@ -413,7 +413,8 @@ function capsForm(name, settings) {
 // --- settings dialog -----------------------------------------------------------------------
 // The dialog edits a working copy (view.draft) of GET /api/config. Saving sends only what changed.
 
-const EFFORTS = ["low", "medium", "high"];
+const EFFORTS = ["low", "medium", "high", "xhigh"];
+const ROLES = ["planner", "implementer", "reviewer"];
 const clone = (x) => JSON.parse(JSON.stringify(x));
 
 function engineDraft(e) {
@@ -422,6 +423,7 @@ function engineDraft(e) {
     enabled: !!e.enabled,
     orchestrator_model: e.orchestrator_model ?? "",
     orchestrator_effort: e.orchestrator_effort ?? "medium",
+    roles: Object.fromEntries(ROLES.map((r) => [r, { model: e.roles?.[r]?.model ?? "", effort: e.roles?.[r]?.effort ?? "medium" }])),
     noWindow: !s,
     start: s ? s.start : "", end: s ? s.end : "", margin: s ? String(s.start_margin_minutes ?? 15) : "15",
     primary_cap: e.primary_cap ?? "",
@@ -508,6 +510,17 @@ function saveSteps() {
     if (cur.enabled !== was.enabled) body.enabled = cur.enabled;
     if (cur.orchestrator_model !== was.orchestrator_model) body.orchestrator_model = cur.orchestrator_model.trim();
     if (cur.orchestrator_effort !== was.orchestrator_effort) body.orchestrator_effort = cur.orchestrator_effort;
+    const roles = {};
+    for (const r of ROLES) {
+      const ch = {};
+      if (cur.roles[r].model !== was.roles[r].model) {
+        if (!cur.roles[r].model.trim()) return null;
+        ch.model = cur.roles[r].model.trim();
+      }
+      if (cur.roles[r].effort !== was.roles[r].effort) ch.effort = cur.roles[r].effort;
+      if (Object.keys(ch).length) roles[r] = ch;
+    }
+    if (Object.keys(roles).length) body.roles = roles;
     for (const f of k === "claude" ? ["primary_cap", "fable_cap"] : ["primary_cap"]) {
       if (String(cur[f]).trim() === "") { if (String(was[f]).trim() !== "") return null; continue; }
       const n = parseCap(cur[f]);
@@ -634,18 +647,36 @@ function engineBlock(k) {
   const cur = d.eng[k];
   const cli = d.cfg.engines[k].cli || {};
   const res = d.checks[k];
-  const efforts = EFFORTS.includes(cur.orchestrator_effort) ? EFFORTS : [...EFFORTS, cur.orchestrator_effort];
+  const effortSelect = (value, onChange, attrs) => {
+    const efforts = EFFORTS.includes(value) ? EFFORTS : [...EFFORTS, value];
+    return h("select", { onchange: (ev) => onChange(ev.target.value), ...attrs },
+      efforts.map((x) => h("option", { value: x, selected: x === value }, x)));
+  };
+  const listId = `models-${k}`;
+  const roleRow = (label, model, effort, key) => h("tr", {},
+    h("th", { scope: "row" }, label),
+    h("td", {}, textInput(model.value, model.set, { list: listId, "aria-label": `${label}: ${t("settings.model")}`, "data-sf": `model:${k}${key}` })),
+    h("td", {}, effortSelect(effort.value, effort.set, { "aria-label": `${label}: ${t("settings.effort")}`, "data-sf": `effort:${k}${key}` })));
+  const roleTable = h("table", { class: "role-table" },
+    h("thead", {}, h("tr", {}, h("th", {}, t("settings.role")), h("th", {}, t("settings.model")), h("th", {}, t("settings.effort")))),
+    h("tbody", {},
+      roleRow(t("settings.roles.orchestrator"),
+        { value: cur.orchestrator_model, set: (v) => { cur.orchestrator_model = v; } },
+        { value: cur.orchestrator_effort, set: (v) => { cur.orchestrator_effort = v; } }, ""),
+      ROLES.map((r) => roleRow(t(`settings.roles.${r}`),
+        { value: cur.roles[r].model, set: (v) => { cur.roles[r].model = v; } },
+        { value: cur.roles[r].effort, set: (v) => { cur.roles[r].effort = v; } }, `:${r}`))),
+    h("datalist", { id: listId }, (d.cfg.engines[k].known_models || []).map((m) => h("option", { value: m }))));
   return h("section", { class: "engine-cfg" },
     h("h3", {}, engineName(k)),
     h("label", { class: "check" },
       h("input", { type: "checkbox", checked: cur.enabled, "data-sf": `enabled:${k}`, onchange: (ev) => { cur.enabled = ev.target.checked; } }),
       t("settings.enabled")),
+    roleTable,
     h("div", { class: "cap-row" },
-      field(t("settings.model"), textInput(cur.orchestrator_model, (v) => { cur.orchestrator_model = v; }, { "data-sf": `model:${k}` })),
-      field(t("settings.effort"), h("select", { "data-sf": `effort:${k}`, onchange: (ev) => { cur.orchestrator_effort = ev.target.value; } },
-        efforts.map((x) => h("option", { value: x, selected: x === cur.orchestrator_effort }, x)))),
       capInput(t("settings.primaryCap"), cur.primary_cap, (v) => { cur.primary_cap = v; }),
       k === "claude" ? capInput(t("settings.fableCap"), cur.fable_cap, (v) => { cur.fable_cap = v; }) : null),
+    k === "claude" ? h("p", { class: "muted small" }, t("settings.fableHint")) : null,
     h("label", { class: "check" },
       h("input", { type: "checkbox", checked: cur.noWindow, "data-sf": `nowindow:${k}`, onchange: (ev) => { cur.noWindow = ev.target.checked; renderSettings(); } }),
       t("settings.noWindow")),

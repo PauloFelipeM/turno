@@ -69,6 +69,11 @@ button { font: inherit; color: inherit; }
 .order li { display: grid; gap: 4px; border-top: 1px solid var(--line); padding-top: 6px; }
 .field { display: grid; gap: 2px; font-size: .85rem; }
 .field input, .field select { font: inherit; color: inherit; background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 2px 6px; }
+.role-table { border-collapse: collapse; font-size: .85rem; margin: 6px 0; }
+.role-table th, .role-table td { padding: 2px 8px 2px 0; text-align: left; font-weight: normal; }
+.role-table thead th { color: var(--muted); font-size: .75rem; }
+.role-table input, .role-table select { font: inherit; color: inherit; background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 2px 6px; }
+.role-table input { width: 14rem; max-width: 100%; }
 .field.wide { width: 100%; }
 .field.wide input { width: 100%; }
 .check { display: flex; gap: 6px; align-items: center; margin: 6px 0; }

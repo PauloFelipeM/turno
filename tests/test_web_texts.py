@@ -55,6 +55,19 @@ class WebTextsTest(unittest.TestCase):
         strip = self.app[self.app.index("function attentionItems"):self.app.index("function decisionItem")]
         self.assertNotIn("retry_at", strip)  # a waiting project stays on its card, out of the strip
 
+    def test_settings_edit_a_model_and_effort_per_role(self):
+        settings = self.block("settings")
+        for text in ('role: "Papel"', 'orchestrator: "Orquestrador"', 'planner: "Planejador"',
+                     'implementer: "Implementador"', 'reviewer: "Revisor"', 'fableHint: "O teto do Fable só vale para papéis no Fable."'):
+            self.assertIn(text, settings)
+        self.assertNotIn("plan-reviewer", self.i18n + self.app)
+        self.assertIn('const ROLES = ["planner", "implementer", "reviewer"]', self.app)
+        self.assertIn('"xhigh"', self.app)
+        self.assertIn("known_models", self.app)
+        self.assertIn('h("datalist"', self.app)
+        self.assertIn("body.roles = roles", self.app)  # only what changed is sent
+        self.assertNotIn("innerHTML", self.app.replace("// Builds elements without innerHTML", ""))
+
 
 if __name__ == "__main__":
     unittest.main()
