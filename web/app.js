@@ -518,7 +518,7 @@ function saveSteps() {
       if (cur.noWindow) body.schedule = null;
       else {
         const margin = Number(cur.margin);
-        if (!cur.start.trim() || !cur.end.trim() || !Number.isInteger(margin) || margin < 0) return null;
+        if (!cur.start.trim() || !cur.end.trim() || !String(cur.margin).trim() || !Number.isInteger(margin) || margin < 0) return null;
         body.schedule = { start: cur.start.trim(), end: cur.end.trim(), start_margin_minutes: margin };
       }
     }
@@ -599,6 +599,8 @@ function addForm() {
     h("div", { class: "btn-row" },
       h("button", { type: "button", class: "btn", "data-sf": "add-go", onclick: (ev) => {
         if (!a.name.trim() || !a.path.trim()) { toast(t("settings.addMissing"), "error"); return; }
+        if (!/^[A-Za-z0-9_-]+$/.test(a.name.trim())) { toast(t("settings.addBadName"), "error"); return; }
+        if (!a.path.trim().startsWith("/")) { toast(t("settings.addBadPath"), "error"); return; }
         const caps = readCaps(a.caps);
         if (!caps) { toast(t("caps.invalid"), "error"); return; }
         const body = { name: a.name.trim(), path: a.path.trim() };
@@ -613,8 +615,18 @@ function addForm() {
 }
 
 function limitText(l) {
-  const win = (label, w) => `${label} ${pct(w && w.used_percent)}${w && w.resets_at ? ` (${t("reset", { when: when(w.resets_at) })})` : ""}`;
+  const win = (label, w) => `${label} ${w ? pct(w.used_percent) : "-"}${w && w.resets_at ? ` (${t("reset", { when: when(w.resets_at) })})` : ""}`;
   return `${win(t("window5h"), l.primary)} · ${win(t("weekly"), l.secondary)}`;
+}
+
+// The quota check outcome: known server errors get a pt-BR text; others show the original as a technical detail.
+function checkResult(k, res) {
+  if (res.limits) return h("p", { class: "small", "data-check": k }, limitText(res.limits));
+  const err = res.error || "";
+  const known = Object.hasOwn(T.settings.checkErrors, err);
+  return h("p", { class: "error small", "data-check": k },
+    known ? t(`settings.checkErrors.${err}`) : t("settings.checkErrorOther"),
+    known || !err ? null : [" ", h("span", { class: "muted tech" }, err)]);
 }
 
 function engineBlock(k) {
@@ -643,14 +655,15 @@ function engineBlock(k) {
       field(t("settings.margin"), h("input", { type: "number", min: "0", step: "1", value: cur.margin, "data-sf": `margin:${k}`, oninput: (ev) => { cur.margin = ev.target.value; } }))),
     h("p", { class: "muted small" }, cli.found ? t("settings.cliFound", { path: cli.path, version: cli.version || "?" }) : t("settings.cliMissing")),
     h("div", { class: "btn-row" },
-      h("button", { type: "button", class: "btn", "data-sf": `check:${k}`, onclick: (ev) =>
-        act(ev.currentTarget, async () => {
+      h("button", { type: "button", class: "btn", "data-sf": `check:${k}`, disabled: !!(res && res.loading), onclick: (ev) => {
+        if (d.checks[k] && d.checks[k].loading) return;
+        return act(ev.currentTarget, async () => {
           d.checks[k] = { loading: true };
           renderSettings();
           try { d.checks[k] = await post(`/api/engines/${enc(k)}/check`); } finally { if (d.checks[k].loading) delete d.checks[k]; renderSettings(); }
-        }) }, t("settings.check"))),
-    res && !res.loading ? h("p", { class: res.limits ? "small" : "error small", "data-check": k },
-      res.limits ? limitText(res.limits) : t("settings.checkError", { error: res.error || "" })) : null);
+        });
+      } }, res && res.loading ? t("settings.checking") : t("settings.check"))),
+    res && !res.loading ? checkResult(k, res) : null);
 }
 
 function drawSettings() {
