@@ -142,7 +142,7 @@ class ClaudeEngineTest(unittest.TestCase):
     def test_unit_cost_is_unknown_when_the_closing_probe_fails(self):
         start = self.engines.to_limits(rate_event(five=0.10, week=0.40, resets=2000000000)["rate_limit_info"])
         self.engine.record(self.state, [rate_event(five=0.10, week=0.40, resets=2000000000)["rate_limit_info"]])
-        self.engine.probe = lambda state: None  # falhou: nada novo
+        self.engine.probe = lambda state: None  # it failed: nothing new
         self.assertIsNone(self.engine.unit_cost(self.state, {"unit_start_limits": start}))
 
     def test_limit_message_with_epoch(self):

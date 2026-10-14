@@ -168,7 +168,7 @@ def ntfy(cfg, title, message, priority=3, tags=(), actions=None):
     try:
         urllib.request.urlopen(req, timeout=15).close()
     except OSError as e:
-        log(f"ntfy falhou: {e}")
+        log(f"ntfy failed: {e}")
 
 
 def reply_topic(cfg):
@@ -226,7 +226,7 @@ def fetch_messages(cfg, topic, since, label):
         with urllib.request.urlopen(url, timeout=15) as r:
             lines = r.read().decode(errors="replace").splitlines()
     except OSError as e:
-        log(f"ntfy ({label}) falhou: {e}")
+        log(f"ntfy ({label}) failed: {e}")
         return None
     out = []
     for line in lines:
@@ -331,7 +331,7 @@ def poll_replies(cfg, notify):
     notify.setdefault("since", now)
     notify.setdefault("since_typed", now)
     projects = {p["name"]: p for p in cfg["project"]}
-    for msg in fetch_messages(cfg, reply_topic(cfg), notify["since"], "respostas") or []:
+    for msg in fetch_messages(cfg, reply_topic(cfg), notify["since"], "replies") or []:
         notify["since"] = msg["id"]
         m = re.fullmatch(r"([\w-]+)/([\w-]+)/([\w-]+)", (msg.get("message") or "").strip())
         if not m or m.group(1) not in projects:
@@ -343,7 +343,7 @@ def poll_replies(cfg, notify):
         if not d or "answer" in d or not valid_decision(d, path) or m.group(3) not in {o["id"] for o in d["options"]}:
             continue
         owner_answer(cfg, project, path, d, m.group(3))
-    for msg in fetch_messages(cfg, cfg["notify"]["topic"], notify["since_typed"], "respostas digitadas") or []:
+    for msg in fetch_messages(cfg, cfg["notify"]["topic"], notify["since_typed"], "typed replies") or []:
         notify["since_typed"] = msg["id"]
         # Everything the scheduler publishes has a title; a message without one is someone typing in the app.
         if msg.get("title"):
@@ -473,7 +473,7 @@ def compose(path, *args):
         return True
     r = subprocess.run(["docker", "compose", *args], cwd=path, capture_output=True, text=True)
     if r.returncode != 0:
-        log(f"docker compose {' '.join(args)} falhou em {path}: {r.stderr.strip()[-300:]}")
+        log(f"docker compose {' '.join(args)} failed in {path}: {r.stderr.strip()[-300:]}")
     return r.returncode == 0
 
 
@@ -494,7 +494,7 @@ def ensure_docker(cfg):
         for _ in range(18):
             time.sleep(10)
             if docker_up():
-                log("Docker no ar")
+                log("Docker is up")
                 return True
     return False
 
@@ -514,7 +514,7 @@ def prepare_docker(cfg, project):
                     continue
                 if is_dirty(other["path"]):
                     # Someone is working on the other project: stopping its stack would break that work.
-                    log(f"{project['name']}: portas ocupadas por {other['name']}, que tem trabalho em andamento; esperando")
+                    log(f"{project['name']}: ports held by {other['name']}, which has work in progress; waiting")
                     return "busy"
                 log(f"stopping the {other['name']} stack (same ports as {project['name']})")
                 compose(other["path"], "stop")
@@ -694,7 +694,10 @@ def run_unit(cfg, engine, state, project, deadline=None):
     if exit_now:
         # Ctrl+C / SIGTERM during the unit: one history line, then out, from the main thread.
         # after_run first: it reads the session id from the run's output, which the resume needs.
-        engine.after_run(state, s, out, resume)
+        try:
+            engine.after_run(state, s, out, resume)
+        except Exception as e:  # the exit, the history line and the saved state must still happen
+            log(f"{project['name']}: could not read the run before exiting: {e!r}")
         record_interrupted_run()
         CURRENT_UNIT = None
         save_state(state)
@@ -755,7 +758,7 @@ def after_unit(cfg, engine, state, project, out, err, code, unit_file):
     if status == "error":
         record_run(engine, project, s, "error")
         s["errors"] += 1
-        log(f"{project['name']}: erro (exit={code}, tentativa {s['errors']}; ver {err})")
+        log(f"{project['name']}: error (exit={code}, attempt {s['errors']}; see {err})")
         if s["errors"] % 3 == 0:
             # A session that does not resume: the next unit restarts from the ledger (recovery step).
             log(f"{project['name']}: dropping the session after repeated errors")
@@ -935,7 +938,7 @@ def run_once(cfg, engine, state, win=None, now=None):
     resets = state.setdefault("_resets", {})
     for name, ts in overrides.resets(ov).items():
         if name in state and name in {p["name"] for p in cfg["project"]} and ts > resets.get(name, 0):
-            state[name].update(status="active", blocked_until=0, errors=0)
+            state[name].update(status="active", blocked_until=0, errors=0, retry_at=0)
             resets[name] = ts
             log(f"{name}: reset from the panel")
     cfg = overrides.apply(cfg, engine.name, ov)
@@ -1322,7 +1325,7 @@ def cmd_answer(args):
 def cmd_test_notify(args):
     cfg = load_config()
     if not (cfg.get("notify") or {}).get("topic"):
-        sys.exit("configure [notify].topic em projects.toml")
+        sys.exit("set [notify].topic in secrets.toml")
     ntfy(cfg, "autopilot: teste", "Se você está lendo isto no celular, as notificações funcionam.", tags=["bell"])
     print(f"sent to {ntfy_server(cfg)} (topic in secrets.toml)")
 
@@ -1332,7 +1335,7 @@ def cmd_reset(args):
     state = load_state(cfg)
     if args.name not in {p["name"] for p in cfg["project"]}:
         sys.exit(f"unknown project: {args.name}")
-    state[args.name].update(status="active", blocked_until=0, errors=0)
+    state[args.name].update(status="active", blocked_until=0, errors=0, retry_at=0)
     save_state(state)
     print(f"{args.name}: active")
 

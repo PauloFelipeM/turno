@@ -144,5 +144,22 @@ class InterruptTest(unittest.TestCase):
         self.assertEqual(calls, [(line["run"] + ".jsonl", False)])
 
 
+    def test_exit_signal_survives_an_after_run_that_fails(self):
+        def boom(state, s, out, resume):
+            raise RuntimeError("no session id")
+        self.engine.after_run = boom
+        old = signal.signal(signal.SIGTERM, self.ap.make_exit_handler(self.state))
+        self.addCleanup(signal.signal, signal.SIGTERM, old)
+        self.fire_when_running(signal.SIGTERM)
+        with self.assertRaises(SystemExit) as cm:
+            self.ap.run_unit(self.cfg, self.engine, self.state, self.project)
+        self.assertEqual(cm.exception.code, 130)
+        [line] = self.lines()
+        self.assertEqual(line["outcome"], "stopped")
+        import json
+        self.assertTrue(json.loads(self.ap.STATE.read_text())["my-api"]["interrupted"])
+        self.assertIn("no session id", self.ap.LOG.read_text())
+
+
 if __name__ == "__main__":
     unittest.main()

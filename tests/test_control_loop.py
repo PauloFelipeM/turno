@@ -1,3 +1,6 @@
+import argparse
+import contextlib
+import io
 import json
 import os
 import signal
@@ -246,9 +249,9 @@ class ControlLoopTest(unittest.TestCase):
             self.state[p["name"]]["status"] = "idle"
         self.ap.run_once(self.cfg, helpers.FakeEngine(TRUE, limits=self.limits), self.state)  # reads the overrides
         self.set_ov(lambda d: d.update(next="my-api"))  # a click that lands before the nap starts
-        t = time.time()
+        t = time.monotonic()
         self.ap.nap(self.cfg, self.state, 14)
-        self.assertLess(time.time() - t, 8)
+        self.assertLess(time.monotonic() - t, 8)
 
     def test_unreadable_overrides_is_logged_once_per_change(self):
         for p in self.projects:
@@ -291,6 +294,37 @@ class ControlLoopTest(unittest.TestCase):
         self.assertIs(seen["handlers"][2], self.ap.request_interrupt)
         self.assertTrue(all(callable(h) and h is not signal.default_int_handler for h in seen["handlers"][:2]))
         self.assertEqual(seen["phase"], "sleeping")
+
+
+    # reset clears the wait
+
+    def test_panel_reset_clears_retry_at_and_the_project_runs_again(self):
+        self.state["my-app"]["status"] = self.state["side-project"]["status"] = "idle"
+        self.state["my-api"].update(interrupted=True, retry_at=time.time() + 900)
+        engine = self.failing_engine()
+        self.assertIsNone(self.pick_wait(engine)[0])
+        self.set_ov(lambda d: d.setdefault("reset", {}).update(my-api=time.time()))
+        engine.classify = lambda out, err, code: ("ok", None, False)
+        self.ap.run_once(self.cfg, engine, self.state)
+        self.assertIn("my-api: new unit", self.ap.LOG.read_text())
+        self.assertEqual(self.state["my-api"]["retry_at"], 0)
+
+    def test_cli_reset_clears_retry_at(self):
+        self.state["my-api"].update(status="blocked", retry_at=time.time() + 900)
+        self.ap.save_state(self.state)
+        self.ap.load_config = lambda: self.cfg
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.ap.cmd_reset(argparse.Namespace(name="my-api"))
+        saved = json.loads(self.ap.STATE.read_text())["my-api"]
+        self.assertEqual((saved["status"], saved["retry_at"]), ("active", 0))
+
+    def test_logs_of_the_loop_are_in_english(self):
+        source = (helpers.ROOT / "autopilot.py").read_text(encoding="utf-8")
+        for old in ("falhou", "Docker no ar", "portas ocupadas", "erro (exit=", "tentativa", "respostas", "configure [notify]"):
+            self.assertNotIn(old, source)
+        self.state["my-app"]["status"] = self.state["side-project"]["status"] = "idle"
+        self.ap.run_once(self.cfg, self.failing_engine(), self.state)
+        self.assertRegex(self.ap.LOG.read_text(), r"my-api: error \(exit=0, attempt 1; see .*\.err\)")
 
 
 if __name__ == "__main__":
