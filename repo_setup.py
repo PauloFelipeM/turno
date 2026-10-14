@@ -13,6 +13,7 @@ import contextlib
 import fcntl
 import json
 import os
+import stat
 import subprocess
 import time
 from pathlib import Path
@@ -43,14 +44,19 @@ def _lock(home):
 
 
 def _valid(data):
-    return isinstance(data, dict) and data.get("status") in STATUSES and isinstance(data.get("goal"), str)
+    if not (isinstance(data, dict) and data.get("status") in STATUSES and isinstance(data.get("goal"), str)):
+        return False
+    if not (data.get("feedback") is None or isinstance(data["feedback"], str)):
+        return False
+    return all(data.get(k) is None or (isinstance(data[k], (int, float)) and not isinstance(data[k], bool))
+               for k in STAMPS.values())
 
 
 def read(home, name):
     """The request, or None when it is missing, unreadable or invalid."""
     try:
         data = json.loads(_path(home, name).read_text(encoding="utf-8"))
-    except (OSError, ValueError):
+    except (OSError, ValueError, RecursionError):
         return None
     return data if _valid(data) else None
 
@@ -128,6 +134,8 @@ def draft_files(path):
         return []
     found = []
     for dirpath, dirnames, filenames in os.walk(root, followlinks=False):
+        if len(found) >= MAX_FILES:
+            break
         dirnames[:] = [d for d in dirnames if not (Path(dirpath) / d).is_symlink()]
         for f in filenames:
             full = Path(dirpath) / f
@@ -148,36 +156,44 @@ def read_drafts(path):
         try:
             if root not in full.resolve(strict=True).parents:
                 continue  # a folder on the way was swapped for a symlink after the listing
-            fd = os.open(full, os.O_RDONLY | os.O_NOFOLLOW)
+            fd = os.open(full, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
         except (OSError, RuntimeError):
             continue
         with os.fdopen(fd, "rb") as f:
-            size = os.fstat(f.fileno()).st_size
+            st = os.fstat(f.fileno())
+            if not stat.S_ISREG(st.st_mode):
+                continue
+            size = st.st_size
             data = f.read(MAX_FILE + 1)
         out.append({"path": rel, "size": size,
                     "text": None if len(data) > MAX_FILE else data.decode("utf-8", "replace")})
     return out
 
 
-def ensure_excluded(path):
+def ensure_excluded(path, on_error=None):
     """Appends `.superpowers/` to the clone's `.git/info/exclude` unless git already ignores that folder
-    (local to the clone, never committed). True when it wrote the line. Never raises; without git it does nothing."""
+    (local to the clone, never committed). True when it wrote the line. Never raises; without git it does
+    nothing. `on_error(message)` is told why it could not tell or write."""
     def git(*args):
         return subprocess.run(["git", "-C", str(path), *args], capture_output=True, text=True,
                               stdin=subprocess.DEVNULL, timeout=10)
     try:
         if git("check-ignore", "-q", (DRAFT / "notes.md").as_posix()).returncode == 0:
             return False
-        r = git("rev-parse", "--path-format=absolute", "--git-path", "info/exclude")
+        r = git("rev-parse", "--git-path", "info/exclude")
         if r.returncode != 0 or not r.stdout.strip():
+            if on_error:
+                on_error(f"git could not locate info/exclude: {r.stderr.strip()[:200]}")
             return False
-        exclude = Path(r.stdout.strip())
-        text = exclude.read_text() if exclude.exists() else ""
+        exclude = Path(path) / r.stdout.strip()  # absolute stays as it is; relative is from the project
+        text = exclude.read_text(encoding="utf-8", errors="replace") if exclude.exists() else ""
         if any(line.strip() in IGNORE_LINES for line in text.splitlines()):
             return False
         exclude.parent.mkdir(parents=True, exist_ok=True)
-        with exclude.open("a") as f:
+        with exclude.open("a", encoding="utf-8") as f:
             f.write(("" if not text or text.endswith("\n") else "\n") + ".superpowers/\n")
         return True
-    except (OSError, subprocess.SubprocessError):
+    except (OSError, ValueError, subprocess.SubprocessError) as e:
+        if on_error:
+            on_error(f"could not update info/exclude: {e}")
         return False

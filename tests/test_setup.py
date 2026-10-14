@@ -29,6 +29,17 @@ class RequestFileTest(unittest.TestCase):
             self.assertIsNone(setup.read(self.home, "app"), text)
             self.assertIsNone(setup.phase(self.home, "app"), text)
 
+    def test_tampered_fields_make_the_request_invalid(self):
+        good = setup.new_request("g")
+        for key, value in (("feedback", 5), ("feedback", ["x"]), ("goal", None), ("requested_at", "ontem"),
+                           ("done_at", [1]), ("drafted_at", True)):
+            self.write(json.dumps({**good, key: value}))
+            self.assertIsNone(setup.read(self.home, "app"), (key, value))
+        self.write(json.dumps({**good, "feedback": "ok", "drafted_at": 3}))
+        self.assertIsNotNone(setup.read(self.home, "app"))
+        self.write("[" * 100000)
+        self.assertIsNone(setup.read(self.home, "app"))
+
     def test_new_request_has_every_field(self):
         self.assertEqual(setup.new_request("um SaaS", now=10.0),
                          {"goal": "um SaaS", "status": "requested", "feedback": None, "requested_at": 10.0,
@@ -133,6 +144,13 @@ class DraftFilesTest(unittest.TestCase):
         self.assertEqual(files["notes.md"], {"path": "notes.md", "size": 4, "text": "olá"})
         self.assertEqual((files["big.md"]["size"], files["big.md"]["text"]), (setup.MAX_FILE + 1, None))
 
+    def test_fifo_and_other_special_files_are_ignored(self):
+        import os
+        self.put("notes.md", "ok")
+        os.mkfifo(self.draft / "pipe.md")
+        files = {f["path"] for f in setup.read_drafts(self.root)}
+        self.assertEqual(files, {"notes.md"})
+
     def test_at_most_max_files(self):
         for i in range(setup.MAX_FILES + 5):
             self.put(f"f{i:03}.md")
@@ -173,6 +191,26 @@ class ExcludeTest(unittest.TestCase):
         self.exclude.write_text("*.log")
         self.assertTrue(setup.ensure_excluded(self.repo))
         self.assertEqual(self.exclude.read_text(), "*.log\n.superpowers/\n")
+
+    def test_exclude_that_is_not_utf8_does_not_raise(self):
+        self.exclude.parent.mkdir(parents=True, exist_ok=True)
+        self.exclude.write_bytes(b"\xff\xfe*.log\n")
+        self.assertTrue(setup.ensure_excluded(self.repo))
+        self.assertTrue(self.exclude.read_bytes().endswith(b".superpowers/\n"))
+
+    def test_relative_git_path_is_resolved_against_the_project(self):
+        calls = []
+        real = subprocess.run
+        def fake(cmd, **kw):
+            calls.append(cmd)
+            if "check-ignore" in cmd:
+                return subprocess.CompletedProcess(cmd, 1, "", "")
+            return subprocess.CompletedProcess(cmd, 0, ".git/info/exclude\n", "")
+        from unittest import mock
+        with mock.patch.object(subprocess, "run", fake):
+            self.assertTrue(setup.ensure_excluded(self.repo))
+        self.assertFalse(any("--path-format=absolute" in c for c in calls))
+        self.assertIn(".superpowers/", self.exclude.read_text())
 
     def test_not_a_repository_does_nothing(self):
         plain = Path(self._tmp.name) / "plain"
