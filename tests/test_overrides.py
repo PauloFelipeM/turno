@@ -78,34 +78,37 @@ class ApplyTests(unittest.TestCase):
     def names(self, cfg):
         return [p["name"] for p in cfg["project"]]
 
-    def test_order_with_unknown_and_missing(self):
+    def test_order_in_the_overrides_is_ignored(self):
+        # Order and caps come from config.json now; what an old overrides file still has does nothing.
         out = overrides.apply(self.cfg(), "codex", {"order": ["c", "zzz", "a"]})
-        self.assertEqual(self.names(out), ["c", "a", "b"])
+        self.assertEqual(self.names(out), ["a", "b", "c"])
 
-    def test_bad_order_ignored(self):
-        self.assertEqual(self.names(overrides.apply(self.cfg(), "codex", {"order": "c"})), ["a", "b", "c"])
-
-    def test_caps_per_engine(self):
+    def test_caps_in_the_overrides_are_ignored(self):
         ov = {"projects": {"a": {"weekly_cap": {"codex": 50, "claude": 70.5}}}, "primary_cap": {"codex": 100}}
-        codex = overrides.apply(self.cfg(), "codex", ov)
-        claude = overrides.apply(self.cfg(), "claude", ov)
-        self.assertEqual(codex["project"][0]["weekly_cap"], 50)
-        self.assertEqual(claude["project"][0]["weekly_cap"], 70.5)
-        self.assertEqual(codex["defaults"]["primary_cap"], 100)
-        self.assertEqual(claude["defaults"]["primary_cap"], 80)
+        for engine in ("codex", "claude"):
+            out = overrides.apply(self.cfg(), engine, ov)
+            self.assertEqual([p["weekly_cap"] for p in out["project"]], [95, 85, 60])
+            self.assertEqual(out["defaults"]["primary_cap"], 80)
 
-    def test_invalid_caps_ignored(self):
-        for bad in ("50", True, 150, -1, None, [1]):
-            ov = {"projects": {"a": {"weekly_cap": {"codex": bad}}}, "primary_cap": {"codex": bad}}
-            out = overrides.apply(self.cfg(), "codex", ov)
-            self.assertEqual(out["project"][0]["weekly_cap"], 95, bad)
-            self.assertEqual(out["defaults"]["primary_cap"], 80, bad)
+    def test_only_paused_is_added(self):
+        ov = {"order": ["c"], "primary_cap": {"codex": 1}, "next": "b", "reset": {"a": 1.0},
+              "projects": {"a": {"paused": True, "weekly_cap": {"codex": 1}}}}
+        expected = self.cfg()
+        for p in expected["project"]:
+            p["paused"] = p["name"] == "a"
+        self.assertEqual(overrides.apply(self.cfg(), "codex", ov), expected)
+
+    def test_paused_must_be_exactly_true(self):
+        for value in ("yes", 1, None, [True], {"x": 1}):
+            out = overrides.apply(self.cfg(), "codex", {"projects": {"a": {"paused": value}}})
+            self.assertEqual([p["paused"] for p in out["project"]], [False, False, False], value)
 
     def test_malformed_parts_do_not_raise(self):
         for ov in ({"projects": [1]}, {"projects": {"a": 3}}, {"projects": {"a": {"weekly_cap": 5}}},
-                   {"primary_cap": 7}, {"order": [1, None, ["x"]]}):
+                   {"primary_cap": 7}, {"order": [1, None, ["x"]]}, None, [1], "x"):
             out = overrides.apply(self.cfg(), "codex", ov)
             self.assertEqual(self.names(out), ["a", "b", "c"])
+            self.assertEqual([p["paused"] for p in out["project"]], [False, False, False])
 
     def test_paused_default_false(self):
         out = overrides.apply(self.cfg(), "codex", {"projects": {"b": {"paused": True}}})

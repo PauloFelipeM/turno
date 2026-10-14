@@ -34,23 +34,22 @@ class PathsTest(unittest.TestCase):
         finally:
             os.environ["TURNO_HOME"] = old
 
-    def test_relative_config_resolves_from_home(self):
-        self.assertEqual(self.ap.resolve_config("claude.toml"), self.tmp / "claude.toml")
-        self.assertEqual(self.ap.resolve_config(None), self.tmp / "projects.toml")
-
-    def test_absolute_config_is_kept(self):
-        self.assertEqual(self.ap.resolve_config("/etc/x.toml"), Path("/etc/x.toml"))
-
     def test_configure_puts_instance_files_in_home(self):
-        (self.tmp / "claude.toml").write_text('[instance]\nname = "claude"\n' + MINIMAL)
-        self.ap.configure("claude.toml")
+        self.ap.configure("claude")
         self.assertEqual(self.ap.STATE, self.tmp / "state-claude.json")
         self.assertEqual(self.ap.LOG, self.tmp / "autopilot-claude.log")
         self.assertEqual(self.ap.RUNS, self.tmp / "runs-claude")
 
-    def test_launcher_uses_configs_from_home(self):
-        self.assertEqual(dict(self.ap.LOOPS)["claude"], self.tmp / "claude.toml")
-        self.assertEqual(self.ap.log_file("codex", None), self.tmp / "autopilot.log")
+    def test_deprecated_relative_config_is_looked_up_in_home(self):
+        (self.tmp / "weekend.toml").write_text('[instance]\nname = "claude"\n' + MINIMAL)
+        self.ap.configure(config_path="weekend.toml")
+        self.assertEqual(self.ap.STATE, self.tmp / "state-claude.json")
+
+    def test_launcher_uses_the_config_and_logs_from_home(self):
+        helpers.write_config(self.tmp, enabled=("claude",))
+        self.assertEqual(self.ap.loops(), ["claude"])
+        self.assertEqual(self.ap.log_file("codex"), self.tmp / "autopilot.log")
+        self.assertIn(f"TURNO_HOME={self.tmp} ", self.ap.loop_command("claude"))
 
 
 if __name__ == "__main__":

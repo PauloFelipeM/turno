@@ -55,8 +55,8 @@ class ControlLoopTest(unittest.TestCase):
 
     def test_next_that_does_not_fit_falls_back_to_the_normal_order(self):
         self.limits["secondary"]["used_percent"] = 95
-        self.set_ov(lambda d: (d.update(next="side-project"),
-                               d.setdefault("projects", {}).setdefault("side-project", {}).update(weekly_cap={"claude": 50})))
+        self.set_ov(lambda d: d.update(next="side-project"))
+        self.cfg["project"][2]["weekly_cap"] = 50
         self.cfg["project"][0]["weekly_cap"] = 99
         self.assertEqual(self.pick_cfg(), "my-app")
 
@@ -65,13 +65,11 @@ class ControlLoopTest(unittest.TestCase):
                                d.setdefault("projects", {}).setdefault("side-project", {}).update(paused=True)))
         self.assertEqual(self.pick_cfg(), "my-app")
 
-    def test_order_override_changes_the_pick(self):
-        self.set_ov(lambda d: d.update(order=["side-project", "my-api", "my-app"]))
-        self.assertEqual(self.pick_cfg(), "side-project")
-
-    def test_cap_override_blocks_a_project_the_config_allows(self):
-        self.set_ov(lambda d: d.setdefault("projects", {}).setdefault("my-app", {}).update(weekly_cap={"claude": 30}))
-        self.assertEqual(self.pick_cfg(), "my-api")
+    def test_order_and_caps_left_in_the_overrides_do_not_change_the_pick(self):
+        # They live in config.json now (tests/test_config_reload.py covers the pick following it).
+        self.set_ov(lambda d: (d.update(order=["side-project", "my-api", "my-app"], primary_cap={"claude": 0}),
+                               d.setdefault("projects", {}).setdefault("my-app", {}).update(weekly_cap={"claude": 30})))
+        self.assertEqual(self.pick_cfg(), "my-app")
 
     def run_once_unit(self, **ov):
         engine = helpers.FakeEngine(TRUE, limits=self.limits)

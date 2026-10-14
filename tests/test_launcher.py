@@ -37,7 +37,8 @@ class LauncherTest(unittest.TestCase):
             return 0, ""
 
         self.ap.tmux = tmux
-        self.ap.loop_pids = lambda config: []
+        self.ap.loop_pids = lambda engine: []
+        helpers.write_config(self.tmp)  # both engines enabled
 
     def commands(self, verb):
         return [c for c in self.calls if c[0] == verb]
@@ -51,10 +52,11 @@ class LauncherTest(unittest.TestCase):
         self.ap.start_loops()
         new_session = self.commands("new-session")[0]
         self.assertIn("codex", new_session)
-        self.assertTrue(new_session[-1].endswith("autopilot.py run"))
+        self.assertTrue(new_session[-1].endswith("autopilot.py --engine codex run"))
         claude = self.commands("new-window")[0]
         self.assertIn("claude", claude)
-        self.assertIn(f"--config {self.ap.HOME / 'claude.toml'} run", claude[-1])
+        self.assertTrue(claude[-1].endswith("autopilot.py --engine claude run"))
+        self.assertNotIn("--config", claude[-1])
         self.assertTrue(any(c[:2] == ("set-option", "-t") and "remain-on-exit" in c for c in self.calls))
 
     def test_start_skips_a_loop_that_is_already_running(self):
@@ -73,7 +75,7 @@ class LauncherTest(unittest.TestCase):
 
     def test_start_does_not_duplicate_a_loop_started_the_old_way(self):
         self.windows = None
-        self.ap.loop_pids = lambda config: [4242] if config is None else []
+        self.ap.loop_pids = lambda engine: [4242] if engine == "codex" else []
         self.ap.start_loops()
         launched = self.loop_launches()
         self.assertEqual(len(launched), 1)
@@ -101,7 +103,7 @@ class LauncherTest(unittest.TestCase):
 
     def test_logs_window_needs_no_running_session(self):
         self.windows = None
-        self.ap.loop_pids = lambda config: [4242]  # both loops running outside tmux
+        self.ap.loop_pids = lambda engine: [4242]  # both loops running outside tmux
         self.ap.start_loops()
         session = self.commands("new-session")
         self.assertEqual(len(session), 1)
@@ -124,8 +126,8 @@ class LauncherTest(unittest.TestCase):
         self.assertIsNone(self.ap.running_pid("codex"))
 
     def test_loop_command_carries_turno_home(self):
-        for config in (None, self.ap.HOME / "claude.toml"):
-            cmd = self.ap.loop_command(config)
+        for engine in ("codex", "claude"):
+            cmd = self.ap.loop_command(engine)
             self.assertTrue(cmd.startswith(f"TURNO_HOME={self.ap.shlex.quote(str(self.ap.HOME))} python3 "))
             self.assertTrue(cmd.endswith(" run"))
 
@@ -148,7 +150,7 @@ class LauncherTest(unittest.TestCase):
     def test_stop_only_codex_signals_only_codex_pids(self):
         killed = []
         self.ap.running_pid = lambda name: None if killed else {"codex": 111, "claude": 222}[name]
-        self.ap.loop_pids = lambda config: [] if killed else ([333] if config is None else [444])
+        self.ap.loop_pids = lambda engine: [] if killed else ([333] if engine == "codex" else [444])
         with mock.patch("os.kill", lambda pid, sig: killed.append(pid)), mock.patch("time.sleep"):
             result = self.ap.stop_loops(["codex"])
         self.assertEqual(sorted(killed), [111, 333])
@@ -163,12 +165,11 @@ class LauncherTest(unittest.TestCase):
 
     def test_matches_loop_command_lines(self):
         script = str(self.ap.BASE / "autopilot.py")
-        claude = str(self.ap.HOME / "claude.toml")
-        self.assertTrue(self.ap.is_loop(["python3", script, "run"], None))
-        self.assertFalse(self.ap.is_loop(["python3", script, "run"], claude))
-        self.assertTrue(self.ap.is_loop(["python3", script, "--config", "claude.toml", "run"], claude))
-        self.assertFalse(self.ap.is_loop(["python3", script, "status"], None))
-        self.assertFalse(self.ap.is_loop(["tmux", "new", "-s", "autopilot", f"python3 {script} run"], None))
+        self.assertTrue(self.ap.is_loop(["python3", script, "run"], "codex"))
+        self.assertFalse(self.ap.is_loop(["python3", script, "run"], "claude"))
+        self.assertTrue(self.ap.is_loop(["python3", script, "--config", "claude.toml", "run"], "claude"))
+        self.assertFalse(self.ap.is_loop(["python3", script, "status"], "codex"))
+        self.assertFalse(self.ap.is_loop(["tmux", "new", "-s", "autopilot", f"python3 {script} run"], "codex"))
 
 
 if __name__ == "__main__":

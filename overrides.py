@@ -83,30 +83,15 @@ def _dict(value):
 
 
 def apply(cfg, engine_name, ov):
-    """A copy of `cfg` with the order, caps and a `paused` flag per project applied. Never raises."""
+    """A copy of `cfg` with a `paused` flag on each project. Never raises.
+
+    Order and caps come from `config.json` now: an `order`, `weekly_cap` or `primary_cap` still in
+    the overrides file is ignored. `engine_name` is kept for the callers.
+    """
     out = copy.deepcopy(cfg)
-    ov = _dict(ov)
-    projects = out.get("project") or []
-    order = ov.get("order")
-    if isinstance(order, list):
-        rank = {}
-        for name in order:
-            if isinstance(name, str) and name not in rank:
-                rank[name] = len(rank)
-        listed = sorted((p for p in projects if p.get("name") in rank), key=lambda p: rank[p["name"]])
-        rest = [p for p in projects if p.get("name") not in rank]
-        projects = listed + rest
-    per_project = _dict(ov.get("projects"))
-    for p in projects:
-        mine = _dict(per_project.get(p.get("name")))
-        p["paused"] = mine.get("paused") is True
-        cap = _dict(mine.get("weekly_cap")).get(engine_name)
-        if valid_cap(cap):
-            p["weekly_cap"] = cap
-    out["project"] = projects
-    primary = _dict(ov.get("primary_cap")).get(engine_name)
-    if valid_cap(primary):
-        out.setdefault("defaults", {})["primary_cap"] = primary
+    per_project = _dict(_dict(ov).get("projects"))
+    for p in out.get("project") or []:
+        p["paused"] = _dict(per_project.get(p.get("name"))).get("paused") is True
     return out
 
 

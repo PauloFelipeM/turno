@@ -153,10 +153,12 @@ class PanelTest(unittest.TestCase):
             order=["side-project", "my-app"], primary_cap={"claude": 70},
             projects={"my-api": {"weekly_cap": {"codex": 55}}}))
         s = self.panel.settings(self.home)
-        self.assertEqual(s["order"], ["side-project", "my-app", "my-api"])
-        self.assertEqual(s["engines"]["codex"]["weekly_cap"]["my-api"], 55)
+        # The loops no longer apply an order or caps from the overrides, so the panel does not show
+        # them as effective either. The settings move to config.json in the config API task.
+        self.assertEqual(s["order"], ["my-app", "my-api", "side-project"])
+        self.assertEqual(s["engines"]["codex"]["weekly_cap"]["my-api"], 90)
         self.assertEqual(s["engines"]["claude"]["weekly_cap"]["my-api"], 90)
-        self.assertEqual((s["engines"]["claude"]["primary_cap"], s["engines"]["codex"]["primary_cap"]), (70, 100))
+        self.assertEqual((s["engines"]["claude"]["primary_cap"], s["engines"]["codex"]["primary_cap"]), (100, 100))
         self.assertEqual(s["overridden"], {"order": True, "caps": True})
 
     def test_live_only_while_the_loop_runs(self):

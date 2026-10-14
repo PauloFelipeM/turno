@@ -250,8 +250,10 @@ class ControlApiTest(unittest.TestCase):
         self.assertEqual(ov["projects"]["side-project"]["weekly_cap"], {"codex": 40, "claude": 80.5})
         self.assertEqual(ov["primary_cap"], {"codex": 90})
         s = self.call("GET", "/api/settings")[1]
-        self.assertEqual(s["order"], ["side-project", "my-app", "my-api"])
-        self.assertEqual(s["engines"]["codex"]["weekly_cap"]["side-project"], 40)
+        # Still written to the overrides, which the loops no longer apply: the effective values are
+        # the config's until this route writes to config.json (the config API task).
+        self.assertEqual(s["order"], ["my-app", "my-api", "side-project"])
+        self.assertEqual(s["engines"]["codex"]["weekly_cap"]["side-project"], 90)
         self.assertEqual(s["overridden"], {"order": True, "caps": True})
         # merge: a second PUT keeps the rest
         self.call("PUT", "/api/settings", {"weekly_cap": {"side-project": {"codex": 10}, "my-api": {"claude": 5}}})

@@ -14,8 +14,8 @@ The project waits for the answer until the deadline; without an answer the defau
 Meanwhile the other projects keep going.
 
 Usage:
-  autopilot.py start                      start both loops (Codex and Claude) in the tmux session "autopilot"
-  autopilot.py stop                       stop both loops (like a Ctrl+C in each)
+  autopilot.py start                      start the loops of the enabled engines in the tmux session "autopilot"
+  autopilot.py stop                       stop the loops (like a Ctrl+C in each)
   autopilot.py run                        a single loop, the Codex one (Ctrl+C stops; running again resumes)
   autopilot.py status                     each project's state and the current window usage
   autopilot.py check                      what the loop would do now (reads the quota; runs nothing)
@@ -24,7 +24,7 @@ Usage:
   autopilot.py answer NAME ID OPTION      answer a decision from the terminal
   autopilot.py test-notify                send a test notification
   autopilot.py serve [--port 8765]        the panel at http://localhost:8765 (follows and controls the loops)
-  autopilot.py --config claude.toml run   the Claude instance (see README)
+  autopilot.py --engine claude run        the Claude loop; --engine works with every command (default: codex)
 """
 
 import argparse
@@ -43,6 +43,7 @@ import urllib.request
 from pathlib import Path
 
 import backlog
+import config
 import coord
 import engines
 import history
@@ -52,7 +53,7 @@ import schedule
 
 BASE = Path(__file__).resolve().parent  # code: prompts, roles, interface
 HOME = paths.home()  # data: config, state, logs, runs
-CONFIG = HOME / "projects.toml"
+ENGINE = "codex"  # the engine this process works for; `configure` sets it and the file names below
 # The ntfy topic is a secret: it lives here, outside git, and both instances use it.
 SECRETS = HOME / "secrets.toml"
 STATE = HOME / "state.json"
@@ -78,49 +79,91 @@ engines.log = log
 from engines import window  # noqa: E402  (used to pick the project and in status)
 
 
-def resolve_config(config_path):
-    """A relative path is resolved from the data folder; no path means projects.toml."""
-    if not config_path:
-        return HOME / "projects.toml"
-    path = Path(config_path).expanduser()
-    return path if path.is_absolute() else HOME / path
+def engine_of(config_path):
+    """The engine a deprecated `--config <file>` stands for.
 
-
-def configure(config_path=None):
-    """Points CONFIG, STATE, LOG and RUNS at the instance of the config file.
-
-    Without [instance] name the usual names apply; with name = "claude", state-claude.json,
-    autopilot-claude.log and runs-claude/. All inside the data folder.
+    A file named `claude.toml`, or a readable TOML whose `[instance] name` is `claude`, is the Claude
+    instance; anything else was the Codex one. A relative path is resolved from the data folder.
     """
-    global CONFIG, STATE, LOG, RUNS, HISTORY
+    if not config_path:
+        return "codex"
+    path = Path(config_path).expanduser()
+    if path.name == "claude.toml":
+        return "claude"
+    try:
+        with (path if path.is_absolute() else HOME / path).open("rb") as f:
+            instance = tomllib.load(f).get("instance")
+    except (OSError, ValueError):
+        return "codex"
+    return "claude" if isinstance(instance, dict) and instance.get("name") == "claude" else "codex"
+
+
+def instance_suffix(engine):
+    """Codex keeps the plain file names (`state.json`, `autopilot.log`, `runs`); the others get `-<engine>`."""
+    return "" if engine == "codex" else f"-{engine}"
+
+
+def configure(engine=None, config_path=None):
+    """Sets ENGINE and points STATE, LOG, RUNS and HISTORY at that engine's files, all in the data folder.
+
+    `engine` wins; without it the engine comes from the deprecated `config_path` (see `engine_of`).
+    The file names are the ones the instances always had, so the existing state keeps working.
+    """
+    global ENGINE, STATE, LOG, RUNS, HISTORY
     HOME.mkdir(parents=True, exist_ok=True)
-    CONFIG = resolve_config(config_path)
-    cfg = load_config()
-    name = (cfg.get("instance") or {}).get("name")
-    suffix = f"-{name}" if name else ""
+    ENGINE = engine or engine_of(config_path)
+    suffix = instance_suffix(ENGINE)
     STATE = HOME / f"state{suffix}.json"
     LOG = HOME / f"autopilot{suffix}.log"
     RUNS = HOME / f"runs{suffix}"
-    HISTORY = HOME / f"history-{(cfg.get('engine') or {}).get('kind', 'codex')}.jsonl"
+    HISTORY = HOME / f"history-{ENGINE}.jsonl"
 
 
 def load_config():
-    with CONFIG.open("rb") as f:
-        cfg = tomllib.load(f)
+    """This engine's view of `config.json`, in the shape the loop consumes, plus the ntfy topic."""
+    cfg = config.for_engine(config.load(HOME), ENGINE)
     if SECRETS.exists():
         with SECRETS.open("rb") as f:
             cfg.setdefault("notify", {}).update(tomllib.load(f).get("notify") or {})
     return cfg
 
 
-def load_state(cfg):
-    state = json.loads(STATE.read_text()) if STATE.exists() else {}
+CONFIG_SEEN = None  # mtime of config.json when the config was last loaded for a turn; nap compares against it
+CONFIG_WARNED = None  # mtime of the config.json whose problem is already in the log
+
+
+def config_mtime():
+    try:
+        return (HOME / config.FILE).stat().st_mtime_ns
+    except OSError:
+        return 0
+
+
+def current_config(last):
+    """The configuration for this turn, re-read from the files: (cfg, whether it differs from `last`).
+
+    A `config.json` (or `secrets.toml`) that cannot be read or is invalid never stops a loop: `last`,
+    the last good configuration, stays in use and the problem is logged once per change of the file.
+    Notes the file's mtime for `nap`.
+    """
+    global CONFIG_SEEN, CONFIG_WARNED
+    # The mtime is taken before the read, as in read_overrides: a write landing in between wakes the
+    # next nap (one spare turn) instead of being missed.
+    CONFIG_SEEN = config_mtime()
+    try:
+        cfg = load_config()
+    except (config.ConfigError, OSError, tomllib.TOMLDecodeError) as e:
+        if CONFIG_WARNED != CONFIG_SEEN:
+            CONFIG_WARNED = CONFIG_SEEN
+            name = "secrets.toml" if isinstance(e, tomllib.TOMLDecodeError) else config.FILE
+            log(f"{name} is invalid; keeping the last good configuration: {e}")
+        return last, False
+    return cfg, cfg != last
+
+
+def ensure_state(cfg, state):
+    """Gives every project of `cfg` its state entry; an existing entry only gains the keys it lacks."""
     d = cfg["defaults"]
-    # ntfy `since` starts now: answers older than the first run do not count.
-    state.setdefault("_notify", {"since": str(int(time.time()))})
-    state.setdefault("_window", {"active": False})
-    # Answers typed in the main topic: likewise, only those arriving from now on count.
-    state["_notify"].setdefault("since_typed", str(int(time.time())))
     for p in cfg["project"]:
         s = state.setdefault(p["name"], {})
         s.setdefault("status", "active")  # active | idle | blocked | waiting
@@ -136,6 +179,16 @@ def load_state(cfg):
         s.setdefault("notes_sent", [])
         s.setdefault("unit_id", None)
         s.setdefault("run", None)
+
+
+def load_state(cfg):
+    state = json.loads(STATE.read_text()) if STATE.exists() else {}
+    # ntfy `since` starts now: answers older than the first run do not count.
+    state.setdefault("_notify", {"since": str(int(time.time()))})
+    state.setdefault("_window", {"active": False})
+    # Answers typed in the main topic: likewise, only those arriving from now on count.
+    state["_notify"].setdefault("since_typed", str(int(time.time())))
+    ensure_state(cfg, state)
     return state
 
 
@@ -434,17 +487,18 @@ def read_overrides():
 
 
 def nap(cfg, state, secs):
-    """Sleeps in 5-second steps; wakes early when the overrides file changes or a waiting project is released.
+    """Sleeps in 5-second steps; wakes early when the overrides or the config file changes or a waiting project is released.
 
-    "Changes" means since `run_once` last read it, not since the nap started: a request written in
-    between is not lost. Answers are read once a minute, and right away when the overrides change.
+    "Changes" means since the turn last read the file, not since the nap started: a request written
+    in between is not lost. Answers are read once a minute, and right away when a file changes.
     """
     end = time.time() + secs
     seen = overrides_mtime() if OVERRIDES_SEEN is None else OVERRIDES_SEEN
+    config_seen = config_mtime() if CONFIG_SEEN is None else CONFIG_SEEN
     last = time.time()
     while (left := end - time.time()) > 0:
         time.sleep(min(5, left))
-        changed = overrides_mtime() != seen
+        changed = overrides_mtime() != seen or config_mtime() != config_seen
         if not changed and time.time() - last < 60:
             continue
         last = time.time()
@@ -628,7 +682,7 @@ def wait_until(proc, deadline):
 
 
 def set_phase(state, phase, project=None, until=None):
-    """What the loop is doing, for the panel: running, sleeping or outside_window."""
+    """What the loop is doing, for the panel: running, sleeping, outside_window or disabled."""
     state["_loop"] = {"phase": phase, "project": project, "until": until}
 
 
@@ -916,7 +970,7 @@ def window_notice(cfg, engine, state, active):
     # On closing the last reading applies: outside the window the quota is not queried.
     used, _ = window(engine.limits(state, max_age=0 if active else float("inf")), "secondary")
     if active:
-        cap = max(p["weekly_cap"] for p in cfg["project"])
+        cap = max((p["weekly_cap"] for p in cfg["project"]), default=100)  # the list may be empty now
         log(f"window open; weekly quota at {used:.0f}%")
         ntfy(cfg, f"{engine.label}: começou o fim de semana", f"Cota semanal em {used:.0f}%; teto {cap}%.",
              priority=2, tags=["arrow_forward"])
@@ -1020,6 +1074,31 @@ def run_project(cfg, engine, state, project, limits, win):
     return wait
 
 
+def loop_turn(cfg, engine, state):
+    """One turn of `cmd_run`'s loop, with the config re-read first.
+
+    Returns (the config now in use, seconds to sleep or None when there is no more work).
+    """
+    cfg, changed = current_config(cfg)
+    if changed:
+        ensure_state(cfg, state)  # a project added in the panel gets its entry; a removed one keeps its own
+        engine.cfg = cfg  # the engine reads the model and effort from here: they apply to the next unit
+    win = schedule.from_config(cfg)
+    if not cfg.get("enabled", True):
+        # A disabled engine starts nothing and resumes nothing; only the decisions keep flowing.
+        read_overrides()  # only to note the file's mtime: otherwise an old one would wake every nap
+        process_decisions(cfg, state)
+        set_phase(state, "disabled")
+        save_state(state)
+        return cfg, 60
+    wait = run_once(cfg, engine, state, win)
+    if wait is None:
+        return cfg, None
+    set_phase(state, idle_phase(win, datetime.datetime.now()), until=time.time() + wait)
+    save_state(state)
+    return cfg, wait
+
+
 def cmd_run(args):
     cfg = load_config()
     engine = engines.make_engine(cfg)
@@ -1048,11 +1127,9 @@ def cmd_run(args):
              f"{name} tem unidade aberta nos dois autopilots. Veja os logs.", priority=4, tags=["warning"])
     save_state(state)
     while True:
-        wait = run_once(cfg, engine, state, win)
+        cfg, wait = loop_turn(cfg, engine, state)
         if wait is None:
             return
-        set_phase(state, idle_phase(win, datetime.datetime.now()), until=time.time() + wait)
-        save_state(state)
         nap(cfg, state, wait)
 
 
@@ -1100,8 +1177,12 @@ def status_lines(cfg, engine, state, limits, win, now):
 # --- starting and stopping both loops ----------------------------------------------------------
 
 TMUX_SESSION = "autopilot"
-# (tmux window and engine name, config): the Codex one is the default.
-LOOPS = (("codex", None), ("claude", HOME / "claude.toml"))
+
+
+def loops():
+    """The engines enabled in the config, in `config.ENGINES` order: the loops `start` launches."""
+    engines_cfg = config.load(HOME)["engines"]
+    return [name for name in config.ENGINES if (engines_cfg.get(name) or {}).get("enabled")]
 
 
 def instance_lock(name):
@@ -1126,25 +1207,42 @@ def running_pid(name):
         return 0  # running, but the pid is not written yet
 
 
-def is_loop(argv, config):
-    """Whether the command line is a loop (`autopilot.py [--config X] run`) of this config."""
+def _flag(args, name):
+    """The value of `--name value` or `--name=value` in a command line; None when absent."""
+    for i, arg in enumerate(args):
+        if arg == name:
+            return args[i + 1] if i + 1 < len(args) else None
+        if arg.startswith(name + "="):
+            return arg[len(name) + 1:]
+    return None
+
+
+def is_loop(argv, engine):
+    """Whether the command line is the loop of `engine`.
+
+    Both today's form (`autopilot.py --engine <engine> run`) and the old ones count: no flag is the
+    Codex loop, and `--config <path>` is the Claude loop when the file is named `claude.toml` and
+    the Codex one otherwise.
+    """
     if len(argv) < 3 or not argv[1].endswith("autopilot.py") or argv[-1] != "run":
         return False
-    given = argv[argv.index("--config") + 1] if "--config" in argv[:-1] else None
-    if config is None:
-        return given is None
-    return given is not None and Path(given).name == Path(config).name
+    flags = argv[2:-1]
+    given = _flag(flags, "--engine")
+    if given is None:
+        old = _flag(flags, "--config")
+        given = "claude" if old is not None and Path(old).name == "claude.toml" else "codex"
+    return given == engine
 
 
-def loop_pids(config):
-    """Loops of this config already running, including those started by hand the old way."""
+def loop_pids(engine):
+    """Loops of this engine already running, including those started the old way (`--config`)."""
     pids = []
     for proc in Path("/proc").glob("[0-9]*"):
         try:
             argv = (proc / "cmdline").read_bytes().decode(errors="replace").split("\0")[:-1]
         except OSError:
             continue
-        if int(proc.name) != os.getpid() and is_loop(argv, config):
+        if int(proc.name) != os.getpid() and is_loop(argv, engine):
             pids.append(int(proc.name))
     return pids
 
@@ -1154,22 +1252,22 @@ def tmux(*args):
     return r.returncode, r.stdout
 
 
-def loop_command(config):
+def loop_command(engine):
     script = shlex.quote(str(Path(__file__).resolve()))
-    return f"TURNO_HOME={shlex.quote(str(HOME))} python3 {script}" + (f" --config {shlex.quote(str(config))}" if config else "") + " run"
+    return f"TURNO_HOME={shlex.quote(str(HOME))} python3 {script} --engine {engine} run"
 
 
-def log_file(name, config):
-    return HOME / ("autopilot.log" if config is None else f"autopilot-{name}.log")
+def log_file(engine):
+    return HOME / f"autopilot{instance_suffix(engine)}.log"
 
 
 def open_logs_window(has_session, windows):
     """The "logs" window: both logs live, one above the other. It is the one `tmux attach` shows."""
     target = f"{TMUX_SESSION}:logs"
     if "logs" not in windows:
-        (top_name, top_cfg), (bottom_name, bottom_cfg) = LOOPS
-        top = f"tail -n 40 -F {shlex.quote(str(log_file(top_name, top_cfg)))}"
-        bottom = f"tail -n 40 -F {shlex.quote(str(log_file(bottom_name, bottom_cfg)))}"
+        top_name, bottom_name = config.ENGINES  # both logs, enabled or not
+        top = f"tail -n 40 -F {shlex.quote(str(log_file(top_name)))}"
+        bottom = f"tail -n 40 -F {shlex.quote(str(log_file(bottom_name)))}"
         if has_session:
             tmux("new-window", "-d", "-t", TMUX_SESSION, "-n", "logs", top)
         else:
@@ -1185,22 +1283,28 @@ def open_logs_window(has_session, windows):
 def start_loops(names=None):
     """The loops (all, or those in `names`) in a tmux session, one window each; never duplicates a running one.
 
-    Returns {name: "started" | "already running"}."""
+    An engine that is not enabled in the config is skipped. Returns
+    {name: "started" | "already running" | "disabled"}."""
     result = {}
+    enabled = loops()
     has_session = tmux("has-session", "-t", TMUX_SESSION)[0] == 0
     windows = {}
     if has_session:
         for line in tmux("list-windows", "-t", TMUX_SESSION, "-F", "#{window_name} #{pane_dead}")[1].splitlines():
             name, _, dead = line.partition(" ")
             windows[name] = dead
-    for name, config in LOOPS:
+    for name in config.ENGINES:
         if names is not None and name not in names:
             continue
-        if running_pid(name) is not None or loop_pids(config):
+        if name not in enabled:
+            print(f"{name}: disabled")
+            result[name] = "disabled"
+            continue
+        if running_pid(name) is not None or loop_pids(name):
             print(f"{name}: already running")
             result[name] = "already running"
             continue
-        cmd = loop_command(config)
+        cmd = loop_command(name)
         if not has_session:
             tmux("new-session", "-d", "-s", TMUX_SESSION, "-n", name, cmd)
             # The window stays open when the loop ends: the last message can still be read.
@@ -1219,12 +1323,13 @@ def start_loops(names=None):
 def stop_loops(names=None):
     """Ctrl+C on the loops (all, or those in `names`): each ends the running unit and saves its state.
 
-    Returns {name: "stopped" | "not running" | "still stopping"}."""
+    Every known engine is considered, not only the enabled ones: a disabled engine may still have a
+    loop running. Returns {name: "stopped" | "not running" | "still stopping"}."""
     result = {}
-    for name, config in LOOPS:
+    for name in config.ENGINES:
         if names is not None and name not in names:
             continue
-        pids = {pid for pid in [running_pid(name), *loop_pids(config)] if pid}
+        pids = {pid for pid in [running_pid(name), *loop_pids(name)] if pid}
         if not pids:
             print(f"{name}: not running")
             result[name] = "not running"
@@ -1235,7 +1340,7 @@ def stop_loops(names=None):
             except ProcessLookupError:
                 pass
         for _ in range(60):
-            if running_pid(name) is None and not loop_pids(config):
+            if running_pid(name) is None and not loop_pids(name):
                 break
             time.sleep(1)
         if running_pid(name) is None:
@@ -1248,7 +1353,10 @@ def stop_loops(names=None):
 
 
 def cmd_start(args):
-    start_loops()
+    try:
+        start_loops()
+    except config.ConfigError as e:
+        sys.exit(f"{config.FILE} is invalid; nothing started: {e}")
     print(f"follow with: tmux attach -t {TMUX_SESSION}  (Ctrl+B then N switches window)")
 
 
@@ -1348,7 +1456,8 @@ def cmd_serve(args):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--config", help="instance config (default: projects.toml)")
+    parser.add_argument("--engine", choices=config.ENGINES, help="the engine to work for (default: codex)")
+    parser.add_argument("--config", help="deprecated: use --engine")
     sub = parser.add_subparsers(dest="cmd", required=True)
     sub.add_parser("run").set_defaults(func=cmd_run)
     sub.add_parser("status").set_defaults(func=cmd_status)
@@ -1370,7 +1479,7 @@ def main():
     serve.set_defaults(func=cmd_serve)
     args = parser.parse_args()
     if args.cmd != "serve":  # the panel reads every instance; it does not pick one
-        configure(args.config)
+        configure(args.engine, args.config)
     try:
         args.func(args)
     except Exception:

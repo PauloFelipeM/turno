@@ -1,5 +1,6 @@
 """Loads the autopilot with every side effect (state, log, shared, ntfy) in a temporary folder."""
 
+import json
 import os
 import subprocess
 import sys
@@ -81,8 +82,39 @@ class FakeEngine:
 DEFAULTS = '[defaults]\norchestrator_model = "m"\norchestrator_effort = "medium"\nprimary_cap = 100\n'
 
 
+def write_config(home, projects=(), enabled=("codex", "claude"), edit=None):
+    """Writes a valid `config.json`: `projects` are its entries, `enabled` the engines switched on.
+
+    `edit(data)` may change anything else before the file is written. The file's mtime always moves
+    forward, even for two writes within the same clock tick.
+    """
+    import config
+    data = config.empty()
+    data["projects"] = [dict(p) for p in projects]
+    for name in enabled:
+        data["engines"][name]["enabled"] = True
+    if edit:
+        edit(data)
+    write_config_text(home, json.dumps(data, indent=2))
+    return data
+
+
+def write_config_text(home, text):
+    """Puts `text` in `config.json` as it is (valid or not), moving the mtime forward."""
+    import config
+    path = Path(home) / config.FILE
+    before = path.stat().st_mtime_ns if path.exists() else 0
+    path.write_text(text)
+    if path.stat().st_mtime_ns <= before:
+        os.utime(path, ns=(before + 1_000_000, before + 1_000_000))
+
+
 def make_home(home, topic="segredo-xyz"):
-    """Sample data folder: Codex and Claude, three projects, and the ntfy topic in both places."""
+    """Sample data folder: Codex and Claude, three projects, and the ntfy topic in both places.
+
+    It writes `config.json` (what the loops read) and the equivalent TOML files, which the panel
+    still reads until it moves to `config.json`.
+    """
     home = Path(home)
     projects = {}
     for name in ("my-app", "my-api", "side-project"):
@@ -92,4 +124,11 @@ def make_home(home, topic="segredo-xyz"):
     (home / "projects.toml").write_text(DEFAULTS + f'\n[notify]\ntopic = "{topic}"\n' + body)
     (home / "claude.toml").write_text('[instance]\nname = "claude"\n\n[engine]\nkind = "claude"\n\n' + DEFAULTS + body)
     (home / "secrets.toml").write_text(f'[notify]\ntopic = "{topic}"\n')
+
+    def models(data):
+        for e in data["engines"].values():
+            e["orchestrator_model"] = "m"
+
+    write_config(home, [{"name": n, "path": str(p), "weekly_cap": {"codex": 90, "claude": 90}}
+                        for n, p in projects.items()], edit=models)
     return projects
