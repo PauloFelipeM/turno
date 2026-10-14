@@ -74,7 +74,7 @@ def _text(v):
 
 NAME = re.compile(r"[A-Za-z0-9_-]+")
 # Files in shared/ that a project or group lock (`shared/<name>.lock`) would collide with.
-RESERVED = ("claims", "config", "decisions", "overrides", "notify", "notes")
+RESERVED = ("claims", "config", "decisions", "overrides", "notify", "notes", "setup")
 
 
 def _reserved(name):
