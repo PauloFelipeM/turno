@@ -98,6 +98,10 @@ An invalid file never stops a loop: it keeps the last good configuration and log
 A project's name is never changed after it is created: state, claims, notes and history use it.
 `config.example.json` is a complete example.
 
+turno never switches a role's model by itself: when a role's model reaches its own usage limit
+(Fable, for example), the unit ends `blocked` and says which role and model; change the model in
+the settings screen or wait for the reset.
+
 A disabled engine starts nothing: its loop, if running, keeps the decisions flowing, passes its open
 units on to the other engine and sleeps. A loop does not end by itself: with every project `idle` it
 tells you once and sleeps until you reset a project or change the config. The engine contract, for
