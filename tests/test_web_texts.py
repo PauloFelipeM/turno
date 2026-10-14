@@ -1,5 +1,6 @@
 """The interface texts the control fixes depend on (plain text checks: there is no JS runtime in the tests)."""
 
+import json
 import re
 import unittest
 from pathlib import Path
@@ -82,6 +83,90 @@ class WebTextsTest(unittest.TestCase):
         self.assertIn('h("datalist"', self.app)
         self.assertIn("body.roles = roles", self.app)  # only what changed is sent
         self.assertNotIn("innerHTML", self.app.replace("// Builds elements without innerHTML", ""))
+
+
+SPACE = re.compile(r"(?:\s+|//[^\n]*)*")
+STRING = re.compile(r'"((?:[^"\\]|\\.)*)"')
+NAME = re.compile(r"[A-Za-z_$][\w$]*")
+
+
+def js_object(text):
+    """The object literal after `export default` as a dict (string values and nested objects only)."""
+    def skip(p):
+        return SPACE.match(text, p).end()
+
+    def string(p):
+        m = STRING.match(text, p)
+        if not m:
+            raise ValueError(f"string expected at {p}")
+        return json.loads(f'"{m.group(1)}"'), m.end()
+
+    def obj(p):
+        if text[p] != "{":
+            raise ValueError(f"object expected at {p}")
+        out, p = {}, skip(p + 1)
+        while text[p] != "}":
+            if text[p] == '"':
+                key, p = string(p)
+            else:
+                m = NAME.match(text, p)
+                if not m:
+                    raise ValueError(f"key expected at {p}")
+                key, p = m.group(0), m.end()
+            p = skip(p)
+            if text[p] != ":":
+                raise ValueError(f"':' expected at {p}")
+            p = skip(p + 1)
+            out[key], p = obj(p) if text[p] == "{" else string(p)
+            p = skip(p)
+            if text[p] == ",":
+                p = skip(p + 1)
+        return out, p + 1
+
+    return obj(skip(text.index("export default") + len("export default")))[0]
+
+
+def leaves(d, prefix=""):
+    """{"a.b": "text", ...} for every string in a nested dict."""
+    out = {}
+    for k, v in d.items():
+        out.update(leaves(v, f"{prefix}{k}.") if isinstance(v, dict) else {f"{prefix}{k}": v})
+    return out
+
+
+class LanguagesTest(unittest.TestCase):
+    def bundle(self, code):
+        return leaves(js_object((WEB / "i18n" / f"{code}.js").read_text(encoding="utf-8")))
+
+    def test_english_has_exactly_the_keys_and_fields_of_portuguese(self):
+        pt, en = self.bundle("pt-BR"), self.bundle("en")
+        self.assertEqual(set(en), set(pt))
+        for key, text in pt.items():
+            self.assertEqual(set(re.findall(r"\{(\w+)\}", en[key])), set(re.findall(r"\{(\w+)\}", text)), key)
+
+    def test_every_language_of_the_config_has_a_bundle_and_a_name(self):
+        import config
+        app = (WEB / "app.js").read_text(encoding="utf-8")
+        self.assertIn(f"const LANGS = {json.dumps(list(config.LANGUAGES))};", app)
+        for code in config.LANGUAGES:
+            names = self.bundle(code)
+            for other in config.LANGUAGES:
+                self.assertIn(f"settings.languages.{other}", names, (code, other))
+
+    def test_the_page_loads_the_configured_language(self):
+        app = (WEB / "app.js").read_text(encoding="utf-8")
+        self.assertNotIn('import T from', app)  # no fixed bundle
+        self.assertIn("await import(`./i18n/${code}.js`)", app)
+        self.assertIn('LANGS.includes(lang) ? lang : "pt-BR"', app)  # unknown language: pt-BR
+        self.assertNotIn('toLocaleString("pt-BR"', app)  # dates and numbers follow the language
+        self.assertIn('"/api/settings/general"', app)
+        self.assertIn('tab("general", t("settings.general"))', app)
+        self.assertIn("settings.warnings.${w}", app)
+
+    def test_the_topic_never_appears_in_the_page(self):
+        code = [line for line in (WEB / "app.js").read_text(encoding="utf-8").splitlines()
+                if not line.lstrip().startswith("//")]
+        self.assertFalse([line for line in code if re.search(r"\btopic\b", line)])  # settings.topicHint is only a text
 
 
 if __name__ == "__main__":

@@ -1,5 +1,9 @@
 // turno panel: draws what the API returns. All data logic lives in the server.
-import T from "./i18n/pt-BR.js";
+
+// The interface texts of the configured language (web/i18n/<code>.js), loaded by setLanguage.
+const LANGS = ["pt-BR", "en"];
+let T = {};
+let LOCALE = "pt-BR"; // dates and numbers follow the language too
 
 const $ = (sel) => document.querySelector(sel);
 const PAGE = 30;
@@ -10,6 +14,7 @@ const view = {
   attentionSig: null, // what the attention strip shows now, to redraw it only when that changes
   draft: null, // the settings dialog's working copy (see buildDraft)
   detailSetup: null, // setup phase of the project panel on screen, to reload it when the loop moves it
+  lang: null, // the language whose texts are loaded
 };
 
 function t(path, vars = {}) {
@@ -38,9 +43,9 @@ function fill(el, ...kids) {
 }
 
 const engineName = (e) => T.engine[e] || e;
-const when = (ts) => (ts ? new Date(ts * 1000).toLocaleString("pt-BR", { weekday: "short", day: "2-digit", hour: "2-digit", minute: "2-digit" }) : "-");
-const clock = (iso) => (iso ? new Date(iso).toLocaleString("pt-BR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" }) : "-");
-const pct = (n) => `${Number(n || 0).toLocaleString("pt-BR", { maximumFractionDigits: 1 })}%`;
+const when = (ts) => (ts ? new Date(ts * 1000).toLocaleString(LOCALE, { weekday: "short", day: "2-digit", hour: "2-digit", minute: "2-digit" }) : "-");
+const clock = (iso) => (iso ? new Date(iso).toLocaleString(LOCALE, { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" }) : "-");
+const pct = (n) => `${Number(n || 0).toLocaleString(LOCALE, { maximumFractionDigits: 1 })}%`;
 const duration = (s) => (s >= 3600 ? `${Math.floor(s / 3600)} h ${Math.round((s % 3600) / 60)} min` : `${Math.max(1, Math.round(s / 60))} min`);
 
 async function getJSON(url) {
@@ -87,11 +92,12 @@ function toast(text, kind = "ok") {
 }
 
 // Runs an action with its button disabled until the server answers; errors become a toast.
+// okText may be a function: it is read after the action, so a text in a language just switched to.
 async function act(btn, fn, okText) {
   btn.disabled = true;
   try {
     await fn();
-    if (okText) toast(okText);
+    if (okText) toast(typeof okText === "function" ? okText() : okText);
     return true;
   } catch (e) {
     toast(e.message, "error");
@@ -381,9 +387,15 @@ async function loadDetail(name) {
       h("p", {}, h("b", {}, x.question)),
       x.context ? h("p", { class: "muted small" }, x.context) : null,
       h("ul", {}, x.options.map((o) => h("li", {}, `${o.id.toUpperCase()}. ${o.label}`, o.id === x.default ? ` (${t("project.default")})` : ""))),
-      h("p", { class: "muted small" }, x.deadline ? `${t("project.deadline", { when: when(x.deadline) })}. ` : "", t("project.answerByPhone")))),
+      h("p", { class: "muted small" }, x.deadline ? `${t("project.deadline", { when: when(x.deadline) })}. ` : "", answerWhere()))),
     messageForm(name),
     settings ? capsForm(name, settings) : null);
+}
+
+// Where a decision is answered: by phone only when ntfy is on and has a topic; the panel always works.
+function answerWhere() {
+  const n = (view.overview && view.overview.notify) || {};
+  return t(n.enabled && n.has_topic ? "project.answerByPhone" : "project.answerInPanel");
 }
 
 function messageForm(name) {
@@ -487,6 +499,16 @@ function setupPanel(name, su) {
       } }, t("setup.cancel"))) : null);
 }
 
+function generalDraft(cfg) {
+  const n = cfg.notify || {};
+  return {
+    language: cfg.language || "pt-BR",
+    enabled: n.enabled !== false,
+    server: n.server ?? "",
+    timeout: n.decision_timeout_hours == null ? "" : String(n.decision_timeout_hours),
+  };
+}
+
 function buildDraft(cfg) {
   const d = {
     section: "projects", cfg, confirmRemove: null, checks: {},
@@ -500,9 +522,11 @@ function buildDraft(cfg) {
     setupOpen: null, // project whose "Preparar com um agente" box is open
     setupGoal: "",
   };
+  d.gen = generalDraft(cfg);
   d.orig = [...d.order];
   d.origProj = clone(d.proj);
   d.origEng = clone(d.eng);
+  d.origGen = clone(d.gen);
   return d;
 }
 
@@ -524,6 +548,8 @@ function mergeDraft(cfg) {
   d.orig = [...old.orig.filter((n) => names.has(n)), ...d.orig.filter((n) => !old.orig.includes(n))];
   d.eng = old.eng;
   d.origEng = old.origEng;
+  d.gen = old.gen;
+  d.origGen = old.origGen;
   return d;
 }
 
@@ -597,6 +623,21 @@ function saveSteps() {
     }
     if (Object.keys(body).length) steps.push({ url: `/api/engines/${enc(k)}`, body, done: () => { d.origEng[k] = clone(cur); } });
   }
+  const g = d.gen, wg = d.origGen;
+  const general = {}, notify = {};
+  if (g.language !== wg.language) general.language = g.language;
+  if (g.enabled !== wg.enabled) notify.enabled = g.enabled;
+  if (g.server.trim() !== wg.server) {
+    if (!/^https?:\/\/\S+$/.test(g.server.trim())) return null;
+    notify.server = g.server.trim();
+  }
+  if (String(g.timeout).trim() !== wg.timeout) {
+    const hours = Number(g.timeout);
+    if (!String(g.timeout).trim() || !Number.isFinite(hours) || hours <= 0) return null;
+    notify.decision_timeout_hours = hours;
+  }
+  if (Object.keys(notify).length) general.notify = notify;
+  if (Object.keys(general).length) steps.push({ url: "/api/settings/general", body: general, done: () => { d.origGen = clone(g); } });
   return steps;
 }
 
@@ -612,7 +653,8 @@ async function saveSettings(steps) {
   view.draft.checks = d.checks;
   view.draft.setupOpen = d.setupOpen;
   view.draft.setupGoal = d.setupGoal;
-  if (view.filter) loadDetail(view.filter);
+  // A new language applies at once: the whole page, this dialog included, is drawn again in it.
+  if (!(await setLanguage(view.draft.cfg.language)) && view.filter) loadDetail(view.filter);
 }
 
 // Runs a settings request; on an error the working copy is redrawn as it stands (partial saves are kept).
@@ -732,7 +774,7 @@ function limitText(l) {
   return `${win(t("window5h"), l.primary)} · ${win(t("weekly"), l.secondary)}`;
 }
 
-// The quota check outcome: known server errors get a pt-BR text; others show the original as a technical detail.
+// The quota check outcome: known server errors get a text of their own; others show the original as a technical detail.
 function checkResult(k, res) {
   if (res.limits) return h("p", { class: "small", "data-check": k }, limitText(res.limits));
   const err = res.error || "";
@@ -795,24 +837,44 @@ function engineBlock(k) {
     res && !res.loading ? checkResult(k, res) : null);
 }
 
+// Settings → General: the owner's language and ntfy. The topic itself is never shown or sent.
+function generalBlock() {
+  const d = view.draft;
+  const g = d.gen;
+  const langs = d.cfg.languages || LANGS;
+  return h("section", { class: "engine-cfg" },
+    field(t("settings.language"), h("select", { "data-sf": "language", onchange: (ev) => { g.language = ev.target.value; } },
+      langs.map((code) => h("option", { value: code, selected: code === g.language }, t(`settings.languages.${code}`))))),
+    h("label", { class: "check" },
+      h("input", { type: "checkbox", checked: g.enabled, "data-sf": "notify-enabled", onchange: (ev) => { g.enabled = ev.target.checked; } }),
+      t("settings.notifyEnabled")),
+    field(t("settings.notifyServer"), textInput(g.server, (v) => { g.server = v; }, { "data-sf": "notify-server" }), "wide"),
+    h("div", { class: "cap-row" },
+      field(t("settings.decisionTimeout"), h("input", { type: "number", min: "0", step: "any", value: g.timeout, "data-sf": "notify-timeout",
+        oninput: (ev) => { g.timeout = ev.target.value; } }))),
+    (d.cfg.warnings || []).map((w) => h("p", { class: "error small", "data-warning": w }, t(`settings.warnings.${w}`))),
+    h("p", { class: "muted small" }, t("settings.topicHint")));
+}
+
 function drawSettings() {
   const d = view.draft;
   const tab = (key, label) => h("button", { type: "button", class: "btn tab" + (d.section === key ? " on" : ""), "data-sf": `tab:${key}`,
     "aria-pressed": String(d.section === key), onclick: () => { d.section = key; renderSettings(); } }, label);
   fill($("#settings-body"),
     h("h2", {}, t("settings.title")),
-    h("div", { class: "btn-row" }, tab("projects", t("settings.projects")), tab("engines", t("settings.engines"))),
+    h("div", { class: "btn-row" }, tab("projects", t("settings.projects")), tab("engines", t("settings.engines")),
+      tab("general", t("settings.general"))),
     d.section === "projects"
       ? [h("p", { class: "muted small" }, t("settings.hint")),
         h("ol", { class: "order" }, d.order.map(projectRow)),
         addForm()]
-      : Object.keys(d.eng).map(engineBlock),
+      : d.section === "engines" ? Object.keys(d.eng).map(engineBlock) : generalBlock(),
     h("div", { class: "btn-row" },
       h("button", { type: "button", class: "btn", "data-sf": "save", onclick: (ev) => {
         const steps = saveSteps();
         if (!steps) { toast(t("settings.invalid"), "error"); return; }
         if (!steps.length) { toast(t("caps.nothing")); return; }
-        return settingsAct(ev.currentTarget, () => saveSettings(steps), t("settings.saved"));
+        return settingsAct(ev.currentTarget, () => saveSettings(steps), () => t("settings.saved"));
       } }, t("settings.save")),
       h("button", { type: "button", class: "btn", onclick: () => $("#settings").close() }, t("settings.close"))));
 }
@@ -984,6 +1046,7 @@ function connect() {
   es.onerror = () => { $("#offline").hidden = false; };
   es.addEventListener("overview", async (e) => {
     view.overview = JSON.parse(e.data);
+    await setLanguage(view.overview.language); // changed in another tab or by hand: the page follows
     const runs = new Set(view.overview.live.map((l) => l.run));
     for (const run of [...view.feeds.keys()]) if (!runs.has(run)) view.feeds.delete(run);
     renderEngines();
@@ -1007,13 +1070,56 @@ function connect() {
   });
 }
 
-$("#live-h").textContent = t("live.title");
-$("#projects-h").textContent = t("projects.title");
-$("#history-h").textContent = t("history.title");
-$("#settings-open").textContent = t("settings.open");
+// --- language ------------------------------------------------------------------------------
+
+// The texts written once into index.html's skeleton.
+function staticTexts() {
+  $("#live-h").textContent = t("live.title");
+  $("#projects-h").textContent = t("projects.title");
+  $("#history-h").textContent = t("history.title");
+  $("#settings-open").textContent = t("settings.open");
+  $("#more").textContent = t("history.more");
+  $("#unit-close").textContent = t("unit.close");
+  $("#offline").textContent = t("offline");
+}
+
+// Loads the texts of `lang` (an unknown one is pt-BR) and, when they change, draws the page again in it.
+// Resolves to true when the language changed. Calls run one after the other.
+let langQueue = Promise.resolve();
+function setLanguage(lang) {
+  let code = LANGS.includes(lang) ? lang : "pt-BR";
+  const step = langQueue.then(async () => {
+    if (code === view.lang) return false;
+    let mod;
+    try {
+      mod = await import(`./i18n/${code}.js`);
+    } catch {
+      if (view.lang) return false; // keep the texts already on screen
+      code = "pt-BR";
+      mod = await import("./i18n/pt-BR.js");
+    }
+    T = mod.default;
+    LOCALE = code;
+    view.lang = code;
+    document.documentElement.lang = code;
+    staticTexts();
+    if (!view.overview) return true;
+    view.attentionSig = null; // the strip is redrawn only when its signature changes
+    renderEngines();
+    renderAttention();
+    renderProjects();
+    renderLive();
+    renderHistory();
+    if (view.filter) loadDetail(view.filter);
+    if (view.draft && $("#settings").open) renderSettings();
+    return true;
+  });
+  langQueue = step.catch(() => false);
+  return step;
+}
+
 $("#settings-open").addEventListener("click", openSettings);
-$("#more").textContent = t("history.more");
 $("#more").addEventListener("click", () => loadUnits("more"));
-$("#unit-close").textContent = t("unit.close");
-$("#offline").textContent = t("offline");
+const first = await getJSON("/api/overview").catch(() => ({}));
+await setLanguage(first.language);
 connect();
