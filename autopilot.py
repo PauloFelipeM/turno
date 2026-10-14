@@ -47,6 +47,7 @@ import config
 import coord
 import engines
 import history
+import messages
 import overrides
 import paths
 import schedule
@@ -209,10 +210,15 @@ def ntfy_server(cfg):
     return (cfg.get("notify") or {}).get("server", "https://ntfy.sh").rstrip("/")
 
 
+def say(cfg, key, **fields):
+    """An owner-facing text in the configured language (`messages.py`; pt-BR when the config has none)."""
+    return messages.text(cfg.get("language"), key, **fields)
+
+
 def ntfy(cfg, title, message, priority=3, tags=(), actions=None):
     """Publishes to the ntfy topic. A network failure is logged and never brings the scheduler down.
 
-    Phone texts stay in Brazilian Portuguese, the owner's language, until there is a language setting.
+    Titles and messages come from `say`, in the owner's language.
     """
     topic = (cfg.get("notify") or {}).get("topic")
     if not topic:
@@ -298,7 +304,8 @@ def fetch_messages(cfg, topic, since, label):
 
 def owner_answer(cfg, project, path, d, option):
     label = answer_decision(project, path, d, option, "owner")
-    ntfy(cfg, f"{project['name']}: anotado", f"{d['question']}\n→ {label}", priority=2, tags=["white_check_mark"])
+    ntfy(cfg, say(cfg, "answered_title", project=project["name"]),
+         say(cfg, "answered_body", question=d["question"], label=label), priority=2, tags=["white_check_mark"])
 
 
 def open_decisions(project):
@@ -326,7 +333,7 @@ def leave_note(cfg, targets, text):
     for p in targets:
         coord.add_note(p["name"], text)
     names = ", ".join(p["name"] for p in targets)
-    ntfy(cfg, "autopilot: mensagem anotada", f"Para {names}, na próxima unidade:\n{text[:200]}",
+    ntfy(cfg, say(cfg, "note_title"), say(cfg, "note_body", names=names, text=text[:200]),
          priority=2, tags=["memo"])
     log(f"owner message noted for {names}")
 
@@ -355,21 +362,21 @@ def typed_reply(cfg, projects, text):
         leave_note(cfg, note_targets(projects, text), text)
         return
     if not candidates:
-        ntfy(cfg, "autopilot: nenhuma pergunta aberta", f"Não há decisão esperando resposta. Ignorei: {text[:80]}",
+        ntfy(cfg, say(cfg, "no_question_title"), say(cfg, "no_question_body", text=text[:80]),
              priority=2, tags=["grey_question"])
         return
     if len(candidates) > 1:
         names = sorted({p["name"] for p, _, _ in candidates})
-        hint = f"ponha o projeto antes da letra, por exemplo: {names[0]} {option.upper()}" if len(names) > 1 \
-            else "use os botões da notificação"
-        ntfy(cfg, "autopilot: qual pergunta?", f"Há {len(candidates)} perguntas abertas; {hint}.",
+        hint = say(cfg, "which_hint_project", project=names[0], letter=option.upper()) if len(names) > 1 \
+            else say(cfg, "which_hint_buttons")
+        ntfy(cfg, say(cfg, "which_title"), say(cfg, "which_body", n=len(candidates), hint=hint),
              priority=3, tags=["grey_question"])
         return
     project, path, d = candidates[0]
     ids = {o["id"] for o in d["options"]}
     if option not in ids:
-        ntfy(cfg, f"{project['name']}: opção inexistente",
-             f"{d['question']}\nAs opções são: {', '.join(sorted(i.upper() for i in ids))}.",
+        ntfy(cfg, say(cfg, "bad_option_title", project=project["name"]),
+             say(cfg, "bad_option_body", question=d["question"], options=", ".join(sorted(i.upper() for i in ids))),
              priority=3, tags=["grey_question"])
         return
     owner_answer(cfg, project, path, d, option)
@@ -431,13 +438,15 @@ def dispatch_decisions(cfg, notify):
                             "method": "POST", "body": f"{p['name']}/{d['id']}/{o['id']}", "clear": True}
                            for o in d["options"]]
                 message = "\n".join([d["question"], "", d.get("context", ""), "", *lines, "",
-                                     f"Responda pelos botões ou digitando a letra (ex.: {d['options'][0]['id'].upper()}).",
-                                     f"Sem resposta em {hours} h: {option_label(d, d['default'])}"])
-                ntfy(cfg, f"{p['name']}: decisão", message.strip(), priority=4, tags=["question"], actions=actions)
+                                     say(cfg, "decision_how", letter=d["options"][0]["id"].upper()),
+                                     say(cfg, "decision_default", hours=hours, label=option_label(d, d["default"]))])
+                ntfy(cfg, say(cfg, "decision_title", project=p["name"]), message.strip(), priority=4, tags=["question"],
+                     actions=actions)
                 log(f"{p['name']}: decision {d['id']} sent; deadline {hours} h")
             elif now > d.get("deadline", 0):
                 label = answer_decision(p, path, d, d["default"], "timeout")
-                ntfy(cfg, f"{p['name']}: sem resposta", f"{d['question']}\n→ {label} (padrão)", tags=["hourglass"])
+                ntfy(cfg, say(cfg, "timeout_title", project=p["name"]),
+                     say(cfg, "timeout_body", question=d["question"], label=label), tags=["hourglass"])
 
 
 def process_decisions(cfg, state):
@@ -583,9 +592,9 @@ def prepare_docker(cfg, project):
     return "ok"
 
 
-def owner_messages(messages):
-    lines = [f"- [{time.strftime('%Y-%m-%d %H:%M', time.localtime(n['at']))}] {n['text']}" for n in messages]
-    return ("Owner messages (sent from the phone, oldest first; they may be in Portuguese):\n"
+def owner_messages(pending):
+    lines = [f"- [{time.strftime('%Y-%m-%d %H:%M', time.localtime(n['at']))}] {n['text']}" for n in pending]
+    return ("Owner messages (sent from the phone or the panel, oldest first; they may be in any language):\n"
             + "\n".join(lines) + "\n"
             "Follow them in this unit when they concern this project and ignore those that do not. Record "
             "a lasting instruction in the decisions file so later units keep it. They never override step 7.")
@@ -616,7 +625,7 @@ def setup_section(mode, request, files):
     part = "Draft unit" if mode == "draft" else "Apply unit"
     lines = [f"Setup unit — mode: {mode}. Follow the \"{part}\" part of the setup instructions, not steps 3 "
              "to 8 of the normal unit protocol (on a resume, the setup instructions are your original ones).",
-             "Owner's goal for this project (it may be in Portuguese):", request.get("goal") or "(none)"]
+             "Owner's goal for this project (it may be in any language):", request.get("goal") or "(none)"]
     if mode == "draft" and request.get("feedback"):
         lines += ["Owner's feedback on the previous draft (apply it to this draft):", request["feedback"]]
     lines.append("Draft files already in .superpowers/autopilot/setup/: " + (", ".join(files) if files else "none"))
@@ -645,8 +654,7 @@ def finish_setup(cfg, project, s, mode, unit_status, summary):
     if ok and setup.transition(HOME, name, frm, to):
         if mode == "draft":
             log(f"{name}: setup draft ready for the owner")
-            ntfy(cfg, f"Rascunho do {name} pronto para revisar", "Abra o painel para aprovar ou pedir mudanças.",
-                 tags=["memo"])
+            ntfy(cfg, say(cfg, "setup_ready_title", project=name), say(cfg, "setup_ready_body"), tags=["memo"])
             return "waiting", summary
         log(f"{name}: prepared for turno; it joins the normal queue")
         s["status"] = "active"
@@ -656,9 +664,9 @@ def finish_setup(cfg, project, s, mode, unit_status, summary):
         return unit_status, summary
     if unit_status == "blocked":
         return unit_status, summary
-    missing = "o rascunho (setup/autopilot.md)" if mode == "draft" else "o docs/autopilot.md no lugar"
+    missing = say(cfg, "setup_missing_draft" if mode == "draft" else "setup_missing_doc")
     log(f"{name}: the {mode} setup unit closed without its result; blocking the project")
-    return "blocked", f"A unidade de preparo terminou sem {missing}. {summary}".strip()
+    return "blocked", say(cfg, "setup_failed", missing=missing, summary=summary).strip()
 
 
 CUT = "cut"  # "exit code" of a unit cut at the end of the window
@@ -782,14 +790,16 @@ def run_unit(cfg, engine, state, project, deadline=None):
     notes = PROMPTS / f"engine-{engine.name}.md"
     if notes.exists():
         prompt += "\n\n" + notes.read_text()
+    # Before the owner's own texts (goal, feedback, messages) are appended: those are never rewritten.
+    prompt = prompt.replace("{owner_language}", messages.language_name(cfg.get("language")))
     if mode:
         prompt += "\n\n" + setup_section(mode, setup.read(HOME, project["name"]) or {}, setup.draft_files(path))
     s["setup"] = mode  # after_unit moves the request by the mode the unit ran with
-    messages = coord.pending_notes(project["name"])
-    if messages:
-        prompt += "\n\n" + owner_messages(messages)
+    pending = coord.pending_notes(project["name"])  # not `messages`: that is the module of the owner's texts
+    if pending:
+        prompt += "\n\n" + owner_messages(pending)
     # Delivered only when the unit closes; on a resume they are sent again.
-    s["notes_sent"] = [n["id"] for n in messages]
+    s["notes_sent"] = [n["id"] for n in pending]
     unit_file = Path(path) / UNIT_FILE
     if not resume:
         unit_file.unlink(missing_ok=True)
@@ -902,8 +912,8 @@ def after_unit(cfg, engine, state, project, out, err, code, unit_file):
             # A session that does not resume: the next unit restarts from the ledger (recovery step).
             log(f"{project['name']}: dropping the session after repeated errors")
             s["session"] = None
-            ntfy(cfg, f"{project['name']}: erros seguidos",
-                 f"{s['errors']} execuções com erro. Último log: {err}", priority=4, tags=["warning"])
+            ntfy(cfg, say(cfg, "errors_title", project=project["name"]),
+                 say(cfg, "errors_body", n=s["errors"], err=err), priority=4, tags=["warning"])
         wait = min(60 * 2 ** min(s["errors"], 5), 1800)
         s["retry_at"] = time.time() + wait
         return wait
@@ -935,8 +945,8 @@ def after_unit(cfg, engine, state, project, out, err, code, unit_file):
     coord.release(project["name"], engine.name)
     if s["notes_sent"]:
         coord.mark_delivered(project["name"], s["notes_sent"])
-        ntfy(cfg, f"{project['name']}: mensagem entregue ao {engine.label}",
-             f"{len(s['notes_sent'])} mensagem(ns) lida(s) nesta unidade: {result.get('unit', '?')}",
+        ntfy(cfg, say(cfg, "delivered_title", project=project["name"], engine=engine.label),
+             say(cfg, "delivered_body", n=len(s["notes_sent"]), unit=result.get("unit", "?")),
              priority=2, tags=["envelope"])
         s["notes_sent"] = []
     unit_status = result.get("status", "worked")
@@ -949,15 +959,17 @@ def after_unit(cfg, engine, state, project, out, err, code, unit_file):
         log(f"{project['name']}: backlog.json missing or invalid; the panel has no progress for it")
     if unit_status == "idle":
         s["status"] = "idle"
-        ntfy(cfg, f"{project['name']}: sem trabalho", summary or "Backlog concluído.", tags=["checkered_flag"])
+        ntfy(cfg, say(cfg, "idle_title", project=project["name"]), summary or say(cfg, "idle_body"),
+             tags=["checkered_flag"])
     elif unit_status == "blocked":
         s["status"] = "blocked"
         s["blocked_until"] = time.time() + d["blocked_cooldown_hours"] * 3600
-        ntfy(cfg, f"{project['name']}: bloqueado", summary, priority=4, tags=["no_entry"])
+        ntfy(cfg, say(cfg, "blocked_title", project=project["name"]), summary, priority=4, tags=["no_entry"])
     elif unit_status == "waiting":
         s["status"] = "waiting"
     if result.get("milestone"):
-        ntfy(cfg, f"{project['name']}: {result['milestone']}", summary, priority=2, tags=["tada"])
+        ntfy(cfg, say(cfg, "milestone_title", project=project["name"], milestone=result["milestone"]), summary,
+             priority=2, tags=["tada"])
     return 5
 
 
@@ -1072,15 +1084,15 @@ def window_notice(cfg, engine, state, active):
     if active:
         cap = max((p["weekly_cap"] for p in cfg["project"]), default=100)  # the list may be empty now
         log(f"window open; weekly quota at {used:.0f}%")
-        ntfy(cfg, f"{engine.label}: começou o fim de semana", f"Cota semanal em {used:.0f}%; teto {cap}%.",
-             priority=2, tags=["arrow_forward"])
+        ntfy(cfg, say(cfg, "window_open_title", engine=engine.label),
+             say(cfg, "window_open_body", used=f"{used:.0f}", cap=cap), priority=2, tags=["arrow_forward"])
         return
     handed = [name for name, c in coord.claims().items()
               if c and c.get("engine") == coord.ANY and c.get("handoff_from") == engine.name]
-    tail = f"Ficaram com o bastão: {', '.join(handed)}." if handed else "Nenhuma unidade ficou pela metade."
+    tail = say(cfg, "window_baton", names=", ".join(handed)) if handed else say(cfg, "window_clean")
     log(f"window closed; weekly quota at {used:.0f}%")
-    ntfy(cfg, f"{engine.label}: fim de semana encerrado", f"Cota semanal em {used:.0f}%. {tail}",
-         priority=2, tags=["stop_button"])
+    ntfy(cfg, say(cfg, "window_closed_title", engine=engine.label),
+         say(cfg, "window_closed_body", used=f"{used:.0f}", tail=tail), priority=2, tags=["stop_button"])
 
 
 def run_once(cfg, engine, state, win=None, now=None):
@@ -1126,7 +1138,7 @@ def run_once(cfg, engine, state, win=None, now=None):
     if done:
         if announce:
             log("all projects idle; done")
-            ntfy(cfg, f"{engine.label}: fim", "Todos os projetos terminaram o backlog.", tags=["checkered_flag"])
+            ntfy(cfg, say(cfg, "all_idle_title", engine=engine.label), say(cfg, "all_idle_body"), tags=["checkered_flag"])
         return None
     if project is None:
         # Not logged: the log shows only work. The reason for the wait shows in `check`.
@@ -1165,8 +1177,8 @@ def run_project(cfg, engine, state, project, limits, win):
             coord.release(name, engine.name)  # nothing started: the project is free for the other engine
         if docker != "busy" and not state["_notify"].get("docker_alerted"):
             # Without the containers the unit would only burn quota; warn once and retry in 10 min.
-            ntfy(cfg, f"{engine.label}: Docker com problema",
-                 f"Não consegui subir os containers de {name} ({docker}). Veja o log.", priority=4, tags=["warning"])
+            ntfy(cfg, say(cfg, "docker_title", engine=engine.label),
+                 say(cfg, "docker_body", project=name, reason=docker), priority=4, tags=["warning"])
             state["_notify"]["docker_alerted"] = True
         if docker == "busy":
             # Only this project waits: the queue moves on to the next one on the following turn.
@@ -1243,12 +1255,12 @@ def cmd_run(args):
     # A loop that was killed leaves `running` behind; nothing runs until the first turn says so.
     set_phase(state, "sleeping")
     save_state(state)
-    log(f"autopilot started ({engine.describe()}{', window ' + win.describe() if win else ''})")
+    log(f"autopilot started ({engine.describe()}{', window ' + win.describe(cfg.get('language')) if win else ''})")
     open_units = {p["name"]: state[p["name"]]["interrupted"] for p in cfg["project"]}
     for name in coord.reconcile(engine.name, open_units):
         log(f"{name}: unit open here, but the project is claimed by the other engine; leaving it aside")
-        ntfy(cfg, f"{engine.label}: projeto em conflito",
-             f"{name} tem unidade aberta nos dois autopilots. Veja os logs.", priority=4, tags=["warning"])
+        ntfy(cfg, say(cfg, "conflict_title", engine=engine.label), say(cfg, "conflict_body", project=name),
+             priority=4, tags=["warning"])
     save_state(state)
     while True:
         cfg, wait = loop_turn(cfg, engine, state)
@@ -1256,14 +1268,15 @@ def cmd_run(args):
 
 
 def status_lines(cfg, engine, state, limits, win, now):
+    lang = cfg.get("language")  # day names as the owner reads them
     out = [f"engine {engine.label}"]
     if not cfg.get("enabled", True):
         out.append(f"engine {engine.label}: disabled in the config")
     if win:
         if win.contains(now):
-            out.append(f"window {win.describe()}: inside, closes {schedule.label(win.end_of(now))}")
+            out.append(f"window {win.describe(lang)}: inside, closes {schedule.label(win.end_of(now), lang)}")
         else:
-            out.append(f"window {win.describe()}: outside, opens {schedule.label(win.next_start(now))}")
+            out.append(f"window {win.describe(lang)}: outside, opens {schedule.label(win.next_start(now), lang)}")
     if engine.needs_limits and not limits:
         out.append("quota: no reading")
     for key, label in (("primary", "5 h"), ("secondary", "weekly")):
@@ -1560,7 +1573,7 @@ def cmd_test_notify(args):
     cfg = load_config()
     if not (cfg.get("notify") or {}).get("topic"):
         sys.exit("set [notify].topic in secrets.toml")
-    ntfy(cfg, "autopilot: teste", "Se você está lendo isto no celular, as notificações funcionam.", tags=["bell"])
+    ntfy(cfg, say(cfg, "test_title"), say(cfg, "test_body"), tags=["bell"])
     print(f"sent to {ntfy_server(cfg)} (topic in secrets.toml)")
 
 
@@ -1615,8 +1628,8 @@ def main():
         import traceback
         log("unexpected error; the loop stopped:\n" + traceback.format_exc())
         if args.cmd == "run":
-            ntfy(load_config(), "autopilot: parou", "Erro inesperado. Veja o fim do autopilot.log.",
-                 priority=5, tags=["rotating_light"])
+            cfg = load_config()
+            ntfy(cfg, say(cfg, "crash_title"), say(cfg, "crash_body"), priority=5, tags=["rotating_light"])
         raise
 
 

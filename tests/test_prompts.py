@@ -1,5 +1,8 @@
 import json
+import sys
+import tempfile
 import unittest
+from pathlib import Path
 
 import helpers
 
@@ -87,6 +90,50 @@ class PromptsTest(unittest.TestCase):
                   "make no commit", "write no decision file", "go into `notes.md`", "run no command that writes in the repository",
                   "write only in `.superpowers/autopilot/setup/`", "you pass them on in every request to the planner"):
             self.assertIn(s, flat)
+
+
+class OwnerLanguageTest(unittest.TestCase):
+    ECHO = [sys.executable, "-c", "import sys; print(sys.stdin.read())"]
+
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp())
+        self.ap = helpers.load(self.tmp)
+        self.project = {"name": "my-app", "path": str(self.tmp / "my-app"), "weekly_cap": 90}
+        Path(self.project["path"]).mkdir()
+        self.cfg = {"defaults": {"initial_cost_primary": 8, "initial_cost_secondary": 1.5},
+                    "project": [self.project]}
+        self.state = self.ap.load_state(self.cfg)
+
+    def prompt(self, lang=None):
+        if lang:
+            self.cfg["language"] = lang
+        engine = helpers.FakeEngine(self.ECHO, name="codex")
+        out, _, _, _ = self.ap.run_unit(self.cfg, engine, self.state, self.project)
+        return Path(out).read_text()
+
+    def test_the_prompts_name_no_fixed_language(self):
+        for name in ("unit.md", "resume.md", "setup.md"):
+            self.assertIn("{owner_language}", (ROOT / "prompts" / name).read_text(), name)
+        for path in [*(ROOT / "prompts").glob("*.md"), ROOT / "claude-agents.json", *(ROOT / "codex-agents").glob("*.toml")]:
+            text = path.read_text()
+            for word in ("pt-BR", "Portuguese", "Spec do chat"):
+                self.assertNotIn(word, text, path.name)
+
+    def test_english(self):
+        prompt = self.prompt("en")
+        self.assertIn("everything the owner reads is written in English (en)", prompt)
+        self.assertNotIn("{owner_language}", prompt)
+
+    def test_no_language_is_brazilian_portuguese(self):
+        prompt = self.prompt()
+        self.assertIn("everything the owner reads is written in Brazilian Portuguese (pt-BR)", prompt)
+        self.assertNotIn("{owner_language}", prompt)
+
+    def test_owner_messages_are_not_rewritten(self):
+        self.ap.coord.add_note("my-app", "keep {owner_language} as typed")
+        prompt = self.prompt("en")
+        self.assertIn("keep {owner_language} as typed", prompt)
+        self.assertIn("they may be in any language", prompt)
 
 
 if __name__ == "__main__":

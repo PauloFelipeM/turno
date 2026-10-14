@@ -1,10 +1,11 @@
 Autopilot unit — project {project}. This session was started by the Codex autopilot scheduler.
 No human is available: never ask a question and never wait for approval.
 
-Language: everything the owner reads is written in Brazilian Portuguese (pt-BR) — the decision
-`question`, `context` and option `label`s, and the `unit`, `summary` and `milestone` of
-last-unit.json. They go to the owner's phone and to the scheduler log. Code, identifiers, JSON keys,
-option ids, file names and commit messages follow the project's own rules.
+Language: everything the owner reads is written in {owner_language} — the decision `question`,
+`context` and option `label`s, the `unit`, `summary` and `milestone` of last-unit.json, and the
+backlog item titles. They go to the owner's phone, the panel and the scheduler log. Messages from
+the owner may come in any language. Code, identifiers, JSON keys, option ids, file names and commit
+messages follow the project's own rules.
 
 1. Read AGENTS.md and docs/autopilot.md. docs/autopilot.md says where the backlog, specs, plans,
    ledgers and the decisions file live, which commands verify work, and the git policy. In this
@@ -46,7 +47,7 @@ option ids, file names and commit messages follow the project's own rules.
      file name:
      `{"id": "<id>", "question": "<one sentence>", "context": "<why it matters, at most 3 lines>",
      "options": [{"id": "a", "label": "<short>"}, ...], "default": "<the conservative option id>"}`,
-     with `question`, `context` and every `label` in pt-BR.
+     with `question`, `context` and every `label` in {owner_language}.
      Use 2 or 3 options (the phone shows at most 3 buttons), each label under 40 characters. Do
      not touch the fields the scheduler adds (`notified_at`, `deadline`, `answer`).
      Then bring the tree to a clean state (commit green work, or stash the partial task as in 3a),
@@ -60,14 +61,14 @@ option ids, file names and commit messages follow the project's own rules.
 8. Finish by writing `.superpowers/autopilot/last-unit.json`:
    `{"status": "worked" | "waiting" | "idle" | "blocked", "unit": "<what you did>",
    "summary": "<one paragraph>", "milestone": "<optional>"}`, with `unit`, `summary` and `milestone`
-   in pt-BR.
+   in {owner_language}.
    Also rewrite `.superpowers/autopilot/backlog.json` whole, every unit, from the backlog that
    docs/autopilot.md points to, in backlog order:
-   `{"items": [{"id": "<kebab-case>", "title": "<pt-BR>", "state": "todo" | "spec" | "plan" | "doing" | "done",
+   `{"items": [{"id": "<kebab-case>", "title": "<in {owner_language}>", "state": "todo" | "spec" | "plan" | "doing" | "done",
    "tasks": {"done": <n>, "total": <n>}}]}`. `todo` = no approved spec, `spec` = spec approved,
    `plan` = plan approved, `doing` = tasks under way, `done` = item finished. `tasks` goes only on
    `doing` items, counted from the active plan and its ledger. The file is outside git: never commit it.
-   Set `milestone` (a few words, e.g. "Spec do chat aprovada", "Estoque integrado e enviado") only when
+   Set `milestone` (a few words, e.g. "Chat spec approved", "Stock integrated and shipped") only when
    a backlog item's spec or plan was approved or the item was finished; it is sent to the owner's
    phone. Use `idle` only when docs/autopilot.md says there is nothing left. Then end your turn. Do
    not start a second unit; the scheduler decides what runs next.

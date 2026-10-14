@@ -3,13 +3,14 @@
 import datetime as dt
 import re
 
+import messages
+
 DAYS = {"mon": 0, "tue": 1, "wed": 2, "thu": 3, "fri": 4, "sat": 5, "sun": 6}
-DAYS_PT = ("seg", "ter", "qua", "qui", "sex", "sáb", "dom")
 
 
-def label(when):
-    """'sex 02/10 19:00': the moment as the owner reads it (pt-BR), independent of the locale."""
-    return f"{DAYS_PT[when.weekday()]} {when:%d/%m %H:%M}"
+def label(when, lang=None):
+    """'sex 02/10 19:00' (pt-BR) or 'Fri 02/10 19:00' (en): the moment as the owner reads it, independent of the locale."""
+    return f"{messages.day(lang, when.weekday())} {when:%d/%m %H:%M}"
 
 
 def parse(spec):
@@ -59,10 +60,11 @@ class Window:
         """Inside the window with more than the margin left: a unit may start."""
         return self.contains(when) and self.end_of(when) - when > self.margin
 
-    def describe(self):
-        def pt(minutes):
-            return f"{DAYS_PT[minutes // 1440]} {minutes % 1440 // 60:02d}:{minutes % 60:02d}"
-        return f"{pt(self.start)} → {pt(self.end)}"
+    def describe(self, lang=None):
+        """'sex 19:00 → dom 03:00' in the owner's language (pt-BR when `lang` is None or unknown)."""
+        def point(minutes):
+            return f"{messages.day(lang, minutes // 1440)} {minutes % 1440 // 60:02d}:{minutes % 60:02d}"
+        return f"{point(self.start)} → {point(self.end)}"
 
 
 def from_config(cfg):

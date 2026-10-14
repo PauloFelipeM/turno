@@ -107,7 +107,7 @@ def _engine_view(home, inst, state, homes):
     if win:
         now = datetime.datetime.now()
         inside = win.contains(now)
-        window = {"label": win.describe(), "open": inside,
+        window = {"label": win.describe(cfg.get("language")), "open": inside,
                   "until": (win.end_of(now) if inside else win.next_start(now)).timestamp()}
 
     def usage(key):

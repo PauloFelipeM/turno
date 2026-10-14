@@ -6,8 +6,8 @@ The "Setup unit" section near the end of this prompt gives the mode (`draft` or 
 owner's goal for the project, the owner's feedback on an earlier draft (if any) and the draft files
 already present. Do only the part below that matches the mode.
 
-Language: `notes.md` and the `unit` and `summary` of last-unit.json are written in Brazilian
-Portuguese (pt-BR): they go to the owner. Commit messages are in English.
+Language: `notes.md` and the `unit` and `summary` of last-unit.json are written in
+{owner_language}: they go to the owner. Commit messages are in English.
 
 The draft folder is `.superpowers/autopilot/setup/`. Git ignores it in this clone.
 
@@ -56,13 +56,13 @@ tests that generate files): to find the commands, read the files; write only in
      example `.superpowers/autopilot/setup/docs/superpowers/roadmap.md` for
      `docs/superpowers/roadmap.md`). Items ordered by value and dependency, built from the goal and
      from what the code already has.
-   - `notes.md`: for the owner, in pt-BR, at most 15 lines: what was detected, what was assumed,
+   - `notes.md`: for the owner, in {owner_language}, at most 15 lines: what was detected, what was assumed,
      and what the owner should check before approving.
 3. Check the draft yourself: every section above is there, each verification command exists in the
    repository, and the backlog serves the goal. If something is missing, send the planner back once
    with the list; after that you rule.
 4. Touch nothing outside the draft folder and commit nothing. Then finish (see "Finish") with
-   status `waiting` and a pt-BR summary of the draft.
+   status `waiting` and a summary of the draft in {owner_language}.
 
 ## Apply unit
 
@@ -94,4 +94,4 @@ force-push; rewrite history; drop database volumes.
 
 Write `.superpowers/autopilot/last-unit.json`:
 `{"status": "worked" | "waiting" | "blocked", "unit": "<what you did>", "summary": "<one paragraph>"}`,
-with `unit` and `summary` in pt-BR. Do not write `backlog.json` in a setup unit. Then end your turn.
+with `unit` and `summary` in {owner_language}. Do not write `backlog.json` in a setup unit. Then end your turn.
