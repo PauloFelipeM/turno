@@ -8,6 +8,7 @@ the drafts, never through a symlink.
 import datetime
 import json
 import os
+import re
 import subprocess
 import time
 from pathlib import Path
@@ -67,6 +68,14 @@ def configured(home):
     return [i for i in instances(home) if "error" not in i]
 
 
+PROC = Path("/proc")  # tests point it at a missing folder to play macOS
+
+
+def _is_autopilot_command(command):
+    """Whether a `ps` command line (one string) runs autopilot.py; a path with spaces still counts."""
+    return re.search(r"autopilot\.py(\s|$)", command) is not None
+
+
 def loop_pid(home, kind):
     """The loop's pid if it is alive. Reads the pid from the lock file without touching the lock (no flock)."""
     try:
@@ -82,9 +91,16 @@ def loop_pid(home, kind):
     except PermissionError:
         pass
     try:
-        args = Path(f"/proc/{pid}/cmdline").read_bytes().split(b"\0")
+        args = (PROC / str(pid) / "cmdline").read_bytes().split(b"\0")
     except FileNotFoundError:
-        return pid  # no /proc (macOS): the signal check is enough
+        # No /proc (macOS): ask `ps` for the command line, as the Linux check does with /proc, because
+        # a live pid may belong to another process that took the number after the loop died.
+        try:
+            command = subprocess.run(["ps", "-o", "command=", "-p", str(pid)], capture_output=True,
+                                     text=True, timeout=5).stdout
+        except (OSError, subprocess.SubprocessError):
+            return None
+        return pid if _is_autopilot_command(command) else None
     except OSError:
         return None
     # The pid may have been reused by another process after the loop died.

@@ -334,9 +334,10 @@ class ControlApiTest(unittest.TestCase):
     # interrupt where /proc is missing (macOS)
 
     def no_proc(self):
-        patch = mock.patch.object(self.control, "PROC", self.home / "no-proc")
-        patch.start()
-        self.addCleanup(patch.stop)
+        for module in (self.control, self.control.panel):
+            patch = mock.patch.object(module, "PROC", self.home / "no-proc")
+            patch.start()
+            self.addCleanup(patch.stop)
 
     def instance_file(self, kind, **info):
         (self.home / "shared" / f"instance-{kind}.json").write_text(json.dumps({"sigusr1": True, "started_at": 1, **info}))
@@ -376,6 +377,23 @@ class ControlApiTest(unittest.TestCase):
         (self.home / "shared" / "instance-codex.json").write_text("not json")
         self.assertEqual(self.post("/api/projects/my-app/interrupt")[0], 409)
         self.assertEqual(self.ov(), {})
+
+    def test_interrupt_without_proc_refuses_a_reused_pid(self):
+        # The loop died by SIGKILL, leaving its lock and instance file; another process took the pid.
+        victim = subprocess.Popen(["sleep", "30"])
+        self.addCleanup(victim.wait)
+        self.addCleanup(victim.kill)
+        (self.home / "shared" / "instance-codex.lock").write_text(str(victim.pid))
+        self.instance_file("codex", pid=victim.pid)
+        self.running_on_my-app()
+        self.no_proc()
+        with mock.patch("os.kill") as kill:
+            status, body = self.post("/api/projects/my-app/interrupt")
+        self.assertEqual(status, 409)
+        self.assertEqual([c for c in kill.call_args_list if c.args[1] != 0], [])  # no signal at all
+        self.assertIsNone(victim.poll())
+        self.assertEqual(self.ov(), {})
+        self.assertIsNone(self.control.panel.loop_pid(self.home, "codex"))
 
     def test_with_proc_the_kernel_mask_wins_over_the_file(self):
         proc, marker = self.start_loop("codex")  # no handler: SIGUSR1 would kill it
