@@ -2,8 +2,9 @@
 
 They only touch `config.json` (through `config.save`, which validates before writing), `overrides.json`
 (under its lock), decision answers (under the decisions lock), owner notes (through `coord.add_note`),
-and start/stop the loops or signal them. They never edit state files or the projects, and removing a
-project only drops its entry from the config.
+setup requests (`setup/<project>.json`, under `shared/setup.lock`), and start/stop the loops or signal
+them. They never edit state files or the projects; removing a project drops its entry from the config
+and its setup request, never its folder or its draft.
 """
 
 import copy
@@ -20,6 +21,7 @@ import coord
 import engines
 import overrides
 import panel
+import repo_setup as setup
 
 MAX_BODY = 64 * 1024
 LOCK_WAIT = 5.0  # seconds answering a decision waits for shared/decisions.lock
@@ -331,7 +333,7 @@ def edit_project(home, name, body):
 
 
 def remove_project(home, name):
-    """Drops the project from the config; state, history, claims and the folder are left alone."""
+    """Drops the project from the config and its setup request; state, history, claims and the folder are left alone."""
     def fn(d):
         if not any(p.get("name") == name for p in d["projects"]):
             raise ApiError(404, "not_found", f"unknown project: {name}")
@@ -340,6 +342,75 @@ def remove_project(home, name):
             raise ApiError(409, "in_use", f"the project is in use ({why})")
         d["projects"] = [p for p in d["projects"] if p.get("name") != name]
     _save(home, fn)
+    setup.delete(home, name)  # the request goes with the project; the draft in its folder stays
+    return 200, {"ok": True}
+
+
+MAX_TEXT = 4000  # goal and feedback of a setup request
+
+
+def _text_field(body, key):
+    value = body.get(key)
+    if not isinstance(value, str) or not 1 <= len(value.strip()) <= MAX_TEXT:
+        raise bad(f"{key} must have 1 to {MAX_TEXT} characters")
+    return value.strip()
+
+
+def _setup_root(home, name):
+    path = panel.project_path(home, name)
+    if path is None:
+        raise ApiError(404, "not_found", f"unknown project: {name}")
+    return Path(path)
+
+
+def request_setup(home, name, body):
+    """Creates the setup request (`requested`): an agent drafts the project's turno rules."""
+    _check_fields(body, ("goal",))
+    goal = _text_field(body, "goal")
+    root = _setup_root(home, name)
+    if not root.is_dir():
+        raise ApiError(400, "bad_path", f"path is not an existing directory: {root}")
+    if not (root / ".git").exists():
+        raise ApiError(400, "not_git", "the project folder is not a git repository")
+    if (root / "docs" / "autopilot.md").exists():
+        raise ApiError(409, "prepared", "the project already has docs/autopilot.md")
+
+    def fn(cur):
+        if cur and cur["status"] in setup.OPEN:
+            raise ApiError(409, "setup_open", "a setup request is already open for this project")
+        return setup.new_request(goal)
+    setup.update(home, name, fn)
+    _poke(home)
+    return 200, {"ok": True, "setup": "requested"}
+
+
+def _move_setup(home, name, frm, to, **fields):
+    _setup_root(home, name)
+    if not setup.transition(home, name, frm, to, **fields):
+        raise ApiError(409, "wrong_phase", f"the setup request is not in {frm}")
+    _poke(home)
+    return 200, {"ok": True, "setup": to}
+
+
+def approve_setup(home, name, body):
+    _check_fields(body, ())
+    return _move_setup(home, name, "review", "approved")
+
+
+def setup_changes(home, name, body):
+    _check_fields(body, ("feedback",))
+    return _move_setup(home, name, "review", "requested", feedback=_text_field(body, "feedback"))
+
+
+def cancel_setup(home, name):
+    """Deletes the request unless it is approved; the draft stays in the project."""
+    _setup_root(home, name)
+    before = setup.cancel(home, name)
+    if before is None:
+        raise ApiError(404, "not_found", "no setup request for this project")
+    if before == "approved":
+        raise ApiError(409, "wrong_phase", "an approved request cannot be cancelled; its files are being put in place")
+    _poke(home)
     return 200, {"ok": True}
 
 
@@ -445,6 +516,17 @@ def put_settings(home, body):
 def write_route(home, method, parts, body):
     """Dispatches a write request to its function: (status, body)."""
     n = len(parts)
+    if n >= 4 and parts[:2] == ["api", "projects"] and parts[3] == "setup":
+        name = parts[2]
+        if n == 4 and method == "POST":
+            return request_setup(home, name, body)
+        if n == 4 and method == "DELETE":
+            return cancel_setup(home, name)
+        if n == 5 and method == "POST" and parts[4] == "approve":
+            return approve_setup(home, name, body)
+        if n == 5 and method == "POST" and parts[4] == "changes":
+            return setup_changes(home, name, body)
+        raise ApiError(404, "not_found")
     if method == "POST" and n == 4 and parts[:2] == ["api", "engines"] and parts[3] in ("start", "stop"):
         return engine_action(home, parts[2], parts[3])
     if method == "POST" and n == 4 and parts[:2] == ["api", "engines"] and parts[3] == "check":

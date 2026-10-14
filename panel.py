@@ -1,6 +1,6 @@
 """What the panel shows, assembled from turno's files.
 
-Read-only (the writes live in control.py): it writes nothing, takes no locks and never loads secrets.toml (the ntfy topic never leaves it).
+Read-only (the writes live in control.py): it writes nothing, takes no locks and never loads secrets.toml (the ntfy topic never leaves it). It reads the setup requests and the drafts, never through a symlink.
 """
 
 import datetime
@@ -18,6 +18,7 @@ import feed
 import history
 import overrides
 import schedule
+import repo_setup as setup
 
 
 def read_json(path):
@@ -229,6 +230,7 @@ def overview(home, cache, homes=None):
             "decisions": count, "decisions_open": open_list,
             "paused": _dict(ov_projects.get(entry["name"])).get("paused") is True,
             "next": ov.get("next") == entry["name"],
+            "setup": setup.phase(home, entry["name"]),
             "blocked_summary": blocked.get(entry["name"]) if any(
                 e["status"] == "blocked" for e in entry["engines"].values()) else None})
     return {"engines": views, "projects": out_projects, "errors": errors, "now": now,
@@ -298,7 +300,7 @@ def config_view(home):
         why = blocked_by(home, p["name"])
         projects.append({"name": p["name"], "path": p["path"], "docker_group": p.get("docker_group"),
                          "weekly_cap": dict(p.get("weekly_cap") or {}), "checks": project_checks(p["path"]),
-                         "removable": why is None, "blocked_by": why})
+                         "removable": why is None, "blocked_by": why, "setup": setup.phase(home, p["name"])})
     engine_view = {}
     for kind in config.ENGINES:
         if kind in data["engines"]:
@@ -315,6 +317,14 @@ def project_path(home, name):
             if p["name"] == name:
                 return p["path"]
     return None
+
+
+def setup_detail(home, name):
+    """The project's setup request and its draft files; None for an unknown project."""
+    path = project_path(home, name)
+    if path is None:
+        return None
+    return {"request": setup.read(home, name), "files": setup.read_drafts(path) if Path(path).is_dir() else []}
 
 
 def project_detail(home, name, cache):
@@ -355,6 +365,7 @@ def watched_files(home):
     home = Path(home)
     files = [home / config.FILE]
     files += list(home.glob("state*.json")) + list(home.glob("history-*.jsonl")) + [home / overrides.FILE]
+    files += list((home / setup.FOLDER).glob("*.json"))
     files += list((home / "shared" / "claims").glob("*.json")) + list((home / "shared").glob("instance-*.lock"))
     for inst in configured(home):
         for p in inst["cfg"]["project"]:

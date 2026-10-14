@@ -173,6 +173,9 @@ class Handler(BaseHTTPRequestHandler):
             if len(parts) == 3 and parts[:2] == ["api", "units"]:
                 unit = panel.unit_detail(hub.home, parts[2])
                 return self._send(200, unit) if unit else self._send(404, {"error": "not_found"})
+            if len(parts) == 4 and parts[:2] == ["api", "projects"] and parts[3] == "setup":
+                detail = panel.setup_detail(hub.home, parts[2])
+                return self._send(200, detail) if detail is not None else self._send(404, {"error": "not_found"})
             if len(parts) == 3 and parts[:2] == ["api", "projects"]:
                 detail = panel.project_detail(hub.home, parts[2], hub.cache)
                 return self._send(200, detail) if detail else self._send(404, {"error": "not_found"})

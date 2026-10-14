@@ -41,7 +41,7 @@ class WebTextsTest(unittest.TestCase):
         codes |= set(re.findall(r'\{"error": "(\w+)"', (root / "server.py").read_text()))
         self.assertEqual(codes, {"bad_option", "bad_request", "not_found", "already_running", "busy", "not_running",
                                  "paused", "restart_needed", "forbidden", "internal", "exists", "in_use", "disabled",
-                                 "config", "bad_path"})
+                                 "config", "bad_path", "setup_open", "prepared", "not_git", "wrong_phase"})
         block = self.block("errors")
         for code in codes:
             self.assertRegex(block, rf'\n?\s*{code}: "[^"]+",', code)

@@ -33,6 +33,10 @@ export default {
     in_use: "O projeto está em uso (unidade aberta, reserva ou rodando); não dá para remover agora.",
     disabled: "Este motor está desligado na configuração; ligue-o em Configurações antes de iniciar.",
     config: "O arquivo de configuração está ilegível. Corrija o config.json e recarregue.",
+    setup_open: "Já existe um pedido de preparo aberto para este projeto.",
+    prepared: "O projeto já tem docs/autopilot.md; não precisa de preparo.",
+    not_git: "A pasta não é um repositório git; o preparo precisa de git.",
+    wrong_phase: "O preparo mudou de fase; recarregue o painel.",
   },
   attention: {
     title: "Precisa de você",
