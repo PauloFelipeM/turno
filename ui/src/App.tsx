@@ -6,6 +6,7 @@ import { NeedsYou } from "@/components/NeedsYou";
 import { Now } from "@/components/Now";
 import { Projects } from "@/components/Projects";
 import { ProjectSheet } from "@/components/ProjectSheet";
+import { SettingsDialog, type SettingsTab } from "@/components/settings/SettingsDialog";
 import { TopBar } from "@/components/TopBar";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -34,7 +35,7 @@ export function App() {
   const { t, setLang } = useI18n();
   const { overview, feeds, connected, tick } = useOverview();
   const [project, setProject] = useState<string | null>(null);
-  const [settings, setSettings] = useState<{ open: boolean; tab: "projects" | "engines" | "general" }>({ open: false, tab: "projects" });
+  const [settings, setSettings] = useState<{ open: boolean; tab: SettingsTab }>({ open: false, tab: "projects" });
 
   // The language comes from the config; changed in another tab or by hand, the page follows.
   const language = overview?.language;
@@ -72,6 +73,13 @@ export function App() {
           </>
         )}
       </main>
+      <SettingsDialog
+        open={settings.open}
+        tab={settings.tab}
+        onTab={(tab) => setSettings((s) => ({ ...s, tab }))}
+        onOpenChange={(open) => setSettings((s) => ({ ...s, open }))}
+        onLanguage={setLang}
+      />
       <Toaster />
     </div>
   );
