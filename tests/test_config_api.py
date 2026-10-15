@@ -358,14 +358,17 @@ class GeneralSettingsTest(unittest.TestCase):
     def put(self, body, **kw):
         return self.call("PUT", "/api/settings/general", body, **kw)
 
-    def test_an_old_config_shows_pt_br_and_ntfy_on_and_is_not_rewritten(self):
+    def test_a_config_without_a_language_shows_english_and_ntfy_on_and_is_not_rewritten(self):
+        data = self.cfg()
+        del data["language"]
+        helpers.write_config_text(self.home, json.dumps(data))
         before = self.raw()
         v = self.call("GET", "/api/config")[1]
-        self.assertEqual((v["language"], v["languages"], v["warnings"]), ("pt-BR", ["pt-BR", "en"], []))
+        self.assertEqual((v["language"], v["languages"], v["warnings"]), ("en", ["pt-BR", "en"], []))
         self.assertEqual(v["notify"], {"enabled": True, "server": "https://ntfy.sh", "decision_timeout_hours": 4,
                                        "has_topic": True})
         ov = self.call("GET", "/api/overview")[1]
-        self.assertEqual((ov["language"], ov["notify"]), ("pt-BR", {"enabled": True, "has_topic": True}))
+        self.assertEqual((ov["language"], ov["notify"]), ("en", {"enabled": True, "has_topic": True}))
         self.assertEqual(self.raw(), before)
 
     def test_saves_the_language_and_the_ntfy_settings(self):
@@ -382,7 +385,7 @@ class GeneralSettingsTest(unittest.TestCase):
     def test_a_partial_body_changes_only_what_it_names(self):
         self.assertEqual(self.put({"notify": {"enabled": False}})[0], 200)
         data = self.cfg()
-        self.assertNotIn("language", data)
+        self.assertEqual(data["language"], "en")  # as the sample config was written
         self.assertEqual(data["notify"], {"server": "https://ntfy.sh", "decision_timeout_hours": 4, "enabled": False})
 
     def test_bad_values_are_refused_and_nothing_is_written(self):
@@ -406,8 +409,8 @@ class GeneralSettingsTest(unittest.TestCase):
             self.assertNotIn("segredo-xyz", json.dumps(self.call("GET", path)[1]), path)
 
     def test_the_write_guard_applies(self):
-        self.assertEqual(self.put({"language": "en"}, turno=None)[0], 403)
-        self.assertNotIn("language", self.cfg())
+        self.assertEqual(self.put({"language": "pt-BR"}, turno=None)[0], 403)
+        self.assertEqual(self.cfg()["language"], "en")
 
     def test_warns_when_ntfy_is_on_without_a_topic(self):
         (self.home / "secrets.toml").unlink()
@@ -419,7 +422,7 @@ class GeneralSettingsTest(unittest.TestCase):
     def test_an_unreadable_config_gives_the_page_the_defaults(self):
         helpers.write_config_text(self.home, json.dumps({**self.cfg(), "language": "fr"}))
         ov = self.call("GET", "/api/overview")[1]
-        self.assertEqual(ov["language"], "pt-BR")
+        self.assertEqual(ov["language"], "en")
         self.assertTrue(ov["errors"])
 
 

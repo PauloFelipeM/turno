@@ -27,10 +27,12 @@ class MessagesTest(unittest.TestCase):
             for key, template in base.items():
                 self.assertEqual(fields(table[key]), fields(template), (lang, key))
 
-    def test_unknown_language_falls_back_to_pt_br(self):
-        for lang in ("fr", None, "", 1, ["en"]):
-            self.assertEqual(messages.text(lang, "idle_body"), "Backlog concluído.", lang)
-        self.assertEqual(messages.language_name("xx"), "Brazilian Portuguese (pt-BR)")
+    def test_unknown_language_falls_back_to_english(self):
+        for lang in ("fr", None, "", 1, ["pt-BR"]):
+            self.assertEqual(messages.text(lang, "idle_body"), "Backlog finished.", lang)
+        self.assertEqual(messages.text("pt-BR", "idle_body"), "Backlog concluído.")
+        self.assertEqual(messages.language_name("xx"), "English (en)")
+        self.assertEqual(messages.language_name("pt-BR"), "Brazilian Portuguese (pt-BR)")
         self.assertEqual(messages.language_name("en"), "English (en)")
 
     def test_fields_are_filled_and_values_kept_as_they_are(self):
@@ -40,7 +42,8 @@ class MessagesTest(unittest.TestCase):
 
     def test_days(self):
         self.assertEqual([messages.day("en", i) for i in range(7)], ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"])
-        self.assertEqual(messages.day(None, 5), "sáb")
+        self.assertEqual(messages.day(None, 5), "Sat")
+        self.assertEqual(messages.day("pt-BR", 5), "sáb")
 
     def test_every_key_the_scheduler_asks_for_exists(self):
         source = (helpers.PKG / "autopilot.py").read_text()
@@ -59,11 +62,12 @@ class WindowTextsTest(unittest.TestCase):
     def test_window_and_moments_follow_the_language(self):
         from turno import schedule
         win = schedule.Window("fri 19:00", "sun 03:00")
-        self.assertEqual(win.describe(), "sex 19:00 → dom 03:00")
+        self.assertEqual(win.describe(), "Fri 19:00 → Sun 03:00")
         self.assertEqual(win.describe("pt-BR"), "sex 19:00 → dom 03:00")
         self.assertEqual(win.describe("en"), "Fri 19:00 → Sun 03:00")
         moment = dt.datetime(2026, 10, 9, 19, 0)
-        self.assertEqual(schedule.label(moment), "sex 09/10 19:00")
+        self.assertEqual(schedule.label(moment), "Fri 09/10 19:00")
+        self.assertEqual(schedule.label(moment, "pt-BR"), "sex 09/10 19:00")
         self.assertEqual(schedule.label(moment, "en"), "Fri 09/10 19:00")
 
 
@@ -95,8 +99,13 @@ class LoopTextsTest(unittest.TestCase):
         self.assertIn("Answer with the buttons or by typing the letter (e.g. A).", body)
         self.assertIn("No answer in 4 h: Yes", body)
 
-    def test_decision_without_a_language_is_unchanged(self):
+    def test_decision_without_a_language_is_in_english(self):
         title, body = self.turn()
+        self.assertEqual(title, "my-api: decision")
+        self.assertIn("No answer in 4 h: Yes", body)
+
+    def test_decision_in_portuguese(self):
+        title, body = self.turn("pt-BR")
         self.assertEqual(title, "my-api: decisão")
         self.assertIn("Responda pelos botões ou digitando a letra (ex.: A).", body)
         self.assertIn("Sem resposta em 4 h: Yes", body)

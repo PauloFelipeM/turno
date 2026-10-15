@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "language": "pt-BR",
+  "language": "en",
   "projects": [
     {"name": "my-app", "path": "/home/me/projects/my-app", "docker_group": "web",
      "weekly_cap": {"codex": 95, "claude": 90}},

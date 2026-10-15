@@ -22,9 +22,10 @@ FILE = "config.json"
 ENGINES = ("codex", "claude")
 VERSION = 1
 # The owner's language: the panel, the phone texts and what the agents write for him. A config
-# without the key is pt-BR, as before the setting existed.
+# without the key is English; the import of the old TOML files writes pt-BR, the language they had.
 LANGUAGES = ("pt-BR", "en")
-DEFAULT_LANGUAGE = "pt-BR"
+DEFAULT_LANGUAGE = "en"
+LEGACY_LANGUAGE = "pt-BR"
 
 _COMMON = {
     "enabled": False,
@@ -64,6 +65,7 @@ class ConfigError(ValueError):
 def empty():
     return {
         "version": VERSION,
+        "language": DEFAULT_LANGUAGE,
         "projects": [],
         "engines": copy.deepcopy(ENGINE_DEFAULTS),
         "notify": {"server": "https://ntfy.sh", "decision_timeout_hours": 4},
@@ -383,6 +385,7 @@ def import_toml(home):
     and the loops that read `config.json` ignore them.
     """
     data = empty()
+    data["language"] = LEGACY_LANGUAGE  # the TOML era was Portuguese only: an upgrade keeps it
     files = {"codex": _toml(home, "projects.toml"), "claude": _toml(home, "claude.toml")}
     by_name = {}
     listed = {eng: set() for eng in ENGINES}

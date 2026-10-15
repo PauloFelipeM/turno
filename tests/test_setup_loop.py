@@ -32,7 +32,7 @@ class SetupLoopTest(unittest.TestCase):
         self.projects = [{"name": n, "path": str(helpers.git_repo(self.tmp / n)), "weekly_cap": 90}
                          for n in ("alpha", "beta")]
         self.by_name = {p["name"]: p for p in self.projects}
-        self.cfg = {"defaults": {"initial_cost_primary": 8, "initial_cost_secondary": 1.5, "safety_factor": 1.5,
+        self.cfg = {"language": "pt-BR", "defaults": {"initial_cost_primary": 8, "initial_cost_secondary": 1.5, "safety_factor": 1.5,
                                  "primary_cap": 100, "blocked_cooldown_hours": 6},
                     "notify": {"topic": "T"}, "project": self.projects}
         self.state = self.ap.load_state(self.cfg)

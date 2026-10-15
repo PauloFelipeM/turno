@@ -81,7 +81,7 @@ class OnboardTest(unittest.TestCase):
         with mock.patch.dict(os.environ, {"LANG": "pt_BR.UTF-8", "LC_ALL": "", "LC_MESSAGES": ""}):
             self.assertEqual(self.run_wizard("--yes", "--no-open"), 0)
         data = self.config.load(self.home)
-        self.assertEqual(data["language"], "pt-BR")
+        self.assertEqual(data["language"], "en")  # English by default, whatever the locale says
         self.assertTrue(data["engines"]["codex"]["enabled"] and data["engines"]["claude"]["enabled"])
         self.assertIs(data["notify"]["enabled"], False)  # ntfy defaults to off
         self.assertEqual(len(self.installs), 1)
@@ -136,6 +136,7 @@ class OnboardTest(unittest.TestCase):
         self.run_wizard("--yes", "--no-service")
         data = json.loads((self.home / "config.json").read_text())
         self.assertEqual([p["name"] for p in data["projects"]], ["my-app", "my-api", "side-project"])
+        self.assertEqual(data["language"], "pt-BR")  # the old TOML setup was in Portuguese
         self.assertTrue((self.home / "projects.toml").exists())
 
     def test_no_engine_cli_stops_the_wizard(self):

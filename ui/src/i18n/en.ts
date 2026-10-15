@@ -1,5 +1,13 @@
-// Interface texts (en). Exactly the keys of pt-BR.js (tests/test_web_texts.py checks it).
+// Interface texts (en). Exactly the keys of pt-BR.ts (tests/test_web_texts.py checks it).
 export default {
+  app: {
+    name: "turno",
+    theme: "Theme",
+    themes: { light: "Light", dark: "Dark", system: "System" },
+    close: "Close",
+    engines: "Engines",
+    loading: "Loading…",
+  },
   engine: { codex: "Codex", claude: "Claude" },
   phase: {
     running: "running {project}",
@@ -7,6 +15,7 @@ export default {
     outside_window: "outside the window, opens {until}",
     stopped: "stopped",
     unknown: "running",
+    disabled: "disabled",
   },
   start: "Start",
   stop: "Stop",
@@ -102,7 +111,7 @@ export default {
     review: "Review",
   },
   settings: {
-    open: "⚙ Settings",
+    open: "Settings",
     title: "Settings",
     projects: "Projects",
     engines: "Engines",
@@ -141,6 +150,12 @@ export default {
     start: "Start",
     end: "End",
     margin: "Margin (min)",
+    day: "Day",
+    time: "Time",
+    minutes: "min",
+    days: { mon: "Monday", tue: "Tuesday", wed: "Wednesday", thu: "Thursday", fri: "Friday", sat: "Saturday", sun: "Sunday" },
+    models: "Known models",
+    pickModel: "Pick a known model",
     cliFound: "found: {path} · {version}",
     cliMissing: "not found",
     check: "Check quota",
@@ -211,7 +226,7 @@ export default {
     unknown: "unrecognized event: {text}",
     exit: "exit {code}",
   },
-  projects: { title: "Projects" },
+  projects: { title: "Projects", empty: "No projects yet.", emptyHint: "Add the folder of a git repository for turno to work on.", add: "Add a project", open: "Open the {project} panel" },
   project: {
     backlog: "Backlog",
     decisions: "Pending decisions",
@@ -222,7 +237,18 @@ export default {
     retryNow: "Try now",
     retryRequested: "Request sent; {project} retries on the loop's next turn",
   },
-  history: { title: "History", empty: "No unit recorded yet.", more: "Load more" },
+  history: {
+    title: "History",
+    empty: "No unit recorded yet.",
+    more: "Load more",
+    when: "Started",
+    project: "Project",
+    outcome: "Outcome",
+    unit: "Unit",
+    engines: "Engines",
+    duration: "Duration",
+    cost: "Cost (week)",
+  },
   outcome: {
     worked: "worked",
     waiting: "waiting for a decision",

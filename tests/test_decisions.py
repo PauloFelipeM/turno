@@ -25,7 +25,7 @@ class DecisionsTest(unittest.TestCase):
         self.ap = helpers.load(self.tmp)
         self.coord = self.ap.coord
         self.project = self.tmp / "my-api"
-        self.cfg = {"defaults": {"initial_cost_primary": 8, "initial_cost_secondary": 1.5},
+        self.cfg = {"language": "pt-BR", "defaults": {"initial_cost_primary": 8, "initial_cost_secondary": 1.5},
                     "notify": {"topic": "T"}, "project": [{"name": "my-api", "path": str(self.project)}]}
         self.messages = {"T": [], "T-reply": []}
         self.ap.fetch_messages = lambda cfg, topic, since, label: [

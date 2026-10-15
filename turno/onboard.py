@@ -130,11 +130,6 @@ class Asker:
             self.out(f"answer one of: {', '.join(options)}")
 
 
-def default_language():
-    lang = os.environ.get("LC_ALL") or os.environ.get("LC_MESSAGES") or os.environ.get("LANG") or ""
-    return "pt-BR" if lang.lower().startswith("pt") else "en"
-
-
 def ntfy_topic():
     return "turno-" + secrets.token_urlsafe(18)
 
@@ -230,7 +225,7 @@ def run(args, home=None, ask=input, out=print):
         out("no engine CLI found: install the Codex CLI or Claude Code, log in, and run `turno onboard` again")
         return 1
 
-    language = args.language or q.choice("Language of the panel and of the phone texts", list(config.LANGUAGES), default_language())
+    language = args.language or q.choice("Language of the panel and of the phone texts", list(config.LANGUAGES), config.DEFAULT_LANGUAGE)
     if args.engines is not None:
         asked = [e.strip() for e in args.engines.split(",") if e.strip()]
         for e in asked:

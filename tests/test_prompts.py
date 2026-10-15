@@ -129,8 +129,13 @@ class OwnerLanguageTest(unittest.TestCase):
         self.assertIn("everything the owner reads is written in English (en)", prompt)
         self.assertNotIn("{owner_language}", prompt)
 
-    def test_no_language_is_brazilian_portuguese(self):
+    def test_no_language_is_english(self):
         prompt = self.prompt()
+        self.assertIn("everything the owner reads is written in English (en)", prompt)
+        self.assertNotIn("{owner_language}", prompt)
+
+    def test_portuguese(self):
+        prompt = self.prompt("pt-BR")
         self.assertIn("everything the owner reads is written in Brazilian Portuguese (pt-BR)", prompt)
         self.assertNotIn("{owner_language}", prompt)
 

@@ -61,7 +61,7 @@ class Window:
         return self.contains(when) and self.end_of(when) - when > self.margin
 
     def describe(self, lang=None):
-        """'sex 19:00 → dom 03:00' in the owner's language (pt-BR when `lang` is None or unknown)."""
+        """'Fri 19:00 → Sun 03:00' in the owner's language (English when `lang` is None or unknown)."""
         def point(minutes):
             return f"{messages.day(lang, minutes // 1440)} {minutes % 1440 // 60:02d}:{minutes % 60:02d}"
         return f"{point(self.start)} → {point(self.end)}"

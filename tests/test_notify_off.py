@@ -23,7 +23,7 @@ class NotifyOffLoopTest(unittest.TestCase):
         self.path = folder / "x1.json"
         self.path.write_text(json.dumps({"id": "x1", "question": "Q?", "default": "a",
                                          "options": [{"id": "a", "label": "Yes"}, {"id": "b", "label": "No"}]}))
-        self.cfg = {"defaults": {"initial_cost_primary": 8, "initial_cost_secondary": 1.5},
+        self.cfg = {"language": "pt-BR", "defaults": {"initial_cost_primary": 8, "initial_cost_secondary": 1.5},
                     "notify": {"enabled": False, "topic": "T", "decision_timeout_hours": 4},
                     "project": [{"name": "my-api", "path": str(self.project)}]}
         self.fetched = []

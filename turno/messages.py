@@ -6,7 +6,7 @@ language is one more table with exactly the keys and fields of the pt-BR one (a 
 plus its name in `NAMES` and its code in `config.LANGUAGES`.
 """
 
-DEFAULT = "pt-BR"
+DEFAULT = "en"
 
 # How the prompts name the language the agents write the owner's texts in.
 NAMES = {"pt-BR": "Brazilian Portuguese (pt-BR)", "en": "English (en)"}
@@ -114,7 +114,7 @@ TEXTS = {
 
 
 def language(lang):
-    """`lang` when it is a known language; pt-BR otherwise (an old or hand-edited value)."""
+    """`lang` when it is a known language; English otherwise (a missing, old or hand-edited value)."""
     return lang if isinstance(lang, str) and lang in TEXTS else DEFAULT
 
 

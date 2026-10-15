@@ -428,15 +428,17 @@ class LanguageAndNotifyTests(Base):
     def write(self, data):
         (self.home / config.FILE).write_text(json.dumps(data))
 
-    def test_old_config_loads_as_pt_br_with_ntfy_on_and_is_not_rewritten(self):
-        self.write(config.empty())
+    def test_config_without_a_language_loads_as_english_with_ntfy_on_and_is_not_rewritten(self):
+        old = config.empty()
+        del old["language"]
+        self.write(old)
         before = (self.home / config.FILE).read_bytes()
         loaded = config.load(self.home)
         self.assertNotIn("language", loaded)
         self.assertNotIn("enabled", loaded["notify"])
         for engine in config.ENGINES:
             cfg = config.for_engine(loaded, engine)
-            self.assertEqual(cfg["language"], "pt-BR")
+            self.assertEqual(cfg["language"], "en")
             self.assertTrue(config.notify_enabled(cfg["notify"]))
         self.assertEqual((self.home / config.FILE).read_bytes(), before)
 
@@ -470,9 +472,19 @@ class LanguageAndNotifyTests(Base):
 
     def test_example_config_shows_the_language_and_ntfy_keys(self):
         example = json.loads((Path(__file__).resolve().parents[1] / "config.example.json").read_text())
-        self.assertEqual(example["language"], "pt-BR")
+        self.assertEqual(example["language"], "en")
         self.assertIs(example["notify"]["enabled"], True)
         self.assertNotIn("topic", example["notify"])
+
+    def test_a_new_config_is_english(self):
+        self.assertEqual(config.DEFAULT_LANGUAGE, "en")
+        self.assertEqual(config.empty()["language"], "en")
+        self.assertEqual(config.load(self.home)["language"], "en")  # no file at all
+
+    def test_the_toml_import_keeps_portuguese(self):
+        self.put("projects.toml")
+        self.assertEqual(config.load(self.home)["language"], "pt-BR")
+        self.assertEqual(json.loads((self.home / config.FILE).read_text())["language"], "pt-BR")  # written out
 
     def test_import_switches_ntfy_on_only_with_a_topic(self):
         self.put("projects.toml")

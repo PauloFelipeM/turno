@@ -197,7 +197,7 @@ class ReloadTest(unittest.TestCase):
     # the loop does not end by itself
 
     def fim(self):
-        return [title for title, _ in self.ap.sent if title.endswith(": fim")]
+        return [title for title, _ in self.ap.sent if title.endswith(": done")]
 
     def test_empty_project_list_is_a_wait_without_a_notice(self):
         self.write([])
@@ -212,7 +212,7 @@ class ReloadTest(unittest.TestCase):
         self.state["alpha"]["status"] = self.state["beta"]["status"] = "idle"
         self.assertEqual(self.turn(), 600)
         self.assertEqual(self.turn(), 600)
-        self.assertEqual(self.fim(), ["Fake: fim"])
+        self.assertEqual(self.fim(), ["Fake: done"])
         self.assertEqual(self.log().count("all projects idle; done"), 1)
         self.assertTrue(json.loads(self.ap.STATE.read_text())["_idle_notified"])
         self.assertAlmostEqual(self.state["_loop"]["until"], time.time() + 600, delta=5)
@@ -227,7 +227,7 @@ class ReloadTest(unittest.TestCase):
         self.state["beta"].update(status="idle", interrupted=False, session=None)
         self.ap.coord.release("beta", "codex")
         self.turn()
-        self.assertEqual(self.fim(), ["Fake: fim", "Fake: fim"])  # idle again: a new notice
+        self.assertEqual(self.fim(), ["Fake: done", "Fake: done"])  # idle again: a new notice
 
     def test_project_added_after_all_idle_is_picked_without_a_restart(self):
         self.state["alpha"]["status"] = self.state["beta"]["status"] = "idle"
@@ -241,7 +241,7 @@ class ReloadTest(unittest.TestCase):
         self.state["alpha"]["status"] = self.state["beta"]["status"] = "idle"
         self.assertIsNone(self.ap.run_once(self.cfg, self.engine, self.state))
         self.assertIsNone(self.ap.run_once(self.cfg, self.engine, self.state))
-        self.assertEqual(self.fim(), ["Fake: fim"])
+        self.assertEqual(self.fim(), ["Fake: done"])
 
     # malformed files
 

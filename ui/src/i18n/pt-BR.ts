@@ -1,5 +1,13 @@
-// Interface texts (pt-BR). Another language = another file with the same keys.
+// Interface texts (pt-BR). Exactly the keys of en.ts (tests/test_web_texts.py checks it).
 export default {
+  app: {
+    name: "turno",
+    theme: "Tema",
+    themes: { light: "Claro", dark: "Escuro", system: "Sistema" },
+    close: "Fechar",
+    engines: "Motores",
+    loading: "Carregando…",
+  },
   engine: { codex: "Codex", claude: "Claude" },
   phase: {
     running: "rodando {project}",
@@ -7,6 +15,7 @@ export default {
     outside_window: "fora da janela, abre {until}",
     stopped: "parado",
     unknown: "rodando",
+    disabled: "desligado",
   },
   start: "Iniciar",
   stop: "Parar",
@@ -102,7 +111,7 @@ export default {
     review: "Revisar",
   },
   settings: {
-    open: "⚙ Configurações",
+    open: "Configurações",
     title: "Configurações",
     projects: "Projetos",
     engines: "Motores",
@@ -141,6 +150,12 @@ export default {
     start: "Início",
     end: "Fim",
     margin: "Margem (min)",
+    day: "Dia",
+    time: "Hora",
+    minutes: "min",
+    days: { mon: "segunda", tue: "terça", wed: "quarta", thu: "quinta", fri: "sexta", sat: "sábado", sun: "domingo" },
+    models: "Modelos conhecidos",
+    pickModel: "Escolher um modelo conhecido",
     cliFound: "encontrada: {path} · {version}",
     cliMissing: "não encontrada",
     check: "Testar cota",
@@ -211,7 +226,7 @@ export default {
     unknown: "evento não reconhecido: {text}",
     exit: "saída {code}",
   },
-  projects: { title: "Projetos" },
+  projects: { title: "Projetos", empty: "Nenhum projeto ainda.", emptyHint: "Adicione a pasta de um repositório git para o turno trabalhar nele.", add: "Adicionar projeto", open: "Abrir o painel do {project}" },
   project: {
     backlog: "Backlog",
     decisions: "Decisões pendentes",
@@ -222,7 +237,18 @@ export default {
     retryNow: "Tentar agora",
     retryRequested: "Pedido enviado; {project} tenta de novo na próxima volta do loop",
   },
-  history: { title: "Histórico", empty: "Nenhuma unidade registrada ainda.", more: "Carregar mais" },
+  history: {
+    title: "Histórico",
+    empty: "Nenhuma unidade registrada ainda.",
+    more: "Carregar mais",
+    when: "Início",
+    project: "Projeto",
+    outcome: "Resultado",
+    unit: "Unidade",
+    engines: "Motores",
+    duration: "Duração",
+    cost: "Custo (semana)",
+  },
   outcome: {
     worked: "trabalhou",
     waiting: "esperando decisão",

@@ -21,7 +21,7 @@ class LoopTest(unittest.TestCase):
                          {"name": "side-project", "path": str(self.tmp / "side-project"), "weekly_cap": 90, "docker_group": "web"}]
         for p in self.projects:
             Path(p["path"]).mkdir()
-        self.cfg = {"defaults": {"initial_cost_primary": 8, "initial_cost_secondary": 1.5, "safety_factor": 1.5,
+        self.cfg = {"language": "pt-BR", "defaults": {"initial_cost_primary": 8, "initial_cost_secondary": 1.5, "safety_factor": 1.5,
                                  "primary_cap": 100, "blocked_cooldown_hours": 6},
                     "project": self.projects}
         self.state = self.ap.load_state(self.cfg)

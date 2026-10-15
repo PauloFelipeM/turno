@@ -13,7 +13,7 @@ class StatusTest(unittest.TestCase):
         self.tmp = Path(tempfile.mkdtemp())
         self.ap = helpers.load(self.tmp)
         self.ap.is_dirty = lambda path: False
-        self.cfg = {"defaults": {"initial_cost_primary": 8, "initial_cost_secondary": 1.5},
+        self.cfg = {"language": "pt-BR", "defaults": {"initial_cost_primary": 8, "initial_cost_secondary": 1.5},
                     "project": [{"name": "my-api", "path": str(self.tmp), "weekly_cap": 90}]}
         self.state = self.ap.load_state(self.cfg)
         self.limits = {"primary": {"used_percent": 22, "resets_at": time.time() + 3600},
