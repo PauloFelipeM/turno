@@ -239,6 +239,36 @@ class ScreensTest(unittest.TestCase):
         self.assertNotIn("retry_at", items)
         self.assertIn('t("retry", {', self.src["components/Projects.tsx"])
 
+    def test_roles_efforts_and_models(self):
+        draft = self.src["components/settings/draft.ts"]
+        self.assertIn('export const ROLES = ["planner", "implementer", "reviewer"];', draft)
+        self.assertIn('"xhigh"', draft)
+        self.assertIn("body.roles = roles", draft)  # only what changed is sent
+        self.assertIn("known_models", self.src["components/settings/EnginesTab.tsx"])
+        self.assertNotIn(OLD_ROLE, self.app + (I18N / "pt-BR.ts").read_text(encoding="utf-8"))
+
+    def test_the_window_pickers_build_the_text_schedule_py_reads(self):
+        from turno import schedule
+        ts = self.src["lib/schedule.ts"]
+        self.assertIn('export const DAYS = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"] as const;', ts)
+        self.assertEqual(list(schedule.DAYS), ["mon", "tue", "wed", "thu", "fri", "sat", "sun"])
+        tab = self.src["components/settings/WindowPicker.tsx"]
+        self.assertIn('type="time"', tab)
+        self.assertIn("<Select", tab)
+
+    def test_every_write_route_the_old_panel_called_is_still_called(self):
+        for call in ('"/api/restart"', '"/api/messages"', '"/api/settings"', '"/api/settings/general"', '"/api/projects"',
+                     "`/api/engines/${enc(e.engine)}/start`", "`/api/engines/${enc(e.engine)}/stop`",
+                     "`/api/engines/${enc(k)}/check`", "`/api/engines/${enc(k)}`",
+                     "`/api/projects/${enc(p.name)}/${toggle}`", "`/api/projects/${enc(p.name)}/next`",
+                     "`/api/projects/${enc(p.name)}/interrupt`", "`/api/projects/${enc(i.project)}/reset`",
+                     "`/api/projects/${enc(name)}/reset`", "`/api/decisions/${enc(project)}/${enc(d.id)}`",
+                     "`/api/projects/${enc(p.name)}/setup`", "`/api/projects/${enc(name)}/setup/approve`",
+                     "`/api/projects/${enc(name)}/setup/changes`", "`/api/projects/${enc(name)}/setup`, undefined, \"DELETE\"",
+                     "`/api/projects/${enc(n)}`, undefined, \"DELETE\"", '"/api/events"', '"/api/live"', "`/api/units?${params}`",
+                     "`/api/units/${enc(id)}`", '"/api/config"'):
+            self.assertIn(call, self.app, call)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -7,6 +7,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { textIn, useI18n } from "@/i18n";
 import { buildDraft, emptyAdd, mergeDraft, saveSteps, type AddDraft, type Draft } from "./draft";
+import { EnginesTab } from "./EnginesTab";
 import { GeneralTab } from "./GeneralTab";
 import { ProjectsTab, type SetupBoxState } from "./ProjectsTab";
 
@@ -105,6 +106,9 @@ export function SettingsDialog({ open, tab, onTab, onOpenChange, onLanguage }: P
               <TabsTrigger value="projects" data-sf="tab:projects">
                 {t("settings.projects")}
               </TabsTrigger>
+              <TabsTrigger value="engines" data-sf="tab:engines">
+                {t("settings.engines")}
+              </TabsTrigger>
               <TabsTrigger value="general" data-sf="tab:general">
                 {t("settings.general")}
               </TabsTrigger>
@@ -120,6 +124,9 @@ export function SettingsDialog({ open, tab, onTab, onOpenChange, onLanguage }: P
               <>
                 <TabsContent value="projects">
                   <ProjectsTab draft={draft} update={update} add={add} setAdd={setAdd} setup={setup} setSetup={setSetup} refresh={refresh} onAdded={onAdded} />
+                </TabsContent>
+                <TabsContent value="engines">
+                  <EnginesTab draft={draft} update={update} />
                 </TabsContent>
                 <TabsContent value="general">
                   <GeneralTab draft={draft} update={update} />
