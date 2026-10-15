@@ -1,4 +1,5 @@
 import { useState, type ReactNode } from "react";
+import { InfoTip } from "@/components/InfoTip";
 import { enc, send, type CheckResult, type Limits } from "@/api";
 import { useEngineName } from "@/components/Engines";
 import { Badge } from "@/components/ui/badge";
@@ -141,7 +142,10 @@ function EngineBlock({ k, d, set }: { k: string; d: Draft; set: (fn: (e: EngineD
           </TableBody>
         </Table>
         <div className="grid max-w-48 gap-1.5">
-          <Label htmlFor={`primary:${k}`}>{t("settings.primaryCap")}</Label>
+          <div className="flex items-center gap-1.5">
+            <Label htmlFor={`primary:${k}`}>{t("settings.primaryCap")}</Label>
+            <InfoTip text={t("help.primaryCap")} />
+          </div>
           <Input
             id={`primary:${k}`}
             type="number"

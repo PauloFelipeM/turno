@@ -78,6 +78,12 @@ export default {
     sent: "Mensagem enviada",
     empty: "Escreva a mensagem antes de enviar.",
   },
+  help: {
+    label: "O que é isto?",
+    group: "Projetos com o mesmo grupo Docker disputam as mesmas portas (por exemplo 8000 e 3306). O turno nunca roda dois deles ao mesmo tempo e, antes de uma unidade, para os containers do outro e sobe os deste (se o outro tiver trabalho não commitado, ele espera). Deixe vazio se o projeto não usa Docker ou usa portas próprias.",
+    weeklyCap: "Teto semanal da sua assinatura para este motor neste projeto: uma unidade nova só começa aqui se o uso da semana mais o custo estimado da unidade ficar abaixo desta porcentagem. Dê tetos menores aos projetos de menor prioridade, para que parem antes e deixem cota para os outros. 0 = este motor nunca trabalha aqui. Uma unidade já começada nunca é cortada.",
+    primaryCap: "A mesma ideia para a janela de 5 horas, para o motor inteiro: nenhuma unidade nova começa se o uso das 5 h mais o custo estimado passar desta porcentagem. 100 = usar a janela inteira.",
+  },
   caps: {
     title: "Teto semanal por motor",
     save: "Salvar",

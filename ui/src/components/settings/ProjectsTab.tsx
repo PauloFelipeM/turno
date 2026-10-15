@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { InfoTip } from "@/components/InfoTip";
 import { ArrowDownIcon, ArrowUpIcon, TriangleAlertIcon } from "lucide-react";
 import { toast } from "sonner";
 import { enc, send, type ProjectConfig } from "@/api";
@@ -31,10 +32,13 @@ interface Props {
   onAdded: (name: string) => Promise<void>;
 }
 
-function Field({ id, label, children }: { id: string; label: string; children: ReactNode }) {
+function Field({ id, label, help, children }: { id: string; label: string; help?: string; children: ReactNode }) {
   return (
     <div className="grid gap-1.5">
-      <Label htmlFor={id}>{label}</Label>
+      <div className="flex items-center gap-1.5">
+        <Label htmlFor={id}>{label}</Label>
+        {help ? <InfoTip text={help} /> : null}
+      </div>
       {children}
     </div>
   );
@@ -124,11 +128,11 @@ function ProjectRow({ n, i, props }: { n: string; i: number; props: Props }) {
         <Input id={`path-${n}`} value={cur.path} onChange={(ev) => update((x) => void (x.proj[n].path = ev.target.value))} data-sf={`path:${n}`} className="font-mono text-xs" />
       </Field>
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
-        <Field id={`group-${n}`} label={t("settings.group")}>
+        <Field id={`group-${n}`} label={t("settings.group")} help={t("help.group")}>
           <Input id={`group-${n}`} value={cur.group} onChange={(ev) => update((x) => void (x.proj[n].group = ev.target.value))} data-sf={`group:${n}`} />
         </Field>
         {Object.keys(cur.caps).map((e) => (
-          <Field key={e} id={`cap-${n}-${e}`} label={`${engineName(e)} (%)`}>
+          <Field key={e} id={`cap-${n}-${e}`} label={`${engineName(e)} (%)`} help={t("help.weeklyCap")}>
             <Input
               id={`cap-${n}-${e}`}
               type="number"
@@ -193,7 +197,7 @@ function AddForm(props: Props) {
           <Field id="add-name" label={t("settings.name")}>
             <Input id="add-name" value={a.name} onChange={(ev) => setAdd({ ...a, name: ev.target.value })} data-sf="add-name" />
           </Field>
-          <Field id="add-group" label={t("settings.group")}>
+          <Field id="add-group" label={t("settings.group")} help={t("help.group")}>
             <Input id="add-group" value={a.group} onChange={(ev) => setAdd({ ...a, group: ev.target.value })} data-sf="add-group" />
           </Field>
         </div>
@@ -202,7 +206,7 @@ function AddForm(props: Props) {
         </Field>
         <div className="grid grid-cols-2 gap-3">
           {engs.map((e) => (
-            <Field key={e} id={`add-cap-${e}`} label={`${engineName(e)} (%)`}>
+            <Field key={e} id={`add-cap-${e}`} label={`${engineName(e)} (%)`} help={t("help.weeklyCap")}>
               <Input
                 id={`add-cap-${e}`}
                 type="number"

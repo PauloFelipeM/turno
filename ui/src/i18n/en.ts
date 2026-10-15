@@ -78,6 +78,12 @@ export default {
     sent: "Message sent",
     empty: "Write the message before sending it.",
   },
+  help: {
+    label: "What is this?",
+    group: "Projects with the same Docker group share ports (for example 8000 and 3306). turno never runs two of them at the same time, and before a unit it stops the other project's containers and starts this one's (unless the other has uncommitted work: then it waits). Leave it empty if the project has no Docker or uses its own ports.",
+    weeklyCap: "Weekly cap of your subscription for this engine in this project: a new unit only starts here while this week's usage plus the unit's estimated cost stays below this percentage. Give lower caps to lower-priority projects, so they stop first and leave quota for the others. 0 = this engine never works here. A unit that already started is never cut.",
+    primaryCap: "The same idea for the 5-hour window, for the whole engine: no new unit starts when the 5-hour usage plus the unit's estimated cost would pass this percentage. 100 = use the whole window.",
+  },
   caps: {
     title: "Weekly cap per engine",
     save: "Save",

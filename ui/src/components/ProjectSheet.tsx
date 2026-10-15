@@ -1,4 +1,5 @@
 import { useState, type ReactNode } from "react";
+import { InfoTip } from "@/components/InfoTip";
 import { toast } from "sonner";
 import { enc, send, type Decision, type Overview, type Settings, type SetupDetail } from "@/api";
 import { ActionButton } from "@/components/ActionButton";
@@ -188,7 +189,10 @@ function CapsForm({ name, settings }: { name: string; settings: Settings }) {
       <div className="grid grid-cols-2 gap-3">
         {engs.map((e) => (
           <div key={e} className="grid gap-1.5">
-            <Label htmlFor={`cap-${name}-${e}`}>{`${engineName(e)} (%)`}</Label>
+            <div className="flex items-center gap-1.5">
+              <Label htmlFor={`cap-${name}-${e}`}>{`${engineName(e)} (%)`}</Label>
+              <InfoTip text={t("help.weeklyCap")} />
+            </div>
             <Input
               id={`cap-${name}-${e}`}
               type="number"
