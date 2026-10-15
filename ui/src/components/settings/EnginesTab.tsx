@@ -71,7 +71,7 @@ function CheckOutcome({ k, res }: { k: string; res: CheckResult }) {
 }
 
 function EngineBlock({ k, d, set }: { k: string; d: Draft; set: (fn: (e: EngineDraft) => void) => void }) {
-  const { t } = useI18n();
+  const { t, errorText } = useI18n();
   const engineName = useEngineName();
   const cur = d.eng[k];
   const cfg = d.cfg.engines[k];
@@ -186,7 +186,7 @@ function EngineBlock({ k, d, set }: { k: string; d: Draft; set: (fn: (e: EngineD
               try {
                 setCheck(await send<CheckResult>(`/api/engines/${enc(k)}/check`));
               } catch (e) {
-                setCheck({ limits: null, error: e instanceof Error ? e.message : "" });
+                setCheck({ limits: null, error: errorText(e) });
               }
             }}
           >

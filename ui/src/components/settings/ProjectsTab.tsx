@@ -163,7 +163,8 @@ function ProjectRow({ n, i, props }: { n: string; i: number; props: Props }) {
             try {
               await send(`/api/projects/${enc(n)}`, undefined, "DELETE");
             } finally {
-              await props.refresh();
+              // The list is refreshed either way; a failing refresh must not hide the error of the removal.
+              await props.refresh().catch(() => undefined);
             }
           }}
           ok={t("settings.removed", { project: n })}
