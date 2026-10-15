@@ -33,7 +33,8 @@ Issues = "https://github.com/PauloFelipeM/turno/issues"
 turno = "turno.cli:main"
 
 [tool.setuptools]
-packages = ["turno"]
+# The data folders have no __init__.py; they are listed so setuptools does not warn that they are absent.
+packages = ["turno", "turno.prompts", "turno.web", "turno.web.i18n"]
 
 [tool.setuptools.dynamic]
 version = { attr = "turno.__version__" }

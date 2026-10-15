@@ -113,6 +113,14 @@ class PackageDataTest(unittest.TestCase):
         for rel in files:
             self.assertTrue(any(fnmatch.fnmatchcase(rel, g) and rel.count("/") == g.count("/") for g in globs), rel)
 
+    def test_the_data_folders_are_declared_packages_and_the_sdist_leaves_tests_out(self):
+        meta = tomllib.loads((helpers.ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+        packages = meta["tool"]["setuptools"]["packages"]
+        for folder in ("prompts", "web", "web/i18n"):  # else setuptools warns they are absent from `packages`
+            self.assertIn("turno." + folder.replace("/", "."), packages)
+        manifest = (helpers.ROOT / "MANIFEST.in").read_text(encoding="utf-8").splitlines()
+        self.assertIn("prune tests", manifest)
+
     def test_console_script_and_version(self):
         from turno import __version__
         meta = tomllib.loads((helpers.ROOT / "pyproject.toml").read_text(encoding="utf-8"))
@@ -135,7 +143,9 @@ class WheelTest(unittest.TestCase):
         venv = work / "venv"
         subprocess.run([sys.executable, "-m", "venv", str(venv)], check=True)
         py = venv / "bin" / "python"
-        subprocess.run([str(py), "-m", "pip", "wheel", str(src), "--no-deps", "-q", "-w", str(work / "dist")], check=True)
+        built = subprocess.run([str(py), "-m", "pip", "wheel", str(src), "--no-deps", "-v", "-w", str(work / "dist")],
+                               check=True, capture_output=True, text=True)
+        self.assertNotIn("absent from the `packages`", built.stdout + built.stderr)
         wheel = next((work / "dist").glob("turno-*.whl"))
         subprocess.run([str(py), "-m", "pip", "install", "-q", str(wheel)], check=True)
         env = {**os.environ, "TURNO_HOME": str(work / "home")}
