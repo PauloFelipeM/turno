@@ -12,6 +12,7 @@ import subprocess
 import time
 from pathlib import Path
 
+from . import __version__
 from . import autopilot
 from . import backlog
 from . import config
@@ -20,6 +21,7 @@ from . import feed
 from . import history
 from . import overrides
 from . import paths
+from . import pypi
 from . import schedule
 from . import repo_setup as setup
 
@@ -266,6 +268,7 @@ def overview(home, cache, homes=None):
             "blocked_summary": blocked.get(entry["name"]) if any(
                 e["status"] == "blocked" for e in entry["engines"].values()) else None})
     return {"engines": views, "projects": out_projects, "errors": errors, "now": now, **general(home),
+            "version": __version__, "update": pypi.notice(home),
             "live": [{k: v for k, v in r.items() if k not in ("path", "root")} for r in live_runs(home, homes)]}
 
 

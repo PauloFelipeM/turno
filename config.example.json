@@ -20,7 +20,7 @@
       },
       "safety_factor": 1.5, "primary_cap": 100,
       "initial_cost_primary": 8.0, "initial_cost_secondary": 1.5, "blocked_cooldown_hours": 6,
-      "schedule": null
+      "schedule": null, "autostart": true
     },
     "claude": {
       "enabled": false,
@@ -32,8 +32,9 @@
       },
       "safety_factor": 1.5, "primary_cap": 100,
       "initial_cost_primary": 8.0, "initial_cost_secondary": 1.5, "blocked_cooldown_hours": 6,
-      "schedule": {"start": "fri 19:00", "end": "sun 03:00", "start_margin_minutes": 15}
+      "schedule": {"start": "fri 19:00", "end": "sun 03:00", "start_margin_minutes": 15}, "autostart": true
     }
   },
-  "notify": {"enabled": true, "server": "https://ntfy.sh", "decision_timeout_hours": 4}
+  "notify": {"enabled": true, "server": "https://ntfy.sh", "decision_timeout_hours": 4},
+  "update_check": true
 }

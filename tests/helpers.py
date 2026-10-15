@@ -29,10 +29,16 @@ def load(tmp):
     ap.SECRETS = tmp / "secrets.toml"
     if "turno.coord" in sys.modules:
         sys.modules["turno.coord"].SHARED = tmp / "shared"
+    from turno import pypi
+    pypi._fetch = _no_network  # a test never reaches PyPI; the tests of the check patch it again
     ap.sent = []
     ap.real_ntfy = ap.ntfy  # for the tests of the sender itself, with the network mocked
     ap.ntfy = lambda cfg, title, message, **kw: ap.sent.append((title, message))
     return ap
+
+
+def _no_network(url):
+    raise AssertionError(f"a test tried to reach {url}")
 
 
 def git_repo(path):

@@ -35,6 +35,7 @@ _COMMON = {
     "initial_cost_secondary": 1.5,
     "blocked_cooldown_hours": 6,
     "schedule": None,
+    "autostart": True,  # `serve --start-engines` (the service) starts this engine's loop
 }
 # The orchestrator keeps `orchestrator_model` / `orchestrator_effort`; the other roles live in `roles`.
 ROLES = ("planner", "implementer", "reviewer")
@@ -191,6 +192,8 @@ def _validate_engine(name, e, problems):
     for key in ("initial_cost_primary", "initial_cost_secondary", "blocked_cooldown_hours"):
         if not (_num(e.get(key)) and e[key] >= 0):
             problems.append(f"{where}.{key} must be a number >= 0")
+    if "autostart" in e and not isinstance(e["autostart"], bool):
+        problems.append(f"{where}.autostart must be true or false")
     if "max_subagents" in e:
         m = e["max_subagents"]
         if not (isinstance(m, int) and not isinstance(m, bool) and m >= 1):
@@ -221,6 +224,8 @@ def validate(data):
                 problems.append(f"engines.{name}: unknown engine")
             else:
                 _validate_engine(name, e, problems)
+    if "update_check" in data and not isinstance(data["update_check"], bool):
+        problems.append("update_check must be true or false")
     if "language" in data and data["language"] not in LANGUAGES:
         problems.append(f"language must be one of {', '.join(LANGUAGES)}")
     notify = data.get("notify")
@@ -340,7 +345,7 @@ def for_engine(data, engine):
     e["roles"] = full_roles(engine, e.get("roles"))
     out = {
         "enabled": bool(e.get("enabled")),
-        "defaults": {k: v for k, v in e.items() if k not in ("enabled", "schedule")},
+        "defaults": {k: v for k, v in e.items() if k not in ("enabled", "schedule", "autostart")},
         "project": [],
         "engine": {"kind": engine},
         "notify": dict(data["notify"]),

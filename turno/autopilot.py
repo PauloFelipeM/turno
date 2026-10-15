@@ -1770,7 +1770,7 @@ def cmd_reset(args):
 def cmd_serve(args):
     from . import server  # only the panel needs it
 
-    server.serve(HOME, args.port)
+    server.serve(HOME, args.port, start_engines=args.start_engines)
 
 
 def main():
@@ -1797,6 +1797,8 @@ def main():
     sub.add_parser("test-notify").set_defaults(func=cmd_test_notify)
     serve = sub.add_parser("serve")
     serve.add_argument("--port", type=int, default=8765)
+    serve.add_argument("--start-engines", action="store_true",
+                       help="also start the enabled engines whose autostart is on (what the service runs)")
     serve.set_defaults(func=cmd_serve)
     args = parser.parse_args()
     if args.cmd != "serve":  # the panel reads every instance; it does not pick one

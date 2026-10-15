@@ -91,6 +91,25 @@ def engine_action(home, engine, action):
     return 202, {"ok": True}
 
 
+def start_engines(home):
+    """`serve --start-engines`: starts, like the "Iniciar" button, each engine that is enabled, has
+    `autostart` on and has no loop running. Returns {engine: result} (see `autopilot.start_loops`).
+
+    An unreadable config starts nothing. The loops are tmux processes of their own: the panel going
+    down later never stops them."""
+    try:
+        data = config.load(home)
+    except (config.ConfigError, OSError) as e:
+        print(f"config.json is invalid; no engine started: {e}", flush=True)
+        return {}
+    names = [k for k in config.ENGINES
+             if isinstance(data["engines"].get(k), dict) and data["engines"][k].get("enabled") is True
+             and data["engines"][k].get("autostart", True) is not False and panel.loop_pid(home, k) is None]
+    if not names:
+        return {}
+    return autopilot.start_loops(names)
+
+
 def _project_entry(d, name):
     """d["projects"][name], replacing anything that is not an object (a corrupt file) with {}."""
     if not isinstance(d.get("projects"), dict):
@@ -427,7 +446,7 @@ def cancel_setup(home, name):
 
 
 ENGINE_FIELDS = ("enabled", "orchestrator_model", "orchestrator_effort", "max_subagents", "primary_cap",
-                 "safety_factor", "blocked_cooldown_hours", "schedule", "roles")
+                 "safety_factor", "blocked_cooldown_hours", "schedule", "roles", "autostart")
 ROLE_FIELDS = ("model", "effort")
 SCHEDULE_FIELDS = ("start", "end", "start_margin_minutes")
 DEFAULT_MARGIN = 15  # like schedule.from_config and the TOML import

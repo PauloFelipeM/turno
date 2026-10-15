@@ -20,6 +20,7 @@ from . import config
 from . import control
 from . import feed
 from . import panel
+from . import pypi
 
 WEB = Path(__file__).resolve().parent / "web"
 TYPES = {".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8",
@@ -237,7 +238,9 @@ class Server(ThreadingHTTPServer):
         super().__init__(("127.0.0.1", port), Handler)
 
 
-def serve(home, port):
+def serve(home, port, start_engines=False):
+    """The panel until Ctrl+C or SIGTERM. With `start_engines` (the service), it also starts the
+    enabled engines with `autostart` once the port is bound (`control.start_engines`)."""
     hub = Hub(home)
     try:
         srv = Server(hub, port)
@@ -246,6 +249,9 @@ def serve(home, port):
             sys.exit(f"port {port} is in use; pick another with --port")
         raise
     threading.Thread(target=hub.run, daemon=True).start()
+    threading.Thread(target=pypi.watch, args=(home, hub.stopped), daemon=True).start()
+    if start_engines:
+        threading.Thread(target=control.start_engines, args=(home,), daemon=True).start()
     print(f"panel at http://localhost:{srv.server_address[1]}", flush=True)
     try:
         srv.serve_forever()
