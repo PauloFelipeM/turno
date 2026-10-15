@@ -82,7 +82,7 @@ function SetupPanel({ name, su, reload }: { name: string; su: SetupDetail | null
                 {f.text == null ? (
                   <p className="text-xs text-muted-foreground">{t("setup.tooLarge", { size: f.size })}</p>
                 ) : (
-                  <ScrollArea className="h-64 rounded-md border bg-muted/40">
+                  <ScrollArea className="max-h-64 rounded-md border bg-muted/40">
                     <pre className="p-3 font-mono text-xs whitespace-pre-wrap">{f.text}</pre>
                   </ScrollArea>
                 )}

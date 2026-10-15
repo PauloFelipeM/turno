@@ -13,7 +13,7 @@ export function ScrollArea({ className, children, viewportRef, onViewportScroll,
       <ScrollAreaPrimitive.Viewport
         ref={viewportRef}
         onScroll={onViewportScroll}
-        className="size-full rounded-[inherit] outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50"
+        className="size-full max-h-[inherit] rounded-[inherit] outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50"
       >
         {children}
       </ScrollAreaPrimitive.Viewport>

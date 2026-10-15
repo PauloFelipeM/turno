@@ -35,7 +35,7 @@ function RunCard({ run, items }: { run: LiveRun; items: FeedItem[] }) {
       </CardHeader>
       <CardContent>
         <ScrollArea
-          className="h-80 rounded-md border bg-muted/30"
+          className="max-h-80 rounded-md border bg-muted/30"
           viewportRef={viewport}
           onViewportScroll={(ev) => {
             const v = ev.currentTarget;
