@@ -125,7 +125,8 @@ restarts the panel, and the panel starts the engines again.
 | `turno test-notify` | Send a test notification |
 | `turno --engine claude <command>` | Any command for the Claude instance (the default is `codex`) |
 
-The service runs `turno serve --start-engines`. Without systemd (WSL without it, containers) or
+The service runs `turno serve --start-engines`. Its unit says `KillMode=process`, so only the panel
+belongs to it: the loops live in tmux and stay alive when the service restarts or stops. Without systemd (WSL without it, containers) or
 launchd, keep the panel running yourself, for example in tmux. On Linux, run
 `loginctl enable-linger $USER` once so the service starts at boot without a login.
 
@@ -159,14 +160,20 @@ version exists; it never installs anything by itself.
 ### Upgrading from a source checkout
 
 If you ran turno from a clone (`python3 autopilot.py ...`), keep the clone and install it in
-editable mode, so `git pull` keeps updating it:
+editable mode, so `git pull` keeps updating it. Order matters: a loop that is still running with
+the old code reads `prompts/*.md` and `claude-agents.json` from the clone on every unit, and those
+files move into `turno/` with the `git pull`. So stop everything first:
 
 ```bash
-cd ~/src/turno && git pull
+cd ~/src/turno
+python3 autopilot.py stop        # still the old code: stops the loops (stop a hand-started `serve` too)
+git pull
 pipx install -e .
 turno service install
-turno restart
+turno restart                    # or: turno start
 ```
+
+Stop a hand-started `serve` before installing the service: port 8765 must be free.
 
 `~/.turno` (config, state, history) is used as it is. `python3 autopilot.py ...` keeps working, and
 `turno stop` recognises loops started either way. With an editable install `turno update` only
