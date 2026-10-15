@@ -14,6 +14,11 @@ The project waits for the answer until the deadline; without an answer the defau
 Meanwhile the other projects keep going.
 
 Usage:
+  turno onboard                    check this machine, write ~/.turno, install the service, open the panel
+  turno serve [--port 8765]        the panel at http://localhost:8765 (--start-engines: also start the loops)
+  turno service install|uninstall|status   the background service that keeps the panel up
+  turno restart                    stop the loops, restart the service; the panel starts them again
+  turno update                     upgrade with pipx or uv, then restart
   turno start                      start the loops of the enabled engines in the tmux session "autopilot"
   turno stop                       stop the loops (like a Ctrl+C in each)
   turno run                        a single loop, the Codex one (Ctrl+C stops; running again resumes)
@@ -23,7 +28,6 @@ Usage:
   turno decisions                  pending decisions
   turno answer NAME ID OPTION      answer a decision from the terminal
   turno test-notify                send a test notification
-  turno serve [--port 8765]        the panel at http://localhost:8765 (follows and controls the loops)
   turno --engine claude run        the Claude loop; --engine works with every command (default: codex)
 """
 
@@ -1789,6 +1793,12 @@ def cmd_service(args):
         print(f"{st['kind']}: installed, {'running' if st['active'] else 'not running'} ({service.path_for(st['kind'])})")
 
 
+def cmd_onboard(args):
+    from . import onboard
+
+    sys.exit(onboard.run(args, HOME))
+
+
 def cmd_restart(args):
     from . import upgrade
 
@@ -1802,7 +1812,7 @@ def cmd_update(args):
 
 
 # Commands that act on turno as a whole: no engine instance, no loop log.
-NO_INSTANCE = {"serve", "service", "restart", "update"}
+NO_INSTANCE = {"serve", "service", "restart", "update", "onboard"}
 
 
 def main():
@@ -1832,6 +1842,11 @@ def main():
     serve.add_argument("--start-engines", action="store_true",
                        help="also start the enabled engines whose autostart is on (what the service runs)")
     serve.set_defaults(func=cmd_serve)
+    from . import onboard
+
+    onboard_cmd = sub.add_parser("onboard", help="check this machine, write ~/.turno, install the service, open the panel")
+    onboard.add_arguments(onboard_cmd)
+    onboard_cmd.set_defaults(func=cmd_onboard)
     service_cmd = sub.add_parser("service", help="the background service that keeps the panel up")
     service_cmd.add_argument("action", choices=("install", "uninstall", "status"))
     service_cmd.set_defaults(func=cmd_service)

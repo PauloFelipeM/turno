@@ -11,7 +11,7 @@ PKG = ROOT / "turno"  # the package: code, prompts, roles and the panel
 sys.path.insert(0, str(ROOT))
 
 MODULES = ("autopilot", "coord", "engines", "schedule", "paths", "history", "backlog", "feed", "panel", "control", "server",
-           "messages", "upgrade")
+           "messages", "upgrade", "onboard")
 
 
 def load(tmp):
@@ -29,9 +29,9 @@ def load(tmp):
     ap.SECRETS = tmp / "secrets.toml"
     if "turno.coord" in sys.modules:
         sys.modules["turno.coord"].SHARED = tmp / "shared"
-    from turno import pypi, service, upgrade
+    from turno import onboard, pypi, service, upgrade
     pypi._fetch = _no_network  # a test never reaches PyPI; the tests of the check patch it again
-    service._run = upgrade._run = _no_command  # nor systemctl, launchctl, pipx or uv
+    service._run = upgrade._run = onboard._run = _no_command  # nor systemctl, launchctl, pipx, uv or a CLI
     ap.sent = []
     ap.real_ntfy = ap.ntfy  # for the tests of the sender itself, with the network mocked
     ap.ntfy = lambda cfg, title, message, **kw: ap.sent.append((title, message))
