@@ -44,7 +44,7 @@ class ServerTest(unittest.TestCase):
         status, ctype, body = self.get("/api/overview")
         self.assertEqual(status, 200)
         self.assertTrue(ctype.startswith("application/json"))
-        self.assertEqual([p["name"] for p in json.loads(body)["projects"]], ["my-app", "my-api", "side-project"])
+        self.assertEqual([p["name"] for p in json.loads(body)["projects"]], ["my-api", "my-app", "side-project"])
         self.assertNotIn(b"segredo-xyz", body)
 
     def test_localhost_host_is_accepted(self):

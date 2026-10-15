@@ -35,7 +35,7 @@ class HistoryTest(unittest.TestCase):
     def setUp(self):
         self.tmp = Path(tempfile.mkdtemp())
         self.ap = helpers.load(self.tmp)
-        self.project = {"name": "my-api", "path": str(self.tmp / "my-api"), "weekly_cap": 90}
+        self.project = {"name": "my-app", "path": str(self.tmp / "my-app"), "weekly_cap": 90}
         Path(self.project["path"]).mkdir()
         self.cfg = {"defaults": {"initial_cost_primary": 8, "initial_cost_secondary": 1.5, "safety_factor": 1.5,
                                  "primary_cap": 100, "blocked_cooldown_hours": 6},
@@ -61,7 +61,7 @@ class HistoryTest(unittest.TestCase):
         self.assertEqual(line["outcome"], "unfinished")
         self.assertFalse(line["closed"])
         self.assertNotIn("summary", line)
-        self.assertEqual(self.state["my-api"]["unit_id"], line["unit_id"])
+        self.assertEqual(self.state["my-app"]["unit_id"], line["unit_id"])
 
     def test_closing_run_records_summary_and_cost_once(self):
         engine = CostEngine(TRUE)
@@ -74,7 +74,7 @@ class HistoryTest(unittest.TestCase):
         self.assertTrue(second["closed"])
         self.assertEqual((second["unit"], second["summary"], second["milestone"]), ("Task 4", "feito", "M"))
         self.assertEqual(second["cost"], {"primary": 4.4, "secondary": 0.5})
-        self.assertIsNone(self.state["my-api"]["unit_id"])
+        self.assertIsNone(self.state["my-app"]["unit_id"])
 
     def test_next_unit_gets_a_new_id(self):
         engine = helpers.FakeEngine(TRUE)
@@ -91,12 +91,12 @@ class HistoryTest(unittest.TestCase):
         self.assertEqual([l["outcome"] for l in self.lines()], ["usage_limit", "error"])
 
     def test_cut_passes_the_unit_id_with_the_baton(self):
-        self.ap.coord.claim("my-api", "claude")
+        self.ap.coord.claim("my-app", "claude")
         self.do_run(helpers.FakeEngine(SLEEP, name="claude"), deadline=time.time() + 1)
         [cut] = self.lines()
         self.assertEqual(cut["outcome"], "cut")
-        self.assertEqual(self.ap.coord.read_claim("my-api")["unit_id"], cut["unit_id"])
-        self.assertIsNone(self.state["my-api"]["unit_id"])
+        self.assertEqual(self.ap.coord.read_claim("my-app")["unit_id"], cut["unit_id"])
+        self.assertIsNone(self.state["my-app"]["unit_id"])
         codex = helpers.FakeEngine(TRUE, name="codex")
         self.ap.run_project(self.cfg, codex, self.state, self.project, {}, None)
         self.assertEqual(self.lines()[-1]["unit_id"], cut["unit_id"])

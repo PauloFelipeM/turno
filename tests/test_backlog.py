@@ -70,7 +70,7 @@ class AfterUnitTest(unittest.TestCase):
     def setUp(self):
         self.tmp = Path(tempfile.mkdtemp())
         self.ap = helpers.load(self.tmp)
-        self.project = {"name": "my-api", "path": str(self.tmp / "my-api"), "weekly_cap": 90}
+        self.project = {"name": "my-app", "path": str(self.tmp / "my-app"), "weekly_cap": 90}
         Path(self.project["path"]).mkdir()
         self.cfg = {"defaults": {"initial_cost_primary": 8, "initial_cost_secondary": 1.5, "safety_factor": 1.5,
                                  "primary_cap": 100, "blocked_cooldown_hours": 6},
@@ -90,7 +90,7 @@ class AfterUnitTest(unittest.TestCase):
     def test_invalid_backlog_is_logged_and_the_unit_still_closes(self):
         self.close("{}")
         self.assertIn("backlog.json missing or invalid", self.ap.LOG.read_text())
-        self.assertFalse(self.state["my-api"]["interrupted"])
+        self.assertFalse(self.state["my-app"]["interrupted"])
 
     def test_valid_backlog_is_not_logged(self):
         self.close(json.dumps(GOOD))

@@ -13,7 +13,7 @@ CTX = mp.get_context("fork")
 def _claim_in_child(shared, engine, start, results):
     coord.SHARED = Path(shared)
     start.wait()
-    results.put((engine, coord.claim("my-app", engine)))
+    results.put((engine, coord.claim("my-api", engine)))
 
 
 def _hold_lock(shared, ready, release):
@@ -42,14 +42,14 @@ class CoordTest(unittest.TestCase):
         got = dict(results.get(timeout=5) for _ in procs)
         self.assertEqual(sorted(got.values()), [False, True])
         winner = next(e for e, ok in got.items() if ok)
-        self.assertEqual(coord.read_claim("my-app")["engine"], winner)
+        self.assertEqual(coord.read_claim("my-api")["engine"], winner)
 
     def test_claim_is_idempotent_for_the_owner(self):
-        self.assertTrue(coord.claim("my-api", "codex"))
-        self.assertTrue(coord.claim("my-api", "codex"))
-        self.assertFalse(coord.claim("my-api", "claude"))
-        self.assertTrue(coord.held_by_other("my-api", "claude"))
-        self.assertFalse(coord.held_by_other("my-api", "codex"))
+        self.assertTrue(coord.claim("my-app", "codex"))
+        self.assertTrue(coord.claim("my-app", "codex"))
+        self.assertFalse(coord.claim("my-app", "claude"))
+        self.assertTrue(coord.held_by_other("my-app", "claude"))
+        self.assertFalse(coord.held_by_other("my-app", "codex"))
 
     def test_handoff_can_be_taken_by_any_engine(self):
         coord.claim("side-project", "claude")
@@ -66,11 +66,11 @@ class CoordTest(unittest.TestCase):
         self.assertEqual(coord.read_claim("side-project")["engine"], "codex")
 
     def test_release_only_removes_own_claim(self):
-        coord.claim("my-app", "codex")
-        coord.release("my-app", "claude")
-        self.assertIsNotNone(coord.read_claim("my-app"))
-        coord.release("my-app", "codex")
-        self.assertIsNone(coord.read_claim("my-app"))
+        coord.claim("my-api", "codex")
+        coord.release("my-api", "claude")
+        self.assertIsNotNone(coord.read_claim("my-api"))
+        coord.release("my-api", "codex")
+        self.assertIsNone(coord.read_claim("my-api"))
 
     def test_group_lock_excludes_and_frees_on_death(self):
         ready, release = CTX.Event(), CTX.Event()
@@ -78,7 +78,7 @@ class CoordTest(unittest.TestCase):
         child.start()
         self.assertTrue(ready.wait(10))
         self.assertIsNone(coord.try_lock("web"))
-        self.assertIsNotNone(coord.try_lock("my-api"))
+        self.assertIsNotNone(coord.try_lock("my-app"))
         release.set()
         child.join(10)
         handle = coord.try_lock("web")
@@ -92,15 +92,15 @@ class CoordTest(unittest.TestCase):
         self.assertIsNotNone(coord.try_lock("decisions"))
 
     def test_group_of(self):
-        self.assertEqual(coord.group_of({"name": "my-app", "docker_group": "web"}), "web")
-        self.assertEqual(coord.group_of({"name": "my-api"}), "my-api")
+        self.assertEqual(coord.group_of({"name": "my-api", "docker_group": "web"}), "web")
+        self.assertEqual(coord.group_of({"name": "my-app"}), "my-app")
 
     def test_reconcile(self):
-        coord.claim("my-app", "codex")       # claim without an open unit: removed
+        coord.claim("my-api", "codex")       # claim without an open unit: removed
         coord.claim("side-project", "claude")       # open unit, other engine's claim: conflict
-        conflicts = coord.reconcile("codex", {"my-app": False, "my-api": True, "side-project": True})
-        self.assertIsNone(coord.read_claim("my-app"))
-        self.assertEqual(coord.read_claim("my-api")["engine"], "codex")
+        conflicts = coord.reconcile("codex", {"my-api": False, "my-app": True, "side-project": True})
+        self.assertIsNone(coord.read_claim("my-api"))
+        self.assertEqual(coord.read_claim("my-app")["engine"], "codex")
         self.assertEqual(conflicts, ["side-project"])
 
     def test_notify_round_trip_and_default(self):
@@ -109,9 +109,9 @@ class CoordTest(unittest.TestCase):
         self.assertEqual(coord.load_notify({"since": "a"}), {"since": "b", "since_typed": "c"})
 
     def test_claims_lists_everything(self):
-        coord.claim("my-app", "codex")
-        coord.claim("my-api", "claude")
-        self.assertEqual(set(coord.claims()), {"my-app", "my-api"})
+        coord.claim("my-api", "codex")
+        coord.claim("my-app", "claude")
+        self.assertEqual(set(coord.claims()), {"my-api", "my-app"})
 
 
 if __name__ == "__main__":

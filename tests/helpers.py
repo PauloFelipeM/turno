@@ -142,7 +142,7 @@ def make_home(home, topic="segredo-xyz"):
     """Sample data folder: Codex and Claude, three projects, `config.json` and the ntfy topic in `secrets.toml`."""
     home = Path(home)
     projects = {}
-    for name in ("my-app", "my-api", "side-project"):
+    for name in ("my-api", "my-app", "side-project"):
         projects[name] = home / "projects" / name
         (projects[name] / ".superpowers" / "autopilot" / "decisions").mkdir(parents=True)
     (home / "secrets.toml").write_text(f'[notify]\ntopic = "{topic}"\n')

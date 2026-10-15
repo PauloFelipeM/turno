@@ -23,7 +23,7 @@ class SetupApiTest(unittest.TestCase):
         self.panel, self.setup = panel, setup
         self.projects = helpers.make_home(self.home)
         helpers.git_repo(self.projects["side-project"])
-        helpers.git_repo(self.projects["my-api"])
+        helpers.git_repo(self.projects["my-app"])
         patch = mock.patch.object(engines, "cli_status", lambda name, max_age=60: dict(CLI))  # never run a real CLI
         patch.start()
         self.addCleanup(patch.stop)
@@ -77,18 +77,18 @@ class SetupApiTest(unittest.TestCase):
                  ("/api/projects/side-project/setup", {"goal": 5}, 400, "bad_request"),
                  ("/api/projects/side-project/setup", {"goal": "x" * 4001}, 400, "bad_request"),
                  ("/api/projects/side-project/setup", {"goal": "g", "other": 1}, 400, "bad_request"),
-                 ("/api/projects/my-app/setup", {"goal": "g"}, 400, "not_git")]
+                 ("/api/projects/my-api/setup", {"goal": "g"}, 400, "not_git")]
         for path, body, code, error in cases:
             status, out = self.call("POST", path, body)
             self.assertEqual((status, out["error"]), (code, error), body)
         self.assertFalse((self.home / "setup").exists())
 
     def test_create_refused_when_prepared_or_open(self):
-        (self.projects["my-api"] / "docs").mkdir()
-        (self.projects["my-api"] / "docs" / "autopilot.md").write_text("x")
-        status, out = self.call("POST", "/api/projects/my-api/setup", {"goal": "g"})
+        (self.projects["my-app"] / "docs").mkdir()
+        (self.projects["my-app"] / "docs" / "autopilot.md").write_text("x")
+        status, out = self.call("POST", "/api/projects/my-app/setup", {"goal": "g"})
         self.assertEqual((status, out["error"]), (409, "prepared"))
-        self.assertIsNone(self.phase("my-api"))
+        self.assertIsNone(self.phase("my-app"))
         for phase in ("requested", "review", "approved"):
             self.setup.update(self.home, "side-project", lambda cur, ph=phase: {**self.setup.new_request("old"), "status": ph})
             status, out = self.call("POST", "/api/projects/side-project/setup", {"goal": "new"})
@@ -118,7 +118,7 @@ class SetupApiTest(unittest.TestCase):
         self.assertEqual(body["files"][0]["text"], "olá")
         self.assertIsNone(body["files"][2]["text"])
         self.assertEqual(self.call("GET", "/api/projects/nope/setup")[0], 404)
-        self.assertEqual(self.call("GET", "/api/projects/my-api/setup")[1], {"request": None, "files": []})
+        self.assertEqual(self.call("GET", "/api/projects/my-app/setup")[1], {"request": None, "files": []})
 
     def test_get_setup_never_reads_through_a_symlink(self):
         secret = self.home / "secret.md"
@@ -130,9 +130,9 @@ class SetupApiTest(unittest.TestCase):
         outside = self.home / "outside"
         outside.mkdir()
         (outside / "notes.md").write_text("SECRET")
-        other = self.projects["my-api"] / ".superpowers" / "autopilot" / "setup"
+        other = self.projects["my-app"] / ".superpowers" / "autopilot" / "setup"
         other.symlink_to(outside, target_is_directory=True)
-        body = self.call("GET", "/api/projects/my-api/setup")[1]
+        body = self.call("GET", "/api/projects/my-app/setup")[1]
         self.assertEqual(body["files"], [])
         self.assertNotIn("SECRET", json.dumps(body))
 
@@ -175,13 +175,13 @@ class SetupApiTest(unittest.TestCase):
     def test_writes_need_the_guard(self):
         self.put_review()
         before = (self.home / "setup" / "side-project.json").read_bytes()
-        for method, path, body in (("POST", "/api/projects/my-api/setup", {"goal": "g"}),
+        for method, path, body in (("POST", "/api/projects/my-app/setup", {"goal": "g"}),
                                    ("POST", "/api/projects/side-project/setup/approve", {}),
                                    ("POST", "/api/projects/side-project/setup/changes", {"feedback": "f"}),
                                    ("DELETE", "/api/projects/side-project/setup", None)):
             self.assertEqual(self.call(method, path, body, turno=None)[0], 403, path)
         self.assertEqual((self.home / "setup" / "side-project.json").read_bytes(), before)
-        self.assertIsNone(self.phase("my-api"))
+        self.assertIsNone(self.phase("my-app"))
 
     def test_removing_a_project_deletes_its_request_only(self):
         self.put_review()
@@ -195,9 +195,9 @@ class SetupApiTest(unittest.TestCase):
     def test_overview_and_config_carry_the_phase(self):
         self.put_review()
         o = {p["name"]: p for p in self.panel.overview(self.home, {}, self.homes)["projects"]}
-        self.assertEqual((o["side-project"]["setup"], o["my-api"]["setup"]), ("review", None))
+        self.assertEqual((o["side-project"]["setup"], o["my-app"]["setup"]), ("review", None))
         c = {p["name"]: p for p in self.call("GET", "/api/config")[1]["projects"]}
-        self.assertEqual((c["side-project"]["setup"], c["my-api"]["setup"]), ("review", None))
+        self.assertEqual((c["side-project"]["setup"], c["my-app"]["setup"]), ("review", None))
         self.assertIn(self.home / "setup" / "side-project.json", self.panel.watched_files(self.home))
 
 

@@ -27,28 +27,28 @@ class PanelTest(unittest.TestCase):
         self.projects = helpers.make_home(self.home)
         self.homes = {"codex": self.home / "codex-cli", "claude": self.home / "claude-cli"}
         self.cache = {}
-        my-app = self.projects["my-app"] / ".superpowers" / "autopilot"
-        (my-app / "backlog.json").write_text(json.dumps(BACKLOG))
-        (my-app / "decisions" / "pay.json").write_text(json.dumps(DECISION))
-        (my-app / "decisions" / "old.json").write_text(json.dumps(dict(DECISION, id="old", answer="a")))
+        my_api = self.projects["my-api"] / ".superpowers" / "autopilot"
+        (my_api / "backlog.json").write_text(json.dumps(BACKLOG))
+        (my_api / "decisions" / "pay.json").write_text(json.dumps(DECISION))
+        (my_api / "decisions" / "old.json").write_text(json.dumps(dict(DECISION, id="old", answer="a")))
         (self.home / "state.json").write_text(json.dumps({
-            "my-app": {"status": "active", "interrupted": True, "unit_id": "u1", "run": {"id": "r2", "started": time.time()},
+            "my-api": {"status": "active", "interrupted": True, "unit_id": "u1", "run": {"id": "r2", "started": time.time()},
                         "cost": {"primary": 8, "secondary": 1.5}},
-            "my-api": {"status": "blocked", "blocked_until": 99, "cost": {"primary": 8, "secondary": 1.5}},
-            "_loop": {"phase": "running", "project": "my-app", "until": None}}))
+            "my-app": {"status": "blocked", "blocked_until": 99, "cost": {"primary": 8, "secondary": 1.5}},
+            "_loop": {"phase": "running", "project": "my-api", "until": None}}))
         (self.home / "state-claude.json").write_text(json.dumps({
             "_engine": {"limits": {"primary": {"used_percent": 10, "resets_at": time.time() + 3600},
                                    "secondary": {"used_percent": 40, "resets_at": time.time() + 86400}},
                         "limits_at": 0}}))
         (self.home / "shared" / "claims").mkdir(parents=True)
-        (self.home / "shared" / "claims" / "my-app.json").write_text(json.dumps({"engine": "codex", "since": 1}))
+        (self.home / "shared" / "claims" / "my-api.json").write_text(json.dumps({"engine": "codex", "since": 1}))
         (self.home / "runs").mkdir()
         shutil.copy(FIXTURES / "codex-run.jsonl", self.home / "runs" / "r1.jsonl")
         shutil.copy(FIXTURES / "codex-run.jsonl", self.home / "runs" / "r2.jsonl")
         lines = [
-            {"unit_id": "u0", "run": "r0", "project": "my-api", "engine": "claude", "outcome": "worked", "closed": True,
+            {"unit_id": "u0", "run": "r0", "project": "my-app", "engine": "claude", "outcome": "worked", "closed": True,
              "started_at": "2026-10-10T10:00:00-03:00", "ended_at": "2026-10-10T10:05:00-03:00", "unit": "antiga"},
-            {"unit_id": "u1", "run": "r1", "project": "my-app", "engine": "codex", "outcome": "unfinished", "closed": False,
+            {"unit_id": "u1", "run": "r1", "project": "my-api", "engine": "codex", "outcome": "unfinished", "closed": False,
              "started_at": "2026-10-11T00:27:02-03:00", "ended_at": "2026-10-11T00:35:07-03:00"},
         ]
         (self.home / "history-claude.jsonl").write_text(json.dumps(lines[0]) + "\n")
@@ -100,7 +100,7 @@ class PanelTest(unittest.TestCase):
         self.start_loop("codex")
         o = self.overview()
         codex, claude = o["engines"]
-        self.assertEqual((codex["engine"], codex["loop"]["phase"], codex["loop"]["project"]), ("codex", "running", "my-app"))
+        self.assertEqual((codex["engine"], codex["loop"]["phase"], codex["loop"]["project"]), ("codex", "running", "my-api"))
         self.assertEqual(claude["loop"]["phase"], "stopped")
         self.assertTrue(claude["limits"]["known"])
         self.assertEqual(claude["limits"]["secondary"]["used"], 40)
@@ -117,42 +117,42 @@ class PanelTest(unittest.TestCase):
 
     def test_overview_projects(self):
         o = self.overview()
-        self.assertEqual([p["name"] for p in o["projects"]], ["my-app", "my-api", "side-project"])
-        my-app, my-api, side-project = o["projects"]
-        self.assertEqual(my-app["claim"], {"engine": "codex", "handoff_from": None})
-        self.assertEqual(my-app["engines"]["codex"]["interrupted"], True)
-        self.assertEqual(my-app["backlog"]["current"]["id"], "admin")
-        self.assertEqual((my-app["backlog"]["done"], my-app["backlog"]["total"]), (1, 3))
-        self.assertEqual(my-app["decisions"], 1)
-        self.assertEqual(my-api["engines"]["codex"]["status"], "blocked")
-        self.assertEqual(my-api["backlog"], {"error": "missing"})
+        self.assertEqual([p["name"] for p in o["projects"]], ["my-api", "my-app", "side-project"])
+        my_api, my_app, side_project = o["projects"]
+        self.assertEqual(my_api["claim"], {"engine": "codex", "handoff_from": None})
+        self.assertEqual(my_api["engines"]["codex"]["interrupted"], True)
+        self.assertEqual(my_api["backlog"]["current"]["id"], "admin")
+        self.assertEqual((my_api["backlog"]["done"], my_api["backlog"]["total"]), (1, 3))
+        self.assertEqual(my_api["decisions"], 1)
+        self.assertEqual(my_app["engines"]["codex"]["status"], "blocked")
+        self.assertEqual(my_app["backlog"], {"error": "missing"})
 
     def test_overview_control_fields(self):
         from turno import overrides
-        my-app, my-api, side-project = self.overview()["projects"]
-        self.assertEqual((my-app["paused"], my-app["next"], side-project["paused"]), (False, False, False))
-        self.assertEqual([d["id"] for d in my-app["decisions_open"]], ["pay"])
-        self.assertEqual(my-app["decisions"], 1)
-        self.assertEqual(side-project["decisions_open"], [])
-        overrides.update(self.home, lambda d: d.update(next="side-project", projects={"my-api": {"paused": True}}))
-        my-app, my-api, side-project = self.overview()["projects"]
-        self.assertEqual((my-api["paused"], my-api["next"], side-project["next"]), (True, False, True))
+        my_api, my_app, side_project = self.overview()["projects"]
+        self.assertEqual((my_api["paused"], my_api["next"], side_project["paused"]), (False, False, False))
+        self.assertEqual([d["id"] for d in my_api["decisions_open"]], ["pay"])
+        self.assertEqual(my_api["decisions"], 1)
+        self.assertEqual(side_project["decisions_open"], [])
+        overrides.update(self.home, lambda d: d.update(next="side-project", projects={"my-app": {"paused": True}}))
+        my_api, my_app, side_project = self.overview()["projects"]
+        self.assertEqual((my_app["paused"], my_app["next"], side_project["next"]), (True, False, True))
 
     def test_decisions_open_only_has_sent_unanswered_decisions(self):
-        folder = self.projects["my-app"] / ".superpowers" / "autopilot" / "decisions"
+        folder = self.projects["my-api"] / ".superpowers" / "autopilot" / "decisions"
         (folder / "unsent.json").write_text(json.dumps(dict(DECISION, id="unsent", notified_at=None)))
-        my-app = self.overview()["projects"][0]
-        self.assertEqual([d["id"] for d in my-app["decisions_open"]], ["pay"])
-        self.assertEqual(my-app["decisions"], 2)
+        my_api = self.overview()["projects"][0]
+        self.assertEqual([d["id"] for d in my_api["decisions_open"]], ["pay"])
+        self.assertEqual(my_api["decisions"], 2)
 
     def test_blocked_summary_is_the_latest_closed_blocked_unit(self):
         self.assertIsNone(self.overview()["projects"][1]["blocked_summary"])
         rows = [
-            {"unit_id": "b1", "project": "my-api", "engine": "codex", "outcome": "blocked", "closed": True,
+            {"unit_id": "b1", "project": "my-app", "engine": "codex", "outcome": "blocked", "closed": True,
              "started_at": "2026-10-11T10:00:00-03:00", "ended_at": "2026-10-11T10:05:00-03:00", "summary": "velho"},
-            {"unit_id": "b2", "project": "my-api", "engine": "codex", "outcome": "blocked", "closed": True,
+            {"unit_id": "b2", "project": "my-app", "engine": "codex", "outcome": "blocked", "closed": True,
              "started_at": "2026-10-12T10:00:00-03:00", "ended_at": "2026-10-12T10:05:00-03:00", "summary": "novo"},
-            {"unit_id": "b3", "project": "my-api", "engine": "codex", "outcome": "blocked", "closed": False,
+            {"unit_id": "b3", "project": "my-app", "engine": "codex", "outcome": "blocked", "closed": False,
              "started_at": "2026-10-13T10:00:00-03:00", "ended_at": "2026-10-13T10:05:00-03:00", "summary": "aberto"},
         ]
         with (self.home / "history-codex.jsonl").open("a") as f:
@@ -168,8 +168,8 @@ class PanelTest(unittest.TestCase):
 
     def test_settings_come_from_the_config(self):
         s = self.panel.settings(self.home)
-        self.assertEqual(s["order"], ["my-app", "my-api", "side-project"])
-        self.assertEqual(s["engines"]["codex"], {"primary_cap": 100, "weekly_cap": {"my-app": 90, "my-api": 90, "side-project": 90}})
+        self.assertEqual(s["order"], ["my-api", "my-app", "side-project"])
+        self.assertEqual(s["engines"]["codex"], {"primary_cap": 100, "weekly_cap": {"my-api": 90, "my-app": 90, "side-project": 90}})
         self.assertNotIn("overridden", s)
 
         def edit(d):
@@ -179,7 +179,7 @@ class PanelTest(unittest.TestCase):
         from turno import config
         config.save(self.home, edit)
         s = self.panel.settings(self.home)
-        self.assertEqual(s["order"], ["side-project", "my-api", "my-app"])
+        self.assertEqual(s["order"], ["side-project", "my-app", "my-api"])
         self.assertEqual(s["engines"]["codex"]["weekly_cap"]["side-project"], 55)
         self.assertEqual(s["engines"]["claude"]["weekly_cap"]["side-project"], 100)  # no value for the engine: 100
         self.assertEqual((s["engines"]["claude"]["primary_cap"], s["engines"]["codex"]["primary_cap"]), (70, 100))
@@ -188,14 +188,14 @@ class PanelTest(unittest.TestCase):
         self.assertEqual(self.overview()["live"], [])
         self.start_loop("codex")
         [live] = self.overview()["live"]
-        self.assertEqual((live["engine"], live["project"], live["unit_id"], live["run"]), ("codex", "my-app", "u1", "r2"))
+        self.assertEqual((live["engine"], live["project"], live["unit_id"], live["run"]), ("codex", "my-api", "u1", "r2"))
         self.assertNotIn("path", live)
         [run] = self.panel.live(self.home, self.homes)
         self.assertEqual(run["items"][0]["kind"], "message")
 
     def test_broken_project_affects_only_its_card(self):
         shutil.rmtree(self.projects["side-project"])
-        (self.projects["my-api"] / ".superpowers" / "autopilot" / "backlog.json").write_text('{"items": [{"id": 1}]}')
+        (self.projects["my-app"] / ".superpowers" / "autopilot" / "backlog.json").write_text('{"items": [{"id": 1}]}')
         o = self.overview()
         self.assertEqual(o["projects"][2]["backlog"], {"error": "missing_path"})
         self.assertEqual(o["projects"][1]["backlog"], {"error": "invalid"})
@@ -209,7 +209,7 @@ class PanelTest(unittest.TestCase):
 
     def test_no_secret_anywhere(self):
         self.start_loop("codex")
-        dumps = json.dumps([self.overview(), self.panel.project_detail(self.home, "my-app", self.cache),
+        dumps = json.dumps([self.overview(), self.panel.project_detail(self.home, "my-api", self.cache),
                             self.panel.units(self.home), self.panel.unit_detail(self.home, "u1"),
                             self.panel.live(self.home, self.homes)])
         self.assertNotIn("segredo-xyz", dumps)
@@ -219,19 +219,19 @@ class PanelTest(unittest.TestCase):
         self.overview()
         self.panel.units(self.home)
         self.panel.unit_detail(self.home, "u1")
-        self.panel.project_detail(self.home, "my-app", self.cache)
+        self.panel.project_detail(self.home, "my-api", self.cache)
         after = sorted((str(p), p.stat().st_mtime_ns) for p in self.home.rglob("*"))
         self.assertEqual(before, after)
 
     def test_project_detail(self):
-        d = self.panel.project_detail(self.home, "my-app", self.cache)
+        d = self.panel.project_detail(self.home, "my-api", self.cache)
         self.assertEqual([i["id"] for i in d["backlog"]["items"]], ["admin", "billing", "chat"])
         self.assertEqual([x["id"] for x in d["decisions"]], ["pay"])
         self.assertIsNone(self.panel.project_detail(self.home, "nope", self.cache))
 
     def test_units_filter_and_page(self):
         self.assertEqual([u["unit_id"] for u in self.panel.units(self.home)], ["u1", "u0"])
-        self.assertEqual([u["unit_id"] for u in self.panel.units(self.home, project="my-api")], ["u0"])
+        self.assertEqual([u["unit_id"] for u in self.panel.units(self.home, project="my-app")], ["u0"])
         self.assertEqual([u["unit_id"] for u in self.panel.units(self.home, before="2026-10-11T00:00:00-03:00")], ["u0"])
         self.assertEqual(len(self.panel.units(self.home, limit=1)), 1)
 
@@ -245,7 +245,7 @@ class PanelTest(unittest.TestCase):
         files = {str(p) for p in self.panel.watched_files(self.home)}
         self.assertIn(str(self.home / "state.json"), files)
         self.assertIn(str(self.home / "history-codex.jsonl"), files)
-        self.assertIn(str(self.projects["my-app"] / ".superpowers" / "autopilot" / "backlog.json"), files)
+        self.assertIn(str(self.projects["my-api"] / ".superpowers" / "autopilot" / "backlog.json"), files)
 
     def test_project_without_path_is_a_config_error(self):
         helpers.write_config(self.home, [{"name": "x"}])
@@ -255,8 +255,8 @@ class PanelTest(unittest.TestCase):
 
     def test_unexpected_json_types_are_tolerated(self):
         (self.home / "state.json").write_text("[]")
-        (self.home / "shared" / "claims" / "my-app.json").write_text("[]")
-        (self.projects["my-app"] / ".superpowers" / "autopilot" / "decisions" / "bad.json").write_text('"x"')
+        (self.home / "shared" / "claims" / "my-api.json").write_text("[]")
+        (self.projects["my-api"] / ".superpowers" / "autopilot" / "decisions" / "bad.json").write_text('"x"')
         o = self.overview()
         self.assertEqual(len(o["engines"]), 2)
         self.assertIsNone(o["projects"][0]["claim"])
@@ -282,9 +282,9 @@ class PanelTest(unittest.TestCase):
         real = self.panel.units
         self.panel.units = lambda *a, **k: calls.append(1) or real(*a, **k)
         self.overview()
-        self.assertEqual(len(calls), 1)  # my-api is blocked in the fixture
+        self.assertEqual(len(calls), 1)  # my-app is blocked in the fixture
         state = json.loads((self.home / "state.json").read_text())
-        state["my-api"]["status"] = "active"
+        state["my-app"]["status"] = "active"
         (self.home / "state.json").write_text(json.dumps(state))
         calls.clear()
         self.assertTrue(all(p["blocked_summary"] is None for p in self.overview()["projects"]))
@@ -299,15 +299,15 @@ class PanelTest(unittest.TestCase):
     def test_overview_shows_retry_at_only_while_it_is_in_the_future(self):
         state = json.loads((self.home / "state.json").read_text())
         soon = time.time() + 600
-        state["my-app"]["retry_at"] = soon
-        state["my-api"]["retry_at"] = time.time() - 5
+        state["my-api"]["retry_at"] = soon
+        state["my-app"]["retry_at"] = time.time() - 5
         state["side-project"] = {"status": "active", "retry_at": "soon"}
         (self.home / "state.json").write_text(json.dumps(state))
-        my-app, my-api, side-project = self.overview()["projects"]
-        self.assertEqual(my-app["engines"]["codex"]["retry_at"], soon)
-        self.assertIsNone(my-app["engines"]["claude"]["retry_at"])
-        self.assertIsNone(my-api["engines"]["codex"]["retry_at"])
-        self.assertIsNone(side-project["engines"]["codex"]["retry_at"])
+        my_api, my_app, side_project = self.overview()["projects"]
+        self.assertEqual(my_api["engines"]["codex"]["retry_at"], soon)
+        self.assertIsNone(my_api["engines"]["claude"]["retry_at"])
+        self.assertIsNone(my_app["engines"]["codex"]["retry_at"])
+        self.assertIsNone(side_project["engines"]["codex"]["retry_at"])
 
 
 if __name__ == "__main__":

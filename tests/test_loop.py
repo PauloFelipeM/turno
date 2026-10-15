@@ -16,8 +16,8 @@ class LoopTest(unittest.TestCase):
         self.tmp = Path(tempfile.mkdtemp())
         self.ap = helpers.load(self.tmp)
         self.coord = self.ap.coord
-        self.projects = [{"name": "my-app", "path": str(self.tmp / "my-app"), "weekly_cap": 90, "docker_group": "web"},
-                         {"name": "my-api", "path": str(self.tmp / "my-api"), "weekly_cap": 90},
+        self.projects = [{"name": "my-api", "path": str(self.tmp / "my-api"), "weekly_cap": 90, "docker_group": "web"},
+                         {"name": "my-app", "path": str(self.tmp / "my-app"), "weekly_cap": 90},
                          {"name": "side-project", "path": str(self.tmp / "side-project"), "weekly_cap": 90, "docker_group": "web"}]
         for p in self.projects:
             Path(p["path"]).mkdir()
@@ -39,17 +39,17 @@ class LoopTest(unittest.TestCase):
         return project["name"] if project else None
 
     def test_priority_order_without_claims(self):
-        self.assertEqual(self.pick(), "my-app")
+        self.assertEqual(self.pick(), "my-api")
 
     def test_project_claimed_by_other_engine_is_skipped(self):
-        self.coord.claim("my-app", "codex")
-        self.assertEqual(self.pick("claude"), "my-api")
+        self.coord.claim("my-api", "codex")
+        self.assertEqual(self.pick("claude"), "my-app")
 
     def test_group_lock_held_elsewhere_skips_the_whole_group(self):
         held = self.coord.try_lock("web")
-        self.state["my-app"]["status"] = "idle"
-        self.assertEqual(self.pick(), "my-api")
         self.state["my-api"]["status"] = "idle"
+        self.assertEqual(self.pick(), "my-app")
+        self.state["my-app"]["status"] = "idle"
         self.assertIsNone(self.pick())  # side-project is in the same group as the held lock
         self.coord.unlock(held)
 
@@ -61,9 +61,9 @@ class LoopTest(unittest.TestCase):
 
     def test_five_hour_window_skips_to_a_cheaper_project(self):
         self.limits["primary"]["used_percent"] = 62
-        self.state["my-app"]["cost"]["primary"] = 28.9  # 62 + 1.5 * 28.9 > 100
-        self.state["my-api"]["cost"]["primary"] = 18.5   # 62 + 1.5 * 18.5 < 100
-        self.assertEqual(self.pick(), "my-api")
+        self.state["my-api"]["cost"]["primary"] = 28.9  # 62 + 1.5 * 28.9 > 100
+        self.state["my-app"]["cost"]["primary"] = 18.5   # 62 + 1.5 * 18.5 < 100
+        self.assertEqual(self.pick(), "my-app")
 
     def test_five_hour_window_full_waits_for_its_reset(self):
         self.limits["primary"].update(used_percent=95, resets_at=time.time() + 1800)
@@ -84,12 +84,12 @@ class LoopTest(unittest.TestCase):
     def test_unit_cut_hands_off_and_clears_state(self):
         engine = helpers.FakeEngine(SLEEP)
         project = self.projects[1]
-        self.coord.claim("my-api", "claude")
+        self.coord.claim("my-app", "claude")
         out, err, code, unit_file = self.ap.run_unit(self.cfg, engine, self.state, project, deadline=time.time() + 1)
         self.ap.after_unit(self.cfg, engine, self.state, project, out, err, code, unit_file)
-        s = self.state["my-api"]
+        s = self.state["my-app"]
         self.assertEqual((s["interrupted"], s["session"]), (False, None))
-        claim = self.coord.read_claim("my-api")
+        claim = self.coord.read_claim("my-app")
         self.assertEqual((claim["engine"], claim["handoff_from"]), ("any", "claude"))
 
     def test_closed_unit_releases_the_claim(self):
@@ -98,26 +98,26 @@ class LoopTest(unittest.TestCase):
         engine = helpers.FakeEngine([sys.executable, "-c",
                                      f"import pathlib; p = pathlib.Path({str(unit)!r}); p.parent.mkdir(parents=True, exist_ok=True); "
                                      "p.write_text('{\"status\": \"worked\", \"unit\": \"u\", \"summary\": \"s\"}')"])
-        self.state["my-app"]["status"] = self.state["side-project"]["status"] = "idle"
+        self.state["my-api"]["status"] = self.state["side-project"]["status"] = "idle"
         self.ap.run_once(self.cfg, engine, self.state)
-        self.assertEqual(self.state["my-api"]["status"], "active")
-        self.assertIsNone(self.coord.read_claim("my-api"))
-        self.assertFalse(self.state["my-api"]["interrupted"])
+        self.assertEqual(self.state["my-app"]["status"], "active")
+        self.assertIsNone(self.coord.read_claim("my-app"))
+        self.assertFalse(self.state["my-app"]["interrupted"])
 
     def test_taking_a_handoff_starts_a_fresh_session(self):
-        self.coord.claim("my-api", "codex")
-        self.coord.hand_off("my-api", "codex")
-        self.state["my-app"]["status"] = self.state["side-project"]["status"] = "idle"
-        self.state["my-api"]["session"] = "old"
+        self.coord.claim("my-app", "codex")
+        self.coord.hand_off("my-app", "codex")
+        self.state["my-api"]["status"] = self.state["side-project"]["status"] = "idle"
+        self.state["my-app"]["session"] = "old"
         engine = helpers.FakeEngine(SLEEP)
         engine.resumable = lambda s: False
         self.ap.run_unit = lambda cfg, eng, state, project, deadline=None: (_ for _ in ()).throw(RuntimeError(project["name"]))
         with self.assertRaises(RuntimeError) as ctx:
             self.ap.run_once(self.cfg, engine, self.state)
-        self.assertEqual(str(ctx.exception), "my-api")
-        self.assertEqual(self.coord.read_claim("my-api")["engine"], "claude")
-        self.assertTrue(self.state["my-api"]["interrupted"])
-        self.assertIsNone(self.state["my-api"]["session"])
+        self.assertEqual(str(ctx.exception), "my-app")
+        self.assertEqual(self.coord.read_claim("my-app")["engine"], "claude")
+        self.assertTrue(self.state["my-app"]["interrupted"])
+        self.assertIsNone(self.state["my-app"]["session"])
 
     def test_outside_window_does_not_touch_quota(self):
         engine = helpers.FakeEngine(TRUE)
@@ -142,7 +142,7 @@ class LoopTest(unittest.TestCase):
         win = self.ap.schedule.Window("fri 19:00", "sun 03:00")
         for p in self.projects:
             self.state[p["name"]]["status"] = "idle"
-        self.state["my-app"]["status"] = "waiting"  # does not end the loop
+        self.state["my-api"]["status"] = "waiting"  # does not end the loop
         self.ap.run_once(self.cfg, engine, self.state, win, now=dt.datetime(2026, 10, 2, 19, 5))
         self.ap.run_once(self.cfg, engine, self.state, win, now=dt.datetime(2026, 10, 2, 19, 10))
         self.ap.run_once(self.cfg, engine, self.state, win, now=dt.datetime(2026, 10, 4, 3, 1))
@@ -153,22 +153,22 @@ class LoopTest(unittest.TestCase):
         engine = helpers.FakeEngine(TRUE)
         engine.label = "Claude"
         win = self.ap.schedule.Window("fri 19:00", "sun 03:00")
-        self.coord.claim("my-app", "claude")
-        self.state["my-app"].update(interrupted=True, session="s1")
+        self.coord.claim("my-api", "claude")
+        self.state["my-api"].update(interrupted=True, session="s1")
         self.state["_window"]["active"] = True
         self.ap.run_once(self.cfg, engine, self.state, win, now=dt.datetime(2026, 10, 4, 3, 1))
-        claim = self.coord.read_claim("my-app")
+        claim = self.coord.read_claim("my-api")
         self.assertEqual((claim["engine"], claim["handoff_from"]), ("any", "claude"))
-        self.assertEqual((self.state["my-app"]["interrupted"], self.state["my-app"]["session"]), (False, None))
-        self.assertIn("my-app", self.ap.sent[-1][1])
+        self.assertEqual((self.state["my-api"]["interrupted"], self.state["my-api"]["session"]), (False, None))
+        self.assertIn("my-api", self.ap.sent[-1][1])
 
     def test_open_unit_found_outside_the_window_is_handed_off(self):
         engine = helpers.FakeEngine(TRUE)
         win = self.ap.schedule.Window("fri 19:00", "sun 03:00")
-        self.coord.claim("my-api", "claude")
-        self.state["my-api"]["interrupted"] = True
+        self.coord.claim("my-app", "claude")
+        self.state["my-app"]["interrupted"] = True
         self.ap.run_once(self.cfg, engine, self.state, win, now=dt.datetime(2026, 10, 6, 10, 0))
-        self.assertTrue(self.coord.is_handoff("my-api"))
+        self.assertTrue(self.coord.is_handoff("my-app"))
 
     def test_window_close_does_not_probe_the_quota(self):
         engine = helpers.FakeEngine(TRUE)
@@ -202,17 +202,17 @@ class LoopTest(unittest.TestCase):
     def test_finished_unit_does_not_log_the_wait(self):
         engine = helpers.FakeEngine(TRUE, limits=self.limits)
         engine.classify = lambda out, err, code: ("error", None, False)
-        self.state["my-app"]["status"] = self.state["side-project"]["status"] = "idle"
+        self.state["my-api"]["status"] = self.state["side-project"]["status"] = "idle"
         self.ap.run_once(self.cfg, engine, self.state)
         log = self.ap.LOG.read_text()
-        self.assertIn("my-api: new unit", log)
+        self.assertIn("my-app: new unit", log)
         self.assertNotIn("waiting until", log)
 
     def test_claude_waits_when_quota_is_unknown(self):
         engine = helpers.FakeEngine(TRUE, limits={})
         engine.needs_limits = True
         self.assertEqual(self.ap.run_once(self.cfg, engine, self.state), 600)
-        self.assertIsNone(self.coord.read_claim("my-app"))
+        self.assertIsNone(self.coord.read_claim("my-api"))
 
 
 if __name__ == "__main__":

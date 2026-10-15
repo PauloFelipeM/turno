@@ -24,9 +24,9 @@ class DecisionsTest(unittest.TestCase):
         self.tmp = Path(tempfile.mkdtemp())
         self.ap = helpers.load(self.tmp)
         self.coord = self.ap.coord
-        self.project = self.tmp / "my-app"
+        self.project = self.tmp / "my-api"
         self.cfg = {"defaults": {"initial_cost_primary": 8, "initial_cost_secondary": 1.5},
-                    "notify": {"topic": "T"}, "project": [{"name": "my-app", "path": str(self.project)}]}
+                    "notify": {"topic": "T"}, "project": [{"name": "my-api", "path": str(self.project)}]}
         self.messages = {"T": [], "T-reply": []}
         self.ap.fetch_messages = lambda cfg, topic, since, label: [
             m for m in self.messages[topic] if m["id"] > since]
@@ -41,7 +41,7 @@ class DecisionsTest(unittest.TestCase):
         decision(self.project, "x1")
         self.ap.process_decisions(self.cfg, self.state())
         self.ap.process_decisions(self.cfg, self.state())
-        self.assertEqual(self.titles(), ["my-app: decisão"])
+        self.assertEqual(self.titles(), ["my-api: decisão"])
 
     def test_dispatch_skipped_while_other_instance_holds_the_lock(self):
         decision(self.project, "x1")
@@ -50,27 +50,27 @@ class DecisionsTest(unittest.TestCase):
         self.assertEqual(self.ap.sent, [])
         self.coord.unlock(held)
         self.ap.process_decisions(self.cfg, self.state())
-        self.assertEqual(self.titles(), ["my-app: decisão"])
+        self.assertEqual(self.titles(), ["my-api: decisão"])
 
     def test_typed_reply_is_read_once(self):
         path = decision(self.project, "x1", notified=True)
         self.messages["T"].append({"id": "m1", "message": "B", "title": None})
         self.ap.process_decisions(self.cfg, self.state())
         self.ap.process_decisions(self.cfg, self.state())
-        self.assertEqual(self.titles(), ["my-app: anotado"])
+        self.assertEqual(self.titles(), ["my-api: anotado"])
         self.assertEqual(json.loads(path.read_text())["answer"], "b")
 
     def test_waiting_project_is_released_even_without_the_lock(self):
         path = decision(self.project, "x1", notified=True)
         state = self.state()
-        state["my-app"]["status"] = "waiting"
+        state["my-api"]["status"] = "waiting"
         d = json.loads(path.read_text())
         d.update(answer="a", answered_by="owner")
         path.write_text(json.dumps(d))
         held = self.coord.try_lock("decisions")
         self.ap.process_decisions(self.cfg, state)
         self.coord.unlock(held)
-        self.assertEqual(state["my-app"]["status"], "active")
+        self.assertEqual(state["my-api"]["status"], "active")
 
     def test_notify_position_migrates_from_state(self):
         state = self.state()
@@ -87,9 +87,9 @@ class DecisionsTest(unittest.TestCase):
         self.assertIsNone(self.ap.read_decision(path))
         self.assertEqual(self.ap.open_decisions(project), [])
         state = self.state()
-        state["my-app"]["status"] = "waiting"
+        state["my-api"]["status"] = "waiting"
         self.ap.process_decisions(self.cfg, state)  # dispatch_decisions and the pending check
-        self.assertEqual(state["my-app"]["status"], "active")
+        self.assertEqual(state["my-api"]["status"], "active")
         self.assertEqual(path.read_text(), "[1, 2]")
         self.assertEqual(self.titles(), [])
         self.assertAlmostEqual(self.ap.next_deadline(project), time.time() + 300, delta=5)

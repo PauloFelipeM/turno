@@ -17,7 +17,7 @@ class NotifyOffLoopTest(unittest.TestCase):
     def setUp(self):
         self.tmp = Path(tempfile.mkdtemp())
         self.ap = helpers.load(self.tmp)
-        self.project = self.tmp / "my-app"
+        self.project = self.tmp / "my-api"
         folder = self.project / ".superpowers" / "autopilot" / "decisions"
         folder.mkdir(parents=True)
         self.path = folder / "x1.json"
@@ -25,7 +25,7 @@ class NotifyOffLoopTest(unittest.TestCase):
                                          "options": [{"id": "a", "label": "Yes"}, {"id": "b", "label": "No"}]}))
         self.cfg = {"defaults": {"initial_cost_primary": 8, "initial_cost_secondary": 1.5},
                     "notify": {"enabled": False, "topic": "T", "decision_timeout_hours": 4},
-                    "project": [{"name": "my-app", "path": str(self.project)}]}
+                    "project": [{"name": "my-api", "path": str(self.project)}]}
         self.fetched = []
         self.ap.fetch_messages = lambda cfg, topic, since, label: self.fetched.append(topic) or []
 
@@ -39,17 +39,17 @@ class NotifyOffLoopTest(unittest.TestCase):
         self.assertGreaterEqual(d["notified_at"], before)
         self.assertAlmostEqual(d["deadline"], d["notified_at"] + 4 * 3600, delta=1)
         self.assertEqual((self.ap.sent, self.fetched), ([], []))
-        self.assertIn("my-app: decision x1 waits in the panel (no ntfy); deadline 4 h", self.ap.LOG.read_text())
+        self.assertIn("my-api: decision x1 waits in the panel (no ntfy); deadline 4 h", self.ap.LOG.read_text())
 
     def test_off_applies_the_default_at_the_deadline(self):
         state = self.ap.load_state(self.cfg)
-        state["my-app"]["status"] = "waiting"
+        state["my-api"]["status"] = "waiting"
         self.ap.process_decisions(self.cfg, state)
         self.path.write_text(json.dumps({**self.decision(), "deadline": time.time() - 1}))
         self.ap.process_decisions(self.cfg, state)
         d = self.decision()
         self.assertEqual((d["answer"], d["answered_by"]), ("a", "timeout"))
-        self.assertEqual(state["my-app"]["status"], "active")
+        self.assertEqual(state["my-api"]["status"], "active")
         self.assertEqual((self.ap.sent, self.fetched), ([], []))
 
     def test_on_without_a_topic_behaves_as_off(self):
@@ -79,7 +79,7 @@ class NotifyOffLoopTest(unittest.TestCase):
     def test_on_with_a_topic_still_sends(self):
         self.cfg["notify"]["enabled"] = True
         self.ap.process_decisions(self.cfg, self.ap.load_state(self.cfg))
-        self.assertEqual([t for t, _ in self.ap.sent], ["my-app: decisão"])
+        self.assertEqual([t for t, _ in self.ap.sent], ["my-api: decisão"])
         self.assertEqual(self.fetched, ["T-reply", "T"])
 
     def test_the_sender_itself_stays_off_the_network(self):

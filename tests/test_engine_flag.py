@@ -114,7 +114,7 @@ class LoadConfigTest(unittest.TestCase):
         codex = self.ap.load_config()
         self.ap.configure("claude")
         claude = self.ap.load_config()
-        self.assertEqual([p["name"] for p in codex["project"]], ["my-app", "my-api", "side-project"])
+        self.assertEqual([p["name"] for p in codex["project"]], ["my-api", "my-app", "side-project"])
         self.assertEqual((codex["project"][0]["weekly_cap"], claude["project"][0]["weekly_cap"]), (95, 70))
         self.assertEqual(claude["defaults"]["orchestrator_model"], "claude-model")
         self.assertEqual((codex["engine"]["kind"], claude["engine"]["kind"]), ("codex", "claude"))
@@ -152,13 +152,13 @@ class LoadConfigTest(unittest.TestCase):
         state = self.ap.load_state(cfg)
         self.assertEqual(state["side-project"]["status"], "active")
         cfg["project"].append({"name": "novo", "path": "/tmp/novo", "weekly_cap": 100})
-        state["my-app"]["status"] = "blocked"
+        state["my-api"]["status"] = "blocked"
         self.ap.ensure_state(cfg, state)
         self.assertEqual(set(state["novo"]), set(state["side-project"]))
         self.assertEqual((state["novo"]["status"], state["novo"]["interrupted"], state["novo"]["retry_at"]),
                          ("active", False, 0))
         self.assertEqual(state["novo"]["cost"], {"primary": 8.0, "secondary": 1.5})
-        self.assertEqual(state["my-app"]["status"], "blocked")  # an existing entry is left alone
+        self.assertEqual(state["my-api"]["status"], "blocked")  # an existing entry is left alone
 
 
 class LoopsTest(unittest.TestCase):
@@ -224,7 +224,7 @@ class LoopsTest(unittest.TestCase):
     def test_is_loop_still_recognises_loops_started_the_old_way(self):
         script = str(self.ap.BASE / "autopilot.py")
         old_codex = ["python3", script, "run"]
-        old_claude = ["python3", script, "--config", "/home/someone/.turno/claude.toml", "run"]
+        old_claude = ["python3", script, "--config", "/home/me/.turno/claude.toml", "run"]
         self.assertTrue(self.ap.is_loop(old_codex, "codex"))
         self.assertFalse(self.ap.is_loop(old_codex, "claude"))
         self.assertTrue(self.ap.is_loop(old_claude, "claude"))

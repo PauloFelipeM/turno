@@ -82,7 +82,7 @@ class ConfigApiTest(unittest.TestCase):
     def test_config_view_lists_projects_engines_and_notify(self):
         status, v = self.call("GET", "/api/config")
         self.assertEqual(status, 200)
-        self.assertEqual([p["name"] for p in v["projects"]], ["my-app", "my-api", "side-project"])
+        self.assertEqual([p["name"] for p in v["projects"]], ["my-api", "my-app", "side-project"])
         p = v["projects"][0]
         self.assertEqual((p["weekly_cap"], p["removable"], p["blocked_by"]), ({"codex": 90, "claude": 90}, True, None))
         self.assertEqual(v["engines"]["codex"]["cli"], CLI)
@@ -91,30 +91,30 @@ class ConfigApiTest(unittest.TestCase):
         self.assertNotIn("segredo-xyz", json.dumps(v))
 
     def test_config_view_checks(self):
-        helpers.git_repo(self.projects["my-api"])
-        (self.projects["my-api"] / "docs").mkdir()
-        (self.projects["my-api"] / "docs" / "autopilot.md").write_text("x")
-        (self.projects["my-api"] / ".gitignore").write_text(".superpowers/\n")
+        helpers.git_repo(self.projects["my-app"])
+        (self.projects["my-app"] / "docs").mkdir()
+        (self.projects["my-app"] / "docs" / "autopilot.md").write_text("x")
+        (self.projects["my-app"] / ".gitignore").write_text(".superpowers/\n")
         helpers.git_repo(self.projects["side-project"])
-        shutil.rmtree(self.projects["my-app"])
+        shutil.rmtree(self.projects["my-api"])
         v = self.panel.config_view(self.home)
         checks = {p["name"]: p["checks"] for p in v["projects"]}
-        self.assertEqual(checks["my-app"], ["missing_path"])
-        self.assertEqual(checks["my-api"], [])
+        self.assertEqual(checks["my-api"], ["missing_path"])
+        self.assertEqual(checks["my-app"], [])
         self.assertEqual(checks["side-project"], ["no_autopilot_doc", "superpowers_not_ignored"])
         plain = self.home / "projects" / "novo"
         self.assertEqual(self.panel.project_checks(plain), ["not_git", "no_autopilot_doc"])
 
     def test_config_view_removable_and_blocked_by(self):
-        (self.home / "state.json").write_text(json.dumps({"my-api": {"interrupted": True}}))
+        (self.home / "state.json").write_text(json.dumps({"my-app": {"interrupted": True}}))
         (self.home / "shared" / "claims" / "side-project.json").write_text(json.dumps({"engine": "codex"}))
         v = {p["name"]: p for p in self.panel.config_view(self.home)["projects"]}
-        self.assertEqual([(v[n]["removable"], v[n]["blocked_by"]) for n in ("my-app", "my-api", "side-project")],
+        self.assertEqual([(v[n]["removable"], v[n]["blocked_by"]) for n in ("my-api", "my-app", "side-project")],
                          [(True, None), (False, "interrupted"), (False, "claimed")])
-        (self.home / "state.json").write_text(json.dumps({"_loop": {"phase": "running", "project": "my-app"}}))
+        (self.home / "state.json").write_text(json.dumps({"_loop": {"phase": "running", "project": "my-api"}}))
         self.start_loop("codex")
         v = {p["name"]: p for p in self.panel.config_view(self.home)["projects"]}
-        self.assertEqual(v["my-app"]["blocked_by"], "running")
+        self.assertEqual(v["my-api"]["blocked_by"], "running")
 
     def test_config_view_invalid_config_is_a_500_with_a_code(self):
         helpers.write_config_text(self.home, "{x")
@@ -138,7 +138,7 @@ class ConfigApiTest(unittest.TestCase):
 
     def test_add_project_errors_write_nothing(self):
         before = self.raw()
-        status, body = self.call("POST", "/api/projects", {"name": "my-app", "path": str(self.extra)})
+        status, body = self.call("POST", "/api/projects", {"name": "my-api", "path": str(self.extra)})
         self.assertEqual((status, body["error"]), (409, "exists"))
         for missing in (str(self.home / "nope"), str(self.home / "secrets.toml")):
             status, body = self.call("POST", "/api/projects", {"name": "novo", "path": missing})
@@ -179,7 +179,7 @@ class ConfigApiTest(unittest.TestCase):
         (self.projects["side-project"] / "keep.txt").write_text("k")
         before = {k: v for k, v in self.snapshot().items() if k != "config.json"}
         self.assertEqual(self.call("DELETE", "/api/projects/side-project")[0], 200)
-        self.assertEqual([p["name"] for p in self.cfg()["projects"]], ["my-app", "my-api"])
+        self.assertEqual([p["name"] for p in self.cfg()["projects"]], ["my-api", "my-app"])
         after = {k: v for k, v in self.snapshot().items() if k != "config.json"}
         self.assertEqual({k: v for k, v in after.items() if not k.endswith("overrides.json") and not k.endswith("overrides.lock")}, before)
         self.assertTrue((self.projects["side-project"] / "keep.txt").exists())
@@ -187,11 +187,11 @@ class ConfigApiTest(unittest.TestCase):
 
     def test_remove_project_in_use_is_409(self):
         (self.home / "state.json").write_text(json.dumps({
-            "my-api": {"interrupted": True}, "my-app": {}, "_loop": {"phase": "running", "project": "my-app"}}))
+            "my-app": {"interrupted": True}, "my-api": {}, "_loop": {"phase": "running", "project": "my-api"}}))
         (self.home / "shared" / "claims" / "side-project.json").write_text(json.dumps({"engine": "claude"}))
         self.start_loop("codex")
         before = self.raw()
-        for name, why in (("my-app", "running"), ("my-api", "interrupted"), ("side-project", "claimed")):
+        for name, why in (("my-api", "running"), ("my-app", "interrupted"), ("side-project", "claimed")):
             status, body = self.call("DELETE", f"/api/projects/{name}")
             self.assertEqual((status, body["error"]), (409, "in_use"), name)
             self.assertIn(why, body["message"])

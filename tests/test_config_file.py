@@ -172,7 +172,7 @@ class ValidateTests(Base):
     def test_current_names_stay_valid(self):
         d = config.empty()
         d["projects"] = [{"name": n, "path": "/x/" + n, "docker_group": "web"}
-                         for n in ("my-app", "my-api", "side-project", "my-app", "claims2")]
+                         for n in ("my-api", "my-app", "side-project", "claims2")]
         self.assertEqual(config.validate(d), [])
 
     def test_unknown_keys_allowed(self):

@@ -27,7 +27,7 @@ class ControlApiTest(unittest.TestCase):
         self.overrides, self.control = overrides, control
         self.projects = helpers.make_home(self.home)
         (self.home / "shared").mkdir(exist_ok=True)
-        self.dec = self.projects["my-app"] / ".superpowers" / "autopilot" / "decisions"
+        self.dec = self.projects["my-api"] / ".superpowers" / "autopilot" / "decisions"
         (self.dec / "pay.json").write_text(json.dumps(DECISION))
         (self.dec / "unsent.json").write_text(json.dumps(dict(DECISION, id="unsent", notified_at=None)))
         self.hub = server.Hub(self.home, {"codex": self.home / "cx", "claude": self.home / "cl"}, interval=0.1)
@@ -125,8 +125,8 @@ class ControlApiTest(unittest.TestCase):
         self.assertEqual(self.post("/api/projects/side-project/next")[0], 200)
         self.assertEqual(self.ov()["next"], "side-project")
         before = time.time()
-        self.assertEqual(self.post("/api/projects/my-api/reset", {})[0], 200)
-        self.assertGreaterEqual(self.ov()["reset"]["my-api"], before)
+        self.assertEqual(self.post("/api/projects/my-app/reset", {})[0], 200)
+        self.assertGreaterEqual(self.ov()["reset"]["my-app"], before)
 
     def test_unknown_project_is_404(self):
         for action in ("pause", "resume", "next", "reset", "interrupt"):
@@ -134,17 +134,17 @@ class ControlApiTest(unittest.TestCase):
         self.assertEqual(self.ov(), {})
 
     def test_interrupt_pauses_and_signals_the_loop(self):
-        self.assertEqual(self.post("/api/projects/my-app/interrupt")[0], 409)  # no loop
+        self.assertEqual(self.post("/api/projects/my-api/interrupt")[0], 409)  # no loop
         self.assertEqual(self.ov(), {})
         proc, marker = self.start_loop("codex", handler=True)
         (self.home / "state.json").write_text(json.dumps({"_loop": {"phase": "sleeping"}}))
-        self.assertEqual(self.post("/api/projects/my-app/interrupt")[0], 409)  # alive but not running it
-        (self.home / "state.json").write_text(json.dumps({"_loop": {"phase": "running", "project": "my-api"}}))
-        self.assertEqual(self.post("/api/projects/my-app/interrupt")[0], 409)
-        self.assertFalse(marker.exists())
+        self.assertEqual(self.post("/api/projects/my-api/interrupt")[0], 409)  # alive but not running it
         (self.home / "state.json").write_text(json.dumps({"_loop": {"phase": "running", "project": "my-app"}}))
-        self.assertEqual(self.post("/api/projects/my-app/interrupt")[0], 202)
-        self.assertTrue(self.ov()["projects"]["my-app"]["paused"])
+        self.assertEqual(self.post("/api/projects/my-api/interrupt")[0], 409)
+        self.assertFalse(marker.exists())
+        (self.home / "state.json").write_text(json.dumps({"_loop": {"phase": "running", "project": "my-api"}}))
+        self.assertEqual(self.post("/api/projects/my-api/interrupt")[0], 202)
+        self.assertTrue(self.ov()["projects"]["my-api"]["paused"])
         for _ in range(50):
             if marker.exists():
                 break
@@ -154,9 +154,9 @@ class ControlApiTest(unittest.TestCase):
     def test_interrupt_never_signals_a_pid_that_is_not_the_loop(self):
         import os
         (self.home / "shared" / "instance-codex.lock").write_text(str(os.getpid()))  # alive, not autopilot.py
-        (self.home / "state.json").write_text(json.dumps({"_loop": {"phase": "running", "project": "my-app"}}))
+        (self.home / "state.json").write_text(json.dumps({"_loop": {"phase": "running", "project": "my-api"}}))
         with mock.patch("os.kill") as kill:
-            self.assertEqual(self.post("/api/projects/my-app/interrupt")[0], 409)
+            self.assertEqual(self.post("/api/projects/my-api/interrupt")[0], 409)
         self.assertFalse([c for c in kill.call_args_list if c.args[1:] == (signal.SIGUSR1,)])
 
     # engines
@@ -188,25 +188,25 @@ class ControlApiTest(unittest.TestCase):
     # decisions and messages
 
     def test_decision_answer_with_comment(self):
-        status, _ = self.post("/api/decisions/my-app/pay", {"option": "b", "comment": "because"})
+        status, _ = self.post("/api/decisions/my-api/pay", {"option": "b", "comment": "because"})
         self.assertEqual(status, 200)
         d = json.loads((self.dec / "pay.json").read_text())
         self.assertEqual((d["answer"], d["answered_by"]), ("b", "owner"))
-        notes = json.loads((self.home / "shared" / "notes" / "my-app.json").read_text())
+        notes = json.loads((self.home / "shared" / "notes" / "my-api.json").read_text())
         self.assertEqual([n["text"] for n in notes], ["Comment on the answer to decision pay (option b): because"])
         self.assertIn("poke", self.ov())
-        self.assertEqual(self.post("/api/decisions/my-app/pay", {"option": "a"})[0], 404)  # no longer open
+        self.assertEqual(self.post("/api/decisions/my-api/pay", {"option": "a"})[0], 404)  # no longer open
 
     def test_decision_answer_without_comment_adds_no_note(self):
-        self.assertEqual(self.post("/api/decisions/my-app/pay", {"option": "a"})[0], 200)
-        self.assertFalse((self.home / "shared" / "notes" / "my-app.json").exists())
+        self.assertEqual(self.post("/api/decisions/my-api/pay", {"option": "a"})[0], 200)
+        self.assertFalse((self.home / "shared" / "notes" / "my-api.json").exists())
 
     def test_decision_answer_refusals(self):
-        self.assertEqual(self.post("/api/decisions/my-app/pay", {"option": "z"}), (400, {"error": "bad_option", "message": mock.ANY}))
-        self.assertEqual(self.post("/api/decisions/my-app/pay", {})[0], 400)
-        self.assertEqual(self.post("/api/decisions/my-app/pay", {"option": "a", "comment": 3})[0], 400)
-        self.assertEqual(self.post("/api/decisions/my-app/unsent", {"option": "a"})[0], 404)
-        self.assertEqual(self.post("/api/decisions/my-app/..%2Fx", {"option": "a"})[0], 404)
+        self.assertEqual(self.post("/api/decisions/my-api/pay", {"option": "z"}), (400, {"error": "bad_option", "message": mock.ANY}))
+        self.assertEqual(self.post("/api/decisions/my-api/pay", {})[0], 400)
+        self.assertEqual(self.post("/api/decisions/my-api/pay", {"option": "a", "comment": 3})[0], 400)
+        self.assertEqual(self.post("/api/decisions/my-api/unsent", {"option": "a"})[0], 404)
+        self.assertEqual(self.post("/api/decisions/my-api/..%2Fx", {"option": "a"})[0], 404)
         self.assertEqual(self.post("/api/decisions/nope/pay", {"option": "a"})[0], 404)
         self.assertNotIn("answer", json.loads((self.dec / "pay.json").read_text()))
 
@@ -217,22 +217,22 @@ class ControlApiTest(unittest.TestCase):
         handle = coord.try_lock("decisions")
         self.assertIsNotNone(handle)
         t = time.monotonic()  # not the wall clock: it can step back under WSL
-        status, body = self.post("/api/decisions/my-app/pay", {"option": "a"})
+        status, body = self.post("/api/decisions/my-api/pay", {"option": "a"})
         coord.unlock(handle)
         self.assertEqual((status, body["error"]), (409, "busy"))
         self.assertGreaterEqual(time.monotonic() - t, 0.4)
         self.assertNotIn("answer", json.loads((self.dec / "pay.json").read_text()))
-        self.assertEqual(self.post("/api/decisions/my-app/pay", {"option": "a"})[0], 200)  # lock released
+        self.assertEqual(self.post("/api/decisions/my-api/pay", {"option": "a"})[0], 200)  # lock released
 
     def test_messages(self):
-        self.assertEqual(self.post("/api/messages", {"text": "hello", "projects": ["side-project", "my-api"]})[0], 200)
+        self.assertEqual(self.post("/api/messages", {"text": "hello", "projects": ["side-project", "my-app"]})[0], 200)
         notes = lambda n: json.loads((self.home / "shared" / "notes" / f"{n}.json").read_text())
         self.assertEqual(notes("side-project")[0]["text"], "hello")
-        self.assertEqual(notes("my-api")[0]["text"], "hello")
-        self.assertFalse((self.home / "shared" / "notes" / "my-app.json").exists())
+        self.assertEqual(notes("my-app")[0]["text"], "hello")
+        self.assertFalse((self.home / "shared" / "notes" / "my-api.json").exists())
         self.assertIn("poke", self.ov())
         self.assertEqual(self.post("/api/messages", {"text": "all"})[0], 200)
-        self.assertEqual(notes("my-app")[0]["text"], "all")
+        self.assertEqual(notes("my-api")[0]["text"], "all")
         self.assertEqual(len(notes("side-project")), 2)
 
     # settings
@@ -244,25 +244,25 @@ class ControlApiTest(unittest.TestCase):
     def test_settings_get_and_put_write_the_config(self):
         status, s = self.call("GET", "/api/settings")
         self.assertEqual(status, 200)
-        self.assertEqual(s["order"], ["my-app", "my-api", "side-project"])
-        body = {"order": ["side-project", "my-app"], "weekly_cap": {"side-project": {"codex": 40, "claude": 80.5}},
+        self.assertEqual(s["order"], ["my-api", "my-app", "side-project"])
+        body = {"order": ["side-project", "my-api"], "weekly_cap": {"side-project": {"codex": 40, "claude": 80.5}},
                 "primary_cap": {"codex": 90}}
         status, s = self.call("PUT", "/api/settings", body)
         self.assertEqual(status, 200)
         data = self.cfg()
-        self.assertEqual([p["name"] for p in data["projects"]], ["side-project", "my-app", "my-api"])
+        self.assertEqual([p["name"] for p in data["projects"]], ["side-project", "my-api", "my-app"])
         self.assertEqual(data["projects"][0]["weekly_cap"], {"codex": 40, "claude": 80.5})
         self.assertEqual(data["engines"]["codex"]["primary_cap"], 90)
         self.assertEqual(self.ov(), {"poke": self.ov().get("poke")})  # only the poke touches the overrides
         self.assertEqual(self.call("GET", "/api/settings")[1], s)
-        self.assertEqual(s["order"], ["side-project", "my-app", "my-api"])
+        self.assertEqual(s["order"], ["side-project", "my-api", "my-app"])
         self.assertEqual(s["engines"]["codex"]["weekly_cap"]["side-project"], 40)
         # merge: a second PUT keeps the rest
-        self.call("PUT", "/api/settings", {"weekly_cap": {"side-project": {"codex": 10}, "my-api": {"claude": 5}}})
+        self.call("PUT", "/api/settings", {"weekly_cap": {"side-project": {"codex": 10}, "my-app": {"claude": 5}}})
         data = self.cfg()
         self.assertEqual(data["projects"][0]["weekly_cap"], {"codex": 10, "claude": 80.5})
         self.assertEqual(data["projects"][2]["weekly_cap"], {"codex": 90, "claude": 5})
-        self.assertEqual([p["name"] for p in data["projects"]], ["side-project", "my-app", "my-api"])
+        self.assertEqual([p["name"] for p in data["projects"]], ["side-project", "my-api", "my-app"])
 
     def test_delete_settings_is_gone(self):
         self.assertEqual(self.call("DELETE", "/api/settings")[0], 404)
@@ -312,8 +312,8 @@ class ControlApiTest(unittest.TestCase):
 
     def test_interrupt_refuses_a_loop_without_a_sigusr1_handler(self):
         proc, marker = self.start_loop("codex")  # an old loop: SIGUSR1 would kill it
-        (self.home / "state.json").write_text(json.dumps({"_loop": {"phase": "running", "project": "my-app"}}))
-        status, body = self.post("/api/projects/my-app/interrupt")
+        (self.home / "state.json").write_text(json.dumps({"_loop": {"phase": "running", "project": "my-api"}}))
+        status, body = self.post("/api/projects/my-api/interrupt")
         self.assertEqual(status, 409)
         self.assertEqual(body["error"], "restart_needed")
         self.assertTrue(body["message"])
@@ -323,9 +323,9 @@ class ControlApiTest(unittest.TestCase):
 
     def test_interrupt_refuses_when_the_handlers_cannot_be_read(self):
         proc, marker = self.start_loop("codex", handler=True)
-        (self.home / "state.json").write_text(json.dumps({"_loop": {"phase": "running", "project": "my-app"}}))
+        (self.home / "state.json").write_text(json.dumps({"_loop": {"phase": "running", "project": "my-api"}}))
         with mock.patch.object(self.control, "_caught_signals", return_value=None):
-            status, body = self.post("/api/projects/my-app/interrupt")
+            status, body = self.post("/api/projects/my-api/interrupt")
         self.assertEqual((status, body["error"]), (409, "restart_needed"))
         self.assertFalse(marker.exists())
         self.assertEqual(self.ov(), {})
@@ -342,16 +342,16 @@ class ControlApiTest(unittest.TestCase):
     def instance_file(self, kind, **info):
         (self.home / "shared" / f"instance-{kind}.json").write_text(json.dumps({"sigusr1": True, "started_at": 1, **info}))
 
-    def running_on_my-app(self):
-        (self.home / "state.json").write_text(json.dumps({"_loop": {"phase": "running", "project": "my-app"}}))
+    def running_on_my_api(self):
+        (self.home / "state.json").write_text(json.dumps({"_loop": {"phase": "running", "project": "my-api"}}))
 
     def test_interrupt_without_proc_trusts_the_loops_instance_file(self):
         proc, marker = self.start_loop("codex", handler=True)
-        self.running_on_my-app()
+        self.running_on_my_api()
         self.instance_file("codex", pid=proc.pid)
         self.no_proc()
-        self.assertEqual(self.post("/api/projects/my-app/interrupt")[0], 202)
-        self.assertTrue(self.ov()["projects"]["my-app"]["paused"])
+        self.assertEqual(self.post("/api/projects/my-api/interrupt")[0], 202)
+        self.assertTrue(self.ov()["projects"]["my-api"]["paused"])
         for _ in range(50):
             if marker.exists():
                 break
@@ -360,22 +360,22 @@ class ControlApiTest(unittest.TestCase):
 
     def test_interrupt_without_proc_refuses_a_loop_without_the_file(self):
         proc, marker = self.start_loop("codex", handler=True)  # started by a version that does not write it
-        self.running_on_my-app()
+        self.running_on_my_api()
         self.no_proc()
-        status, body = self.post("/api/projects/my-app/interrupt")
+        status, body = self.post("/api/projects/my-api/interrupt")
         self.assertEqual((status, body["error"]), (409, "restart_needed"))
         self.assertEqual(self.ov(), {})
         self.assertFalse(marker.exists())
 
     def test_interrupt_without_proc_refuses_a_file_that_does_not_match(self):
         proc, marker = self.start_loop("codex", handler=True)
-        self.running_on_my-app()
+        self.running_on_my_api()
         self.no_proc()
         for info in ({"pid": proc.pid + 1}, {"pid": proc.pid, "sigusr1": False}, {"pid": str(proc.pid)}):
             self.instance_file("codex", **info)
-            self.assertEqual(self.post("/api/projects/my-app/interrupt")[0], 409, info)
+            self.assertEqual(self.post("/api/projects/my-api/interrupt")[0], 409, info)
         (self.home / "shared" / "instance-codex.json").write_text("not json")
-        self.assertEqual(self.post("/api/projects/my-app/interrupt")[0], 409)
+        self.assertEqual(self.post("/api/projects/my-api/interrupt")[0], 409)
         self.assertEqual(self.ov(), {})
 
     def test_interrupt_without_proc_refuses_a_reused_pid(self):
@@ -385,10 +385,10 @@ class ControlApiTest(unittest.TestCase):
         self.addCleanup(victim.kill)
         (self.home / "shared" / "instance-codex.lock").write_text(str(victim.pid))
         self.instance_file("codex", pid=victim.pid)
-        self.running_on_my-app()
+        self.running_on_my_api()
         self.no_proc()
         with mock.patch("os.kill") as kill:
-            status, body = self.post("/api/projects/my-app/interrupt")
+            status, body = self.post("/api/projects/my-api/interrupt")
         self.assertEqual(status, 409)
         self.assertEqual([c for c in kill.call_args_list if c.args[1] != 0], [])  # no signal at all
         self.assertIsNone(victim.poll())
@@ -397,9 +397,9 @@ class ControlApiTest(unittest.TestCase):
 
     def test_with_proc_the_kernel_mask_wins_over_the_file(self):
         proc, marker = self.start_loop("codex")  # no handler: SIGUSR1 would kill it
-        self.running_on_my-app()
+        self.running_on_my_api()
         self.instance_file("codex", pid=proc.pid)
-        status, body = self.post("/api/projects/my-app/interrupt")
+        status, body = self.post("/api/projects/my-api/interrupt")
         self.assertEqual((status, body["error"]), (409, "restart_needed"))
         time.sleep(0.3)
         self.assertIsNone(proc.poll())

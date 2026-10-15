@@ -14,7 +14,7 @@ class StatusTest(unittest.TestCase):
         self.ap = helpers.load(self.tmp)
         self.ap.is_dirty = lambda path: False
         self.cfg = {"defaults": {"initial_cost_primary": 8, "initial_cost_secondary": 1.5},
-                    "project": [{"name": "my-app", "path": str(self.tmp), "weekly_cap": 90}]}
+                    "project": [{"name": "my-api", "path": str(self.tmp), "weekly_cap": 90}]}
         self.state = self.ap.load_state(self.cfg)
         self.limits = {"primary": {"used_percent": 22, "resets_at": time.time() + 3600},
                        "secondary": {"used_percent": 37, "resets_at": time.time() + 86400}}
@@ -27,11 +27,11 @@ class StatusTest(unittest.TestCase):
     def test_shows_usage_and_projects(self):
         text = self.lines()
         self.assertIn("37.0%", text)
-        self.assertIn("my-app", text)
+        self.assertIn("my-api", text)
 
     def test_shows_claims_and_handoffs(self):
-        self.ap.coord.claim("my-app", "claude")
-        self.ap.coord.hand_off("my-app", "claude")
+        self.ap.coord.claim("my-api", "claude")
+        self.ap.coord.hand_off("my-api", "claude")
         self.assertIn("baton from claude", self.lines())
 
     def test_shows_window(self):

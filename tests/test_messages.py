@@ -71,7 +71,7 @@ class LoopTextsTest(unittest.TestCase):
     def setUp(self):
         self.tmp = Path(tempfile.mkdtemp())
         self.ap = helpers.load(self.tmp)
-        self.project = self.tmp / "my-app"
+        self.project = self.tmp / "my-api"
         folder = self.project / ".superpowers" / "autopilot" / "decisions"
         folder.mkdir(parents=True)
         self.path = folder / "x1.json"
@@ -79,7 +79,7 @@ class LoopTextsTest(unittest.TestCase):
                                          "options": [{"id": "a", "label": "Yes"}, {"id": "b", "label": "No"}]}))
         self.cfg = {"defaults": {"initial_cost_primary": 8, "initial_cost_secondary": 1.5},
                     "notify": {"topic": "T", "decision_timeout_hours": 4},
-                    "project": [{"name": "my-app", "path": str(self.project)}]}
+                    "project": [{"name": "my-api", "path": str(self.project)}]}
         self.inbox = []
         self.ap.fetch_messages = lambda cfg, topic, since, label: [m for m in self.inbox if topic == "T"]
 
@@ -91,20 +91,20 @@ class LoopTextsTest(unittest.TestCase):
 
     def test_decision_in_english(self):
         title, body = self.turn("en")
-        self.assertEqual(title, "my-app: decision")
+        self.assertEqual(title, "my-api: decision")
         self.assertIn("Answer with the buttons or by typing the letter (e.g. A).", body)
         self.assertIn("No answer in 4 h: Yes", body)
 
     def test_decision_without_a_language_is_unchanged(self):
         title, body = self.turn()
-        self.assertEqual(title, "my-app: decisão")
+        self.assertEqual(title, "my-api: decisão")
         self.assertIn("Responda pelos botões ou digitando a letra (ex.: A).", body)
         self.assertIn("Sem resposta em 4 h: Yes", body)
 
     def test_typed_answer_is_confirmed_in_english(self):
         self.turn("en")
         self.inbox.append({"id": "m1", "message": "B", "title": None})
-        self.assertEqual(self.turn("en"), ("my-app: noted", "Q?\n→ No"))
+        self.assertEqual(self.turn("en"), ("my-api: noted", "Q?\n→ No"))
 
     def test_failed_setup_summary_follows_the_language(self):
         from turno import repo_setup as setup

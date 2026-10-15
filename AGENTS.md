@@ -1,8 +1,7 @@
 # turno
 
 A scheduler that runs the Codex CLI and Claude Code unattended on several projects, inside the quota
-of the subscriptions, plus a local web panel to follow it. It grew out of codex-autopilot and is
-becoming an open product. This folder is the tool itself; the projects live elsewhere, and the data
+of the subscriptions, plus a local web panel to follow it. This folder is the tool itself; the projects live elsewhere, and the data
 (config, state, logs, runs) lives in `~/.turno` (or `$TURNO_HOME`). Here you maintain the scheduler;
 you do not work on the projects. Every data path in this file given without a folder (`shared/`,
 `state*.json`, `config.json`, `secrets.toml`, logs, `runs/`) lives in `~/.turno` (or `$TURNO_HOME`).

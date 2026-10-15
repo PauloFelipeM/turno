@@ -17,7 +17,7 @@ class InterruptTest(unittest.TestCase):
     def setUp(self):
         self.tmp = Path(tempfile.mkdtemp())
         self.ap = helpers.load(self.tmp)
-        self.project = {"name": "my-api", "path": str(self.tmp / "my-api"), "weekly_cap": 90}
+        self.project = {"name": "my-app", "path": str(self.tmp / "my-app"), "weekly_cap": 90}
         Path(self.project["path"]).mkdir()
         self.cfg = {"defaults": {"initial_cost_primary": 8, "initial_cost_secondary": 1.5, "safety_factor": 1.5,
                                  "primary_cap": 100, "blocked_cooldown_hours": 6},
@@ -66,9 +66,9 @@ class InterruptTest(unittest.TestCase):
         return t, box
 
     def test_interrupt_stops_the_unit_and_keeps_it_open(self):
-        self.ap.coord.claim("my-api", "codex")
+        self.ap.coord.claim("my-app", "codex")
         t, box = self.run_in_thread()
-        self.state["my-api"]["session"] = "sess-1"
+        self.state["my-app"]["session"] = "sess-1"
         self.ap.request_interrupt()
         t.join(60)
         self.assertEqual(box["code"], self.ap.STOPPED)
@@ -76,10 +76,10 @@ class InterruptTest(unittest.TestCase):
         [line] = self.lines()
         self.assertEqual(line["outcome"], "stopped")
         self.assertFalse(line["closed"])
-        s = self.state["my-api"]
+        s = self.state["my-app"]
         self.assertTrue(s["interrupted"])
         self.assertEqual(s["session"], "sess-1")
-        self.assertEqual(self.ap.coord.read_claim("my-api")["engine"], "codex")
+        self.assertEqual(self.ap.coord.read_claim("my-app")["engine"], "codex")
         self.assertFalse(self.ap.STOP_REQUESTED)
 
     def test_sigusr1_on_the_main_thread_does_not_deadlock(self):
@@ -90,7 +90,7 @@ class InterruptTest(unittest.TestCase):
         out, err, code, unit_file = self.ap.run_unit(self.cfg, self.engine, self.state, self.project)
         self.assertEqual(code, self.ap.STOPPED)
         self.assertLess(time.time() - start, 15)
-        self.assertTrue(self.state["my-api"]["interrupted"])
+        self.assertTrue(self.state["my-app"]["interrupted"])
 
     def test_exit_signal_makes_run_unit_record_save_and_exit_130(self):
         old = signal.signal(signal.SIGTERM, self.ap.make_exit_handler(self.state))
@@ -104,7 +104,7 @@ class InterruptTest(unittest.TestCase):
         self.assertIsNone(self.ap.CURRENT_UNIT)
         import json
         saved = json.loads(self.ap.STATE.read_text())
-        self.assertTrue(saved["my-api"]["interrupted"])
+        self.assertTrue(saved["my-app"]["interrupted"])
 
     def test_interrupt_ignores_a_process_that_already_ended(self):
         proc = subprocess.Popen([sys.executable, "-c", "pass"])
@@ -119,8 +119,8 @@ class InterruptTest(unittest.TestCase):
         self.assertEqual(self.lines(), [])
 
     def test_record_interrupted_run_writes_a_stopped_line(self):
-        self.ap.CURRENT_UNIT = (self.engine, self.project, self.state["my-api"])
-        self.state["my-api"]["run"] = {"id": "r1", "started": time.time()}
+        self.ap.CURRENT_UNIT = (self.engine, self.project, self.state["my-app"])
+        self.state["my-app"]["run"] = {"id": "r1", "started": time.time()}
         self.ap.record_interrupted_run()
         [line] = self.lines()
         self.assertEqual(line["outcome"], "stopped")
@@ -157,7 +157,7 @@ class InterruptTest(unittest.TestCase):
         [line] = self.lines()
         self.assertEqual(line["outcome"], "stopped")
         import json
-        self.assertTrue(json.loads(self.ap.STATE.read_text())["my-api"]["interrupted"])
+        self.assertTrue(json.loads(self.ap.STATE.read_text())["my-app"]["interrupted"])
         self.assertIn("no session id", self.ap.LOG.read_text())
 
 

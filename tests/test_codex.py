@@ -155,14 +155,14 @@ class RunUnitTest(unittest.TestCase):
     def setUp(self):
         self.tmp = Path(tempfile.mkdtemp())
         self.ap = helpers.load(self.tmp)
-        self.project = {"name": "my-app", "path": str(self.tmp)}
+        self.project = {"name": "my-api", "path": str(self.tmp)}
         self.cfg = {"defaults": {"initial_cost_primary": 8, "initial_cost_secondary": 1.5},
                     "project": [self.project]}
         self.state = self.ap.load_state(self.cfg)
 
     def test_unit_is_saved_as_open_before_the_process_starts(self):
         engine = helpers.FakeEngine([sys.executable, "-c",
-                                     f"import json; print(json.load(open({str(self.ap.STATE)!r}))['my-app']['interrupted'])"])
+                                     f"import json; print(json.load(open({str(self.ap.STATE)!r}))['my-api']['interrupted'])"])
         out, err, code, _ = self.ap.run_unit(self.cfg, engine, self.state, self.project)
         self.assertEqual(code, 0)
         self.assertEqual(Path(out).read_text().strip(), "True")

@@ -99,7 +99,7 @@ class OwnerLanguageTest(unittest.TestCase):
     def setUp(self):
         self.tmp = Path(tempfile.mkdtemp())
         self.ap = helpers.load(self.tmp)
-        self.project = {"name": "my-app", "path": str(self.tmp / "my-app"), "weekly_cap": 90}
+        self.project = {"name": "my-api", "path": str(self.tmp / "my-api"), "weekly_cap": 90}
         Path(self.project["path"]).mkdir()
         self.cfg = {"defaults": {"initial_cost_primary": 8, "initial_cost_secondary": 1.5},
                     "project": [self.project]}
@@ -135,7 +135,7 @@ class OwnerLanguageTest(unittest.TestCase):
         self.assertNotIn("{owner_language}", prompt)
 
     def test_owner_messages_are_not_rewritten(self):
-        self.ap.coord.add_note("my-app", "keep {owner_language} as typed")
+        self.ap.coord.add_note("my-api", "keep {owner_language} as typed")
         prompt = self.prompt("en")
         self.assertIn("keep {owner_language} as typed", prompt)
         self.assertIn("they may be in any language", prompt)
