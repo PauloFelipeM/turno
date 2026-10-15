@@ -219,5 +219,19 @@ class SourceRulesTest(unittest.TestCase):
         self.assertIsNone(rows[-1][2])
 
 
+class ScreensTest(unittest.TestCase):
+    """What each screen must keep from the old panel."""
+
+    def setUp(self):
+        self.src = source()
+        self.app = "\n".join(source(include_ui_kit=False).values())
+
+    def test_the_theme_is_remembered_and_follows_the_system(self):
+        theme = self.src["theme.tsx"]
+        self.assertIn('const KEY = "turno.theme";', theme)
+        self.assertIn('matchMedia("(prefers-color-scheme: dark)")', theme)
+        self.assertIn('classList.toggle("dark"', theme)
+
+
 if __name__ == "__main__":
     unittest.main()
