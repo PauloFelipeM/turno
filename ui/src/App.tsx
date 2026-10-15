@@ -1,7 +1,9 @@
 import { useEffect, useState } from "react";
 import { WifiOffIcon } from "lucide-react";
 import { Engines } from "@/components/Engines";
+import { History } from "@/components/History";
 import { NeedsYou } from "@/components/NeedsYou";
+import { Now } from "@/components/Now";
 import { Projects } from "@/components/Projects";
 import { TopBar } from "@/components/TopBar";
 import { Alert, AlertDescription } from "@/components/ui/alert";
@@ -29,7 +31,7 @@ function Loading() {
 
 export function App() {
   const { t, setLang } = useI18n();
-  const { overview, connected } = useOverview();
+  const { overview, feeds, connected, tick } = useOverview();
   const [project, setProject] = useState<string | null>(null);
   const [settings, setSettings] = useState<{ open: boolean; tab: "projects" | "engines" | "general" }>({ open: false, tab: "projects" });
 
@@ -63,6 +65,8 @@ export function App() {
             <Engines overview={overview} />
             <NeedsYou overview={overview} onReview={setProject} />
             <Projects overview={overview} onOpen={setProject} onAdd={() => setSettings({ open: true, tab: "projects" })} />
+            <Now overview={overview} feeds={feeds} />
+            <History tick={tick} />
           </>
         )}
       </main>
