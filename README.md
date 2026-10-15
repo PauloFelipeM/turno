@@ -7,7 +7,7 @@ reviewer and implementer subagents. Decisions that matter reach your phone (ntfy
 with buttons, or wait for you in the panel. A local web panel shows what is running, what happened
 and how much of each backlog is left, and lets you control everything.
 
-![The turno panel: both engines with their quota bars, a decision that needs the owner, the project cards, the unit running now and the history](docs/images/panel.png)
+![The turno panel: both engines with their quota bars, a decision that needs the owner, the project cards, the unit running now and the history](https://raw.githubusercontent.com/PauloFelipeM/turno/v0.2.0/docs/images/panel.png)
 
 > **Status:** alpha. It runs one person's projects every day and is being generalized. The panel,
 > the phone texts and what the agents write for you are in English (the default) or Brazilian Portuguese.
@@ -118,23 +118,23 @@ restarts the panel, and the panel starts the engines again.
 
 All screenshots show demo data (`my-app`, `my-api`, `side-project`), not a real machine.
 
-![The panel in the dark theme](docs/images/panel-dark.png)
+![The panel in the dark theme](https://raw.githubusercontent.com/PauloFelipeM/turno/v0.2.0/docs/images/panel-dark.png)
 
 The same screen in the dark theme (the theme menu in the top bar).
 
-![The details of a unit: two runs and the feed of each one](docs/images/run.png)
+![The details of a unit: two runs and the feed of each one](https://raw.githubusercontent.com/PauloFelipeM/turno/v0.2.0/docs/images/run.png)
 
 A unit from the history: its summary, cost and the feed of each run (here one cut by a usage limit and the resumed one).
 
-![Settings, Projects tab](docs/images/settings-projects.png)
+![Settings, Projects tab](https://raw.githubusercontent.com/PauloFelipeM/turno/v0.2.0/docs/images/settings-projects.png)
 
 Settings, Projects: folder, Docker group and the weekly cap per engine; the order is the priority.
 
-![Settings, Engines tab, the Claude block](docs/images/settings-engines.png)
+![Settings, Engines tab, the Claude block](https://raw.githubusercontent.com/PauloFelipeM/turno/v0.2.0/docs/images/settings-engines.png)
 
 Settings, Engines: models per role, the 5 h cap and the weekly time window.
 
-![Settings, General tab](docs/images/settings-general.png)
+![Settings, General tab](https://raw.githubusercontent.com/PauloFelipeM/turno/v0.2.0/docs/images/settings-general.png)
 
 Settings, General: language and ntfy.
 
