@@ -31,6 +31,8 @@ with the build command. To try the command itself, install the clone in editable
   HTML, no external URL); `tests/test_web_draft.py` and the window round-trip run the shipped
   TypeScript through node (skipped without node). Click through a change in a browser against a
   temporary `TURNO_HOME` (`tests/helpers.make_home`), never against the real data.
+- The README's screenshots (`docs/images/`) come from demo data: after a change to the panel, build it and run
+  `python3 scripts/screenshots.py` (needs Chrome or Chromium; on WSL it uses the Windows Chrome) to regenerate them.
 - Never run `turno start`, `run`, `stop`, `restart` or `update` from a development copy while real
   loops run on the same machine: `stop` finds loops by their command line, whatever `TURNO_HOME` says.
 
