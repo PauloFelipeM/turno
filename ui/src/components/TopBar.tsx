@@ -45,12 +45,13 @@ export function TopBar({ overview, onSettings }: Props) {
             title={t("footer.restart")}
             description={t("footer.restartConfirm")}
             confirm={t("footer.restart")}
+            tooltip={t("footer.restart")}
             action={async () => {
               const res = await send<{ ok: true; service: boolean }>("/api/restart");
               toast.success(t(res.service ? "footer.restarting" : "footer.restartNoService"));
             }}
             trigger={
-              <Button variant="ghost" size="sm" data-action="restart-open">
+              <Button variant="ghost" size="sm" aria-label={t("footer.restart")} data-action="restart-open">
                 <RotateCwIcon />
                 <span className="hidden sm:inline">{t("footer.restart")}</span>
               </Button>
@@ -77,10 +78,15 @@ export function TopBar({ overview, onSettings }: Props) {
               </DropdownMenuRadioGroup>
             </DropdownMenuContent>
           </DropdownMenu>
-          <Button variant="outline" size="sm" onClick={onSettings} data-action="settings-open">
-            <SettingsIcon />
-            <span className="hidden sm:inline">{t("settings.open")}</span>
-          </Button>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button variant="outline" size="sm" onClick={onSettings} aria-label={t("settings.open")} data-action="settings-open">
+                <SettingsIcon />
+                <span className="hidden sm:inline">{t("settings.open")}</span>
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>{t("settings.open")}</TooltipContent>
+          </Tooltip>
         </div>
       </div>
       {update?.newer ? (

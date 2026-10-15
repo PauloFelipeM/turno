@@ -5,6 +5,8 @@ export default {
     theme: "Theme",
     themes: { light: "Light", dark: "Dark", system: "System" },
     close: "Close",
+    notifications: "Notifications",
+    closeToast: "Close notification",
     engines: "Engines",
     loading: "Loading…",
   },
@@ -183,7 +185,7 @@ export default {
     },
   },
   footer: {
-    version: "turno {version}",
+    version: "v{version}",
     update: "turno {latest} is available: run turno update in a terminal.",
     restart: "Restart turno",
     restartConfirm: "Restart turno? The loops stop (their units resume) and start again; the panel reconnects by itself.",

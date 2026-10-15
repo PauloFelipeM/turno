@@ -5,6 +5,8 @@ export default {
     theme: "Tema",
     themes: { light: "Claro", dark: "Escuro", system: "Sistema" },
     close: "Fechar",
+    notifications: "Notificações",
+    closeToast: "Fechar notificação",
     engines: "Motores",
     loading: "Carregando…",
   },
@@ -183,7 +185,7 @@ export default {
     },
   },
   footer: {
-    version: "turno {version}",
+    version: "v{version}",
     update: "turno {latest} está disponível: rode turno update num terminal.",
     restart: "Reiniciar turno",
     restartConfirm: "Reiniciar o turno? Os loops param (as unidades retomam depois) e voltam a rodar; o painel se reconecta sozinho.",
