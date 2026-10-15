@@ -11,10 +11,10 @@ Every code path given without a folder (`autopilot.py`, `prompts/`, `web/`, ...)
 
 Language: everything in this repository is in English (code, comments, docstrings, logs, CLI output,
 docs, commit messages). The exception is what the owner receives at runtime, which is in the
-language of `config.json`'s `language` (`pt-BR`, the default, or `en`): ntfy notifications and the
+language of `config.json`'s `language` (`en`, the default, or `pt-BR`): ntfy notifications and the
 other scheduler texts (`messages.py`), decision texts, the `unit`/`summary`/`milestone` and backlog
 titles the orchestrator writes (the prompts say `{owner_language}`, which `run_unit` fills), and the
-panel interface (`web/i18n/<language>.js`). A new owner-facing text goes into every language.
+panel interface (`ui/src/i18n/<language>.ts`). A new owner-facing text goes into every language.
 
 ## Rule number one
 
@@ -37,9 +37,9 @@ have the same effect as the commands above.
 
 | Path | What it is |
 |---|---|
-| `pyproject.toml` | The package: setuptools, no runtime dependency, `requires-python >= 3.11`, the console script `turno = turno.cli:main` and the package data (prompts, roles, `web/`) |
+| `pyproject.toml` | The package: setuptools, no runtime dependency, `requires-python >= 3.11`, the console script `turno = turno.cli:main` and the package data (prompts, roles, the built `web/`) |
 | `autopilot.py` (repository root) | Shim: `python3 <checkout>/autopilot.py ...` runs `turno.cli:main`, so loops started the old way and old aliases keep working |
-| `turno/__init__.py` | `__version__`, the one place the version lives (`turno --version`, the panel footer, `pyproject.toml`) |
+| `turno/__init__.py` | `__version__`, the one place the version lives (`turno --version`, the panel's top bar, `pyproject.toml`) |
 | `turno/cli.py`, `turno/__main__.py` | `turno` and `python -m turno`; both call `autopilot.main` |
 | `autopilot.py` | CLI (every subcommand), decisions and ntfy, Docker, project choice and the loop (`run_once`, `run_project`), starting and stopping the loops in tmux, and the command lines: `turno_argv` (`<python> -m turno`, or the root shim from a checkout that is not installed), `loop_engine`/`is_loop` (the three forms of a loop's command line) |
 | `onboard.py` | `turno onboard`: checks, questions (or flags), `config.json`, the ntfy topic (`secrets.toml`, mode 600, shown once), the service, opening the panel |
@@ -51,7 +51,7 @@ have the same effect as the commands above.
 | `coord.py` | Claims, baton and locks between the instances, in `shared/` |
 | `schedule.py` | Weekly window (Claude's default: Friday 19:00 to Sunday 03:00) |
 | `paths.py` | The data folder (`$TURNO_HOME` or `~/.turno`) and `has_ntfy_topic`, a yes or no about `secrets.toml` that never returns the topic |
-| `messages.py` | The scheduler's owner-facing texts per language (ntfy titles and bodies, the summary of a failed setup unit, day names): `text(lang, key, **fields)`; an unknown language is pt-BR |
+| `messages.py` | The scheduler's owner-facing texts per language (ntfy titles and bodies, the summary of a failed setup unit, day names): `text(lang, key, **fields)`; an unknown language is English |
 | `history.py` | Unit history (`history-<engine>.jsonl`) |
 | `backlog.py` | Validation and reading of each project's `backlog.json` |
 | `feed.py` | Incremental reading of run JSONL files and translation into the live feed |
@@ -60,7 +60,8 @@ have the same effect as the commands above.
 | `repo_setup.py` | Setup requests (`~/.turno/setup/<project>.json`, under `shared/setup.lock`), the draft reader (never through a symlink) and the `.git/info/exclude` line |
 | `server.py` | The panel's HTTP server on 127.0.0.1: API, events (SSE) and `web/`; with `--start-engines` it starts the autostart engines once the port is bound |
 | `control.py` | What the panel's write routes do (pause, next, interrupt, reactivate, start/stop, restart, decisions, messages, projects, engines, settings); they need the `X-Turno: 1` header, JSON and a local `Host`/`Origin` |
-| `web/` | Interface: `index.html`, `app.js`, `style.css`, `i18n/pt-BR.js` and `i18n/en.js` (the same keys; the page loads the configured language), including the settings screen, with Projects, Engines and General, and the footer (version, update notice, "Restart turno") |
+| `ui/` (repository root) | The panel's source: React 18 + TypeScript + Tailwind + shadcn/ui-style components (`src/components/ui/`), built by Vite (`npm --prefix ui ci && npm --prefix ui run build`) into `turno/web/`; texts in `src/i18n/pt-BR.ts` and `en.ts` (the same keys), the typed client in `src/api.ts` |
+| `web/` | The built panel (`index.html`, hashed `assets/`); git-ignored, shipped in the wheel and the sdist; without it `serve` answers `/` with the build command |
 | `prompts/unit.md` | Prompt of every new unit: the protocol the orchestrator follows |
 | `prompts/resume.md` | Prompt to resume an interrupted unit |
 | `prompts/setup.md` | Prompt of a setup unit: draft mode (rules, `AGENTS.md`, initial backlog, `notes.md` in the draft folder) and apply mode (copy, one commit `docs: prepare for turno`) |
@@ -96,12 +97,12 @@ call it on every turn.
 
 - **First run.** When `config.json` does not exist and `projects.toml` does, `config.load` imports
   `projects.toml` (Codex) and `claude.toml` (Claude, when present), writes `config.json` and leaves the
-  TOML files as a copy. The engine whose file exists is enabled. `overrides.json` is not changed.
+  TOML files as a copy. The import writes `"language": "pt-BR"`. The engine whose file exists is enabled. `overrides.json` is not changed.
 - **Invalid file.** A `config.json` that does not validate never stops a loop: it keeps the last good
   configuration and logs the problems once per change of the file. The panel's writes are validated
   before they replace the file.
-- **Language and ntfy.** `language` (`pt-BR` or `en`; missing = `pt-BR`, and the file is not
-  rewritten) and `notify.enabled` (missing = on) are set in Settings → General
+- **Language and ntfy.** `language` (`pt-BR` or `en`; missing = `en`, and the file is not
+  rewritten; a config imported from the TOML files gets `pt-BR`) and `notify.enabled` (missing = on) are set in Settings → General
   (`PUT /api/settings/general`). With ntfy off, or on without a topic, nothing is sent or read and
   `secrets.toml` is not even opened when it is off: a new decision still gets `notified_at` and
   `deadline` (the default applies at the deadline) and waits in the panel; warnings go to the log;
@@ -246,12 +247,12 @@ Invariants a change must not break:
   Everything else in a project (the draft, the copied files, the commit) is written by the agent.
   The panel reads the draft files only inside `.superpowers/autopilot/setup/`, never through a
   symlink, at most 200 KB each.
-- **The panel's controls:** the settings screen ("⚙ Configurações"), with Projects (add, edit, reorder,
+- **The panel's controls:** the settings screen ("Settings", in the top bar), with Projects (add, edit, reorder,
   remove; the name is never changed) and Engines (on/off, models, window, caps, and a check of the CLI
-  and the quota) and General (language, ntfy on/off, server, decision timeout); start and stop per engine; the "Needs you" strip ("Precisa de você" in pt-BR), with the pending
+  and the quota) and General (language, ntfy on/off, server, decision timeout); start and stop per engine; the top bar (version, update notice, "Restart turno", theme); the "Needs you" strip, with the pending
   decisions (answer, with an optional comment) and the blocked projects (reactivate, which writes
-  `reset`); pause, next and interrupt on each project card; the project panel with a message to the
-  agents, the caps and, while the project waits on a `retry_at`, "Tentar agora" (also `reset`); "Preparar com um agente" in the settings screen for a project without `docs/autopilot.md`, and the setup review (approve, ask for changes, cancel) in the project panel.
+  `reset`); pause, next and interrupt on each project card; the project panel (a side sheet) with a message to the
+  agents, the caps and, while the project waits on a `retry_at`, "Try now" (also `reset`); "Prepare with an agent" in the settings screen for a project without `docs/autopilot.md`, and the setup review (approve, ask for changes, cancel) in the project panel.
 - **History per run.** Every finished run becomes one line in `history-<engine>.jsonl`; summary and
   cost only on the run that closes the unit.
 
@@ -289,7 +290,8 @@ in `config.json` and never return it from the panel's API.
   install or a checkout only gets told to `git pull`.
 - **Never installs by itself.** The update notice only reads PyPI (one GET a day at most).
 - **Package data.** Everything `turno/` reads at runtime (`prompts/`, `claude-agents.json`,
-  `codex-agents/`, `web/`) is found through the package location (`Path(__file__).parent`), never the
+  `codex-agents/`, `web/`, the Vite build of `ui/`; the wheel test (`TURNO_TEST_WHEEL=1`) fails when it
+  is missing) is found through the package location (`Path(__file__).parent`), never the
   repository root, and is listed in `pyproject.toml`'s package data (a test checks that every
   non-Python file in `turno/` is). A new data file goes into that list.
 - **Privacy.** The tree and the history never carry the owner's project names, home paths, e-mail,
@@ -316,9 +318,12 @@ in `config.json` and never return it from the panel's API.
   data; and never `stop`, `restart` or `update` from a development copy while real loops run (they
   find loops by command line, whatever `TURNO_HOME` says).
 - After editing: the tests, `python3 -m compileall -q turno autopilot.py scripts`,
-  `node --input-type=module --check < turno/web/app.js` when the panel changed, and
+  `npm --prefix ui run typecheck && npm --prefix ui run build` when the panel changed, and
   `python3 -m turno status` and `python3 -m turno --engine claude status`, both with `TURNO_HOME`
   pointing at a temporary folder (or at the real data, if the owner's `config.json` already exists).
+- **Panel changes**: a new visible text goes into both `ui/src/i18n/*.ts`; the click-through in
+  headless Chrome against a temporary `TURNO_HOME` (see the piece-5 plan) before calling a panel
+  change done.
 - Packaging changes: `TURNO_TEST_WHEEL=1 python3 -m unittest discover -s tests -p test_package.py`
   builds the wheel and installs it in a throwaway virtualenv.
 - If the loop is running, a change only applies after the owner restarts it (`turno restart`, or

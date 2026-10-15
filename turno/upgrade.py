@@ -111,7 +111,8 @@ def update(home, out=print):
     """Upgrades with pipx or uv, then runs the new code's `restart`. Returns an exit code."""
     how = installer()
     if how in ("editable", "source"):
-        out(f"turno runs from a source checkout ({autopilot.BASE.parent}): run `git pull` there, then `turno restart`")
+        out(f"turno runs from a source checkout ({autopilot.BASE.parent}): run `git pull` there, rebuild the panel "
+            f"(`npm --prefix ui ci && npm --prefix ui run build`), then `turno restart`")
         return 1
     if how == "other":
         out("turno was not installed with pipx or uv: upgrade it with the tool you used "

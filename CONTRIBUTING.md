@@ -7,11 +7,14 @@ what it could break: read the invariants in [AGENTS.md](AGENTS.md) before you st
 
 ```bash
 git clone https://github.com/PauloFelipeM/turno && cd turno
+npm --prefix ui ci && npm --prefix ui run build   # the panel: Node 20.19 or newer, only to build
 python3 -m unittest discover -s tests -v
 ```
 
-No dependencies: turno and its tests use only the Python standard library (3.11 or newer). To try
-the command itself, install the clone in editable mode in a virtualenv (`python3 -m venv .venv &&
+turno and its tests use only the Python standard library (3.11 or newer). The panel (`ui/`) is
+React + TypeScript + Tailwind + shadcn/ui, built by Vite into `turno/web/` (git-ignored; shipped in
+the wheel and the sdist). Node is needed only to build it; `turno serve` without the build answers
+with the build command. To try the command itself, install the clone in editable mode in a virtualenv (`python3 -m venv .venv &&
 .venv/bin/pip install -e .`) or run `python3 autopilot.py ...` from the root.
 
 ## Tests
@@ -23,8 +26,11 @@ the command itself, install the clone in editable mode in a virtualenv (`python3
   `autopilot.tmux` (the helpers make the first four fail loudly if a test forgets).
 - `TURNO_TEST_WHEEL=1 python3 -m unittest discover -s tests -p test_package.py` also builds the wheel
   and installs it in a throwaway virtualenv (needs pip and the network).
-- The panel has no JS test runner: check syntax with
-  `node --input-type=module --check < turno/web/app.js` and click through the change in a browser.
+- The panel: `npm --prefix ui run typecheck` and `npm --prefix ui run build`.
+  `tests/test_web_texts.py` checks the dictionaries and the source rules (no hard-coded text, no raw
+  HTML, no external URL); `tests/test_web_draft.py` and the window round-trip run the shipped
+  TypeScript through node (skipped without node). Click through a change in a browser against a
+  temporary `TURNO_HOME` (`tests/helpers.make_home`), never against the real data.
 - Never run `turno start`, `run`, `stop`, `restart` or `update` from a development copy while real
   loops run on the same machine: `stop` finds loops by their command line, whatever `TURNO_HOME` says.
 
@@ -32,10 +38,14 @@ the command itself, install the clone in editable mode in a virtualenv (`python3
 
 - Code, comments, docstrings, logs, CLI output, docs and commit messages are in English.
 - What the owner reads at runtime follows `config.json`'s `language` (`pt-BR` or `en`): the ntfy
-  texts in `turno/messages.py`, the panel in `turno/web/i18n/<language>.js` (both files have the
+  texts in `turno/messages.py`, the panel in `ui/src/i18n/<language>.ts` (both files have the
   same keys) and what the agents write (the prompts' `{owner_language}`). A new text goes into
   both languages.
-- Small modules with one responsibility; the standard library only; no build step for the panel.
+- Small modules with one responsibility; the standard library only in Python. The panel's texts are in
+  `ui/src/i18n/<language>.ts`; English is the default and the fallback; the components use the kit in
+  `ui/src/components/ui/` (Radix + cva + tailwind-merge, `forwardRef` because React is 18; do not run
+  the shadcn CLI, which emits React 19 components). The panel's build step is the only one, and only
+  for the panel.
 - Commits follow `type: summary` (`feat:`, `fix:`, `docs:`, `test:`, `chore:`, `refactor:`).
 
 ## Privacy
@@ -48,5 +58,14 @@ goes into a commit.
 
 ## Releasing
 
-Bump `__version__` in `turno/__init__.py`, then `python3 -m build` and `twine check dist/*`, upload
-to TestPyPI, install from it in a clean virtualenv, and only then upload to PyPI.
+In order:
+
+```bash
+# 1. bump __version__ in turno/__init__.py
+npm --prefix ui ci && npm --prefix ui run build          # 2. the panel, from the lock file
+TURNO_TEST_WHEEL=1 python3 -m unittest discover -s tests -p test_package.py   # 3. sdist + wheel carry turno/web
+rm -rf dist && python3 -m build                          # 4. sdist and wheel
+twine check dist/*                                       # 5.
+twine upload -r testpypi dist/*                          # 6. then install from TestPyPI in a clean virtualenv and open the panel
+twine upload dist/*                                      # 7. PyPI
+```

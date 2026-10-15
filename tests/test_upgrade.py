@@ -167,6 +167,7 @@ class UpdateTest(unittest.TestCase):
         self.installed_as("/home/me/.local/share/pipx/venvs/turno", {"dir_info": {"editable": True}})
         self.assertEqual(self.upgrade.update(self.home, out=self.out.append), 1)
         self.assertIn("git pull", self.out[-1])
+        self.assertIn("npm --prefix ui ci && npm --prefix ui run build", self.out[-1])
         self.installed_as("/usr/local")
         self.assertEqual(self.upgrade.update(self.home, out=self.out.append), 1)
         self.assertIn("pip install -U turno", self.out[-1])

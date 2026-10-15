@@ -8,7 +8,7 @@ with buttons, or wait for you in the panel. A local web panel shows what is runn
 and how much of each backlog is left, and lets you control everything.
 
 > **Status:** alpha. It runs one person's projects every day and is being generalized. The panel,
-> the phone texts and what the agents write for you are in English or Brazilian Portuguese.
+> the phone texts and what the agents write for you are in English (the default) or Brazilian Portuguese.
 > Linux, macOS and Windows with WSL2.
 
 ## Install
@@ -21,7 +21,7 @@ turno onboard
 `turno onboard` checks the machine (Python, git, tmux, Docker, the Codex and Claude CLIs), asks a
 few questions (language, which engines to use, ntfy, the background service), creates `~/.turno`,
 installs a service that starts the panel at boot, and opens the panel at http://localhost:8765.
-Then add your projects in the panel's settings (⚙). From there on everything happens in the
+Then add your projects in the panel's settings. From there on everything happens in the
 browser: the service brings the panel up, the panel starts the enabled engines.
 
 Scripted install: `turno onboard --language en --engines codex,claude --no-ntfy --service --yes`.
@@ -84,7 +84,7 @@ last good configuration and logs the problem.
 |---|---|
 | `projects` | Name, path, optional `docker_group` (projects that bind the same ports) and `weekly_cap` per engine. The order is the priority |
 | `engines.<engine>` | `enabled`, `autostart` (the service starts it), orchestrator model and effort, `roles` (planner, implementer, reviewer), `primary_cap`, `safety_factor`, initial costs, `blocked_cooldown_hours`, `schedule` (a weekly window) |
-| `language` | `en` or `pt-BR`: the panel, the phone texts and what the agents write for you |
+| `language` | `en` (the default) or `pt-BR`: the panel, the phone texts and what the agents write for you. A config without the key is English; a config imported from the old `projects.toml` keeps `pt-BR` |
 | `notify` | `enabled`, the ntfy server and the decision timeout. The topic stays in `secrets.toml` |
 | `update_check` | `false` stops the daily PyPI check |
 
@@ -97,14 +97,17 @@ The panel shows the quota of each engine with its cap and reset time, what each 
 every project with its state and backlog progress, the running unit live (commands, file changes,
 which subagent was called) and the unit history with outcome, duration and cost.
 
+It is a React app (Tailwind and shadcn/ui components) bundled into the package: light, dark or system
+theme (the menu in the top bar), and it works at phone width. Nothing is loaded from the internet.
+
 | Control | What it does |
 |---|---|
 | Start / Stop (per engine) | Starts the loop in tmux, or stops it like a Ctrl+C: the unit is resumed on the next start |
 | "Needs you" | Pending decisions to answer (with an optional comment) and blocked projects to reactivate |
 | Pause, Next, Interrupt (project card) | Skip a project; give it the next new unit; stop its running unit and pause it |
-| Project panel | A message to the agents, the project's caps and, while it waits to retry, "Try now" |
-| ⚙ Settings | Projects (add, edit, reorder, remove), Engines (on/off, start with the panel, models, caps, window, a quota check) and General (language, ntfy) |
-| Footer | The running version, a notice when PyPI has a newer one, and "Restart turno" |
+| Project panel | Clicking a project card opens it as a side panel (full screen on a phone): backlog, the setup review, a message to the agents, the caps, "Try now" while it waits to retry, and the project's history |
+| Settings | Projects (add, edit, reorder, remove), Engines (on/off, start with the panel, models, caps, the window with a day and a time picker, a quota check) and General (language, ntfy) |
+| Top bar | The running version, a notice when PyPI has a newer one, "Restart turno", the theme and Settings |
 
 "Restart turno" does what `turno restart` does: the loops stop (their units resume), the service
 restarts the panel, and the panel starts the engines again.
@@ -143,7 +146,7 @@ of all of them), read by the next unit.
 ## Preparing a new project
 
 A repository that never ran turno needs `docs/autopilot.md` and `.superpowers/` ignored by git. In
-⚙ Settings, a project without that file shows "Prepare with an agent": write what the project should
+Settings, a project without that file shows "Prepare with an agent": write what the project should
 become, and a draft unit proposes `docs/autopilot.md`, an `AGENTS.md` if there is none, the initial
 backlog and a short note for you. Review it in the project panel, ask for changes or approve; the
 apply unit makes one commit, `docs: prepare for turno`, on the current branch (no push).
@@ -168,12 +171,14 @@ files move into `turno/` with the `git pull`. So stop everything first:
 cd ~/src/turno
 python3 autopilot.py stop        # still the old code: stops the loops (stop a hand-started `serve` too)
 git pull
+npm --prefix ui ci && npm --prefix ui run build   # the panel (needs Node 20.19+ only for this)
 pipx install -e .
 turno service install
 turno restart                    # or: turno start
 ```
 
-Stop a hand-started `serve` before installing the service: port 8765 must be free.
+Stop a hand-started `serve` before installing the service: port 8765 must be free. A checkout
+without the build still serves the API, and a page that shows the build command.
 
 `~/.turno` (config, state, history) is used as it is. `python3 autopilot.py ...` keeps working, and
 `turno stop` recognises loops started either way. With an editable install `turno update` only
