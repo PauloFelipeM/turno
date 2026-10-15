@@ -95,7 +95,12 @@ function EngineBlock({ k, d, set }: { k: string; d: Draft; set: (fn: (e: EngineD
     <Card className="gap-4" data-settings-engine={k}>
       <CardHeader className="items-center">
         <CardTitle>{engineName(k)}</CardTitle>
-        <Badge variant={cli.found ? "secondary" : "destructive"} className="ml-auto max-w-full truncate font-normal" data-cli={cli.found ? "found" : "missing"}>
+        <Badge
+          variant={cli.found ? "secondary" : "destructive"}
+          className="ml-auto block min-w-0 max-w-full truncate font-normal"
+          title={cli.found ? t("settings.cliFound", { path: cli.path, version: cli.version || "?" }) : undefined}
+          data-cli={cli.found ? "found" : "missing"}
+        >
           {cli.found ? t("settings.cliFound", { path: cli.path, version: cli.version || "?" }) : t("settings.cliMissing")}
         </Badge>
       </CardHeader>

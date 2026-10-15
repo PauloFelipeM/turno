@@ -1,6 +1,5 @@
 import { useState } from "react";
-import { CheckIcon, ChevronsUpDownIcon } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { CheckIcon, ChevronDownIcon } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Popover, PopoverAnchor, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { useI18n } from "@/i18n";
@@ -19,12 +18,17 @@ export function ModelCombobox({ value, onChange, known, label, sf }: {
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverAnchor asChild>
-        <div className="flex min-w-44 items-center gap-1">
-          <Input value={value} onChange={(ev) => onChange(ev.target.value)} aria-label={label} data-sf={sf} className="font-mono text-xs" />
+        <div className="relative min-w-44">
+          <Input value={value} onChange={(ev) => onChange(ev.target.value)} aria-label={label} data-sf={sf} className="pr-9" />
           <PopoverTrigger asChild>
-            <Button variant="ghost" size="icon-sm" aria-label={t("settings.pickModel")} data-sf={`${sf}-pick`}>
-              <ChevronsUpDownIcon />
-            </Button>
+            <button
+              type="button"
+              aria-label={t("settings.pickModel")}
+              data-sf={`${sf}-pick`}
+              className="absolute inset-y-0 right-0 flex w-9 items-center justify-center rounded-r-md text-muted-foreground outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50"
+            >
+              <ChevronDownIcon className="size-4 opacity-50" />
+            </button>
           </PopoverTrigger>
         </div>
       </PopoverAnchor>
@@ -35,7 +39,7 @@ export function ModelCombobox({ value, onChange, known, label, sf }: {
             <li key={m} role="option" aria-selected={m === value}>
               <button
                 type="button"
-                className={cn("flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left font-mono text-xs hover:bg-accent focus-visible:bg-accent focus-visible:outline-none")}
+                className={cn("flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left text-sm hover:bg-accent focus-visible:bg-accent focus-visible:outline-none")}
                 onClick={() => {
                   onChange(m);
                   setOpen(false);

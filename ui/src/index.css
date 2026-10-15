@@ -101,6 +101,21 @@
   .grid > * {
     min-width: 0;
   }
+  /* Tailwind v4 resets buttons to the default cursor; everything clickable shows the pointer again. */
+  button:not(:disabled),
+  [role="button"]:not([aria-disabled="true"]),
+  [role="tab"],
+  [role="option"],
+  [role="menuitem"],
+  [role="combobox"],
+  [role="switch"],
+  [role="checkbox"],
+  select,
+  summary,
+  label[for],
+  a[href] {
+    cursor: pointer;
+  }
   .tabular {
     font-variant-numeric: tabular-nums;
   }

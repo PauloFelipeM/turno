@@ -103,7 +103,7 @@ function EngineCard({ e }: { e: EngineView }) {
           {phaseText(t, lang, e)}
         </Badge>
       </CardHeader>
-      <CardContent className="grid gap-3">
+      <CardContent className="grid flex-1 content-start gap-3">
         {e.limits.known ? (
           <>
             <Meter label={t("window5h")} usage={e.limits.primary} cap={e.primary_cap} />
