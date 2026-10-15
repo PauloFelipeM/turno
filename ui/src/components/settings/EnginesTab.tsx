@@ -158,15 +158,21 @@ function EngineBlock({ k, d, set }: { k: string; d: Draft; set: (fn: (e: EngineD
           />
         </div>
         <div className="grid gap-3 rounded-lg border p-3">
-          <SwitchRow id={`nowindow:${k}`} checked={cur.noWindow} onChange={(v) => set((e) => void (e.noWindow = v))}>
-            {t("settings.noWindow")}
-          </SwitchRow>
+          <div className="flex items-center gap-1.5">
+            <SwitchRow id={`nowindow:${k}`} checked={cur.noWindow} onChange={(v) => set((e) => void (e.noWindow = v))}>
+              {t("settings.noWindow")}
+            </SwitchRow>
+            <InfoTip text={t("help.noWindow")} />
+          </div>
           {cur.noWindow ? null : (
             <div className="flex flex-wrap items-end gap-4">
               <WindowPointPicker id={`start:${k}`} label={t("settings.start")} value={cur.start} onChange={(v) => set((e) => void (e.start = v))} />
               <WindowPointPicker id={`end:${k}`} label={t("settings.end")} value={cur.end} onChange={(v) => set((e) => void (e.end = v))} />
               <div className="grid gap-1.5">
-                <Label htmlFor={`margin:${k}`}>{t("settings.margin")}</Label>
+                <div className="flex items-center gap-1.5">
+                  <Label htmlFor={`margin:${k}`}>{t("settings.margin")}</Label>
+                  <InfoTip text={t("help.margin")} />
+                </div>
                 <div className="flex items-center gap-2">
                   <Input
                     id={`margin:${k}`}
