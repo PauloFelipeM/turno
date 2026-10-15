@@ -232,7 +232,7 @@ def ntfy_server(cfg):
 
 
 def say(cfg, key, **fields):
-    """An owner-facing text in the configured language (`messages.py`; pt-BR when the config has none)."""
+    """An owner-facing text in the configured language (`messages.py`; English when the config has none)."""
     return messages.text(cfg.get("language"), key, **fields)
 
 
