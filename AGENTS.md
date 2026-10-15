@@ -1,10 +1,13 @@
 # turno
 
 A scheduler that runs the Codex CLI and Claude Code unattended on several projects, inside the quota
-of the subscriptions, plus a local web panel to follow it. This folder is the tool itself; the projects live elsewhere, and the data
+of the subscriptions, plus a local web panel to follow and control it. It is published on PyPI as
+`turno`. This repository is the tool itself; the projects it works on live elsewhere, and the data
 (config, state, logs, runs) lives in `~/.turno` (or `$TURNO_HOME`). Here you maintain the scheduler;
 you do not work on the projects. Every data path in this file given without a folder (`shared/`,
 `state*.json`, `config.json`, `secrets.toml`, logs, `runs/`) lives in `~/.turno` (or `$TURNO_HOME`).
+Every code path given without a folder (`autopilot.py`, `prompts/`, `web/`, ...) lives in the
+`turno/` package. "The owner" is the person whose machine runs turno.
 
 Language: everything in this repository is in English (code, comments, docstrings, logs, CLI output,
 docs, commit messages). The exception is what the owner receives at runtime, which is in the
@@ -15,56 +18,69 @@ panel interface (`web/i18n/<language>.js`). A new owner-facing text goes into ev
 
 ## Rule number one
 
-**Never run `autopilot.py start`, `autopilot.py run` or `autopilot.py --engine claude run` from a
-Codex or Claude Code session.** The loop starts other sessions, spends the same quota you do and dies
-with your session. The owner starts the loops, with `autopilot.py start` (see `README.md`). `test-notify` and
-`serve` (it starts nothing by itself) are safe. So are `status`, `decisions` and `check`, with one
-caveat: the first time, when `config.json` does not exist yet, any command that loads the config
-imports `projects.toml` and `claude.toml` and writes `config.json` (see "The config"). `check` also
-reads the quota (on Claude, with a minimal Haiku query). `stop`, `answer` and `reset` change state and only
-run when the owner asks. Each engine has an instance lock (`~/.turno/shared/instance-<engine>.lock`,
-holding the pid): two loops of the same engine never run. From an agent session, never call the
-panel's start, stop or interrupt endpoints (`/api/engines/<engine>/start|stop`,
-`/api/projects/<name>/interrupt`) either: they have the same effect as the commands above.
+**Never run `turno start`, `turno run`, `turno --engine claude run`, `turno restart` or `turno
+update` (or the same through `python3 autopilot.py` or `python3 -m turno`) from a Codex or Claude
+Code session.** The loop starts other sessions, spends the same quota you do and dies with your
+session; `restart` and `update` stop every loop on the machine. The owner starts the loops (the
+service does it at boot, see `README.md`). `test-notify` and `serve` without `--start-engines` (it
+starts nothing by itself) are safe. So are `status`, `decisions` and `check`, with one caveat: the
+first time, when `config.json` does not exist yet, any command that loads the config imports
+`projects.toml` and `claude.toml` and writes `config.json` (see "The config"). `check` also reads the
+quota (on Claude, with a minimal Haiku query). `stop`, `answer`, `reset`, `onboard` and `service`
+change state and only run when the owner asks. Each engine has an instance lock
+(`~/.turno/shared/instance-<engine>.lock`, holding the pid): two loops of the same engine never run.
+From an agent session, never call the panel's start, stop, interrupt or restart endpoints
+(`/api/engines/<engine>/start|stop`, `/api/projects/<name>/interrupt`, `/api/restart`) either: they
+have the same effect as the commands above.
 
 ## Files
 
 | Path | What it is |
 |---|---|
-| `autopilot.py` | CLI, decisions and ntfy, Docker, project choice and the loop (`run_once`, `run_project`) |
+| `pyproject.toml` | The package: setuptools, no runtime dependency, `requires-python >= 3.11`, the console script `turno = turno.cli:main` and the package data (prompts, roles, `web/`) |
+| `autopilot.py` (repository root) | Shim: `python3 <checkout>/autopilot.py ...` runs `turno.cli:main`, so loops started the old way and old aliases keep working |
+| `turno/__init__.py` | `__version__`, the one place the version lives (`turno --version`, the panel footer, `pyproject.toml`) |
+| `turno/cli.py`, `turno/__main__.py` | `turno` and `python -m turno`; both call `autopilot.main` |
+| `autopilot.py` | CLI (every subcommand), decisions and ntfy, Docker, project choice and the loop (`run_once`, `run_project`), starting and stopping the loops in tmux, and the command lines: `turno_argv` (`<python> -m turno`, or the root shim from a checkout that is not installed), `loop_engine`/`is_loop` (the three forms of a loop's command line) |
+| `onboard.py` | `turno onboard`: checks, questions (or flags), `config.json`, the ntfy topic (`secrets.toml`, mode 600, shown once), the service, opening the panel |
+| `service.py` | `turno service`: the systemd user unit or launchd agent that runs `serve --start-engines` (`KillMode=process`: the loops in tmux outlive it) |
+| `upgrade.py` | `turno restart` (stop the loops, restart the service, start what the panel will not) and `turno update` (pipx or uv, then the new code's `restart`) |
+| `pypi.py` | The PyPI version check: at most one GET a day, cached in `shared/update-check.json`, off with `"update_check": false` |
 | `engines.py` | `CodexEngine` and `ClaudeEngine`: command, quota reading, output classification, cost, live feed translation (the contract is in `docs/engines.md`) |
 | `config.py` | `config.json`: validation, atomic writes under `shared/config.lock`, the one-time import of the old TOML files, `for_engine` |
 | `coord.py` | Claims, baton and locks between the instances, in `shared/` |
-| `schedule.py` | Weekly window (Claude's: Friday 19:00 to Sunday 03:00) |
+| `schedule.py` | Weekly window (Claude's default: Friday 19:00 to Sunday 03:00) |
 | `paths.py` | The data folder (`$TURNO_HOME` or `~/.turno`) and `has_ntfy_topic`, a yes or no about `secrets.toml` that never returns the topic |
 | `messages.py` | The scheduler's owner-facing texts per language (ntfy titles and bodies, the summary of a failed setup unit, day names): `text(lang, key, **fields)`; an unknown language is pt-BR |
 | `history.py` | Unit history (`history-<engine>.jsonl`) |
 | `backlog.py` | Validation and reading of each project's `backlog.json` |
 | `feed.py` | Incremental reading of run JSONL files and translation into the live feed |
-| `panel.py` | What the panel shows, assembled from the files (read-only) |
+| `panel.py` | What the panel shows, assembled from the files (read-only), including the version and the update notice |
 | `overrides.py` | The panel's requests to the loops (`~/.turno/overrides.json`), read-modify-write under a lock |
 | `repo_setup.py` | Setup requests (`~/.turno/setup/<project>.json`, under `shared/setup.lock`), the draft reader (never through a symlink) and the `.git/info/exclude` line |
-| `server.py` | The panel's HTTP server on 127.0.0.1: API, events (SSE) and `web/` |
-| `control.py` | What the panel's write routes do (pause, next, interrupt, reactivate, start/stop, decisions, messages, projects, engines, settings); they need the `X-Turno: 1` header, JSON and a local `Host`/`Origin` |
-| `web/` | Interface: `index.html`, `app.js`, `style.css`, `i18n/pt-BR.js` and `i18n/en.js` (the same keys; the page loads the configured language), including the settings screen, with Projects, Engines and General |
-| `docs/engines.md` | The engine contract: what the loop calls on an engine, and what a CLI must offer |
+| `server.py` | The panel's HTTP server on 127.0.0.1: API, events (SSE) and `web/`; with `--start-engines` it starts the autostart engines once the port is bound |
+| `control.py` | What the panel's write routes do (pause, next, interrupt, reactivate, start/stop, restart, decisions, messages, projects, engines, settings); they need the `X-Turno: 1` header, JSON and a local `Host`/`Origin` |
+| `web/` | Interface: `index.html`, `app.js`, `style.css`, `i18n/pt-BR.js` and `i18n/en.js` (the same keys; the page loads the configured language), including the settings screen, with Projects, Engines and General, and the footer (version, update notice, "Restart turno") |
 | `prompts/unit.md` | Prompt of every new unit: the protocol the orchestrator follows |
 | `prompts/resume.md` | Prompt to resume an interrupted unit |
 | `prompts/setup.md` | Prompt of a setup unit: draft mode (rules, `AGENTS.md`, initial backlog, `notes.md` in the draft folder) and apply mode (copy, one commit `docs: prepare for turno`) |
 | `prompts/engine-*.md` | Engine note appended to the prompt (what is specific to Codex or Claude) |
 | `claude-agents.json` | Claude role prompts (`planner`, `implementer`, `reviewer`); the engine adds the configured model and effort and passes them with `--agents` |
-| `config.json` | The configuration, written by the panel and re-read by the loops on every turn: projects (their order is the priority, weekly cap per engine), a section per engine (on/off, orchestrator model and effort, window, caps, costs), `language` and `notify` (on/off, server, decision timeout). Under `shared/config.lock` |
-| `config.example.json` | An example config with generic projects; the real one lives in `~/.turno` |
-| `secrets.toml`, `secrets.example.toml` | ntfy topic, read by both instances when ntfy is on (outside git; the panel only asks `paths.has_ntfy_topic` whether it exists) |
+| `codex-agents/*.toml` | Codex role templates (`planner`, `implementer`, `reviewer`), without model or effort |
+| `docs/engines.md` (repository root) | The engine contract: what the loop calls on an engine, and what a CLI must offer |
+| `config.example.json` (repository root) | An example config with generic projects; the real one lives in `~/.turno` |
+| `secrets.example.toml` (repository root) | The shape of `secrets.toml` |
+| `scripts/scan_private.py` (repository root) | Refuses a tree or history with private data (a patterns file that is never committed, plus home paths, topics and tokens) |
+| `tests/` (repository root) | Tests: `python3 -m unittest discover -s tests -v` |
+| `config.json` | The configuration, written by the panel and re-read by the loops on every turn: projects (their order is the priority, weekly cap per engine), a section per engine (on/off, `autostart`, orchestrator model and effort, window, caps, costs), `language`, `notify` (on/off, server, decision timeout) and `update_check`. Under `shared/config.lock` |
+| `secrets.toml` | ntfy topic, read by both instances when ntfy is on (outside git; the panel only asks `paths.has_ntfy_topic` whether it exists) |
 | `projects.toml`, `claude.toml` | Legacy. Imported once, when `config.json` does not exist, and kept as a copy; nothing reads them afterwards |
-| `overrides.json` | Panel requests: `projects.<name>.paused`, `next`, `reset`, `poke` (generated; under `shared/overrides.lock`). Order and caps used to live here; they are in `config.json` now, and the import leaves this file untouched |
+| `overrides.json` | Panel requests: `projects.<name>.paused`, `next`, `reset`, `poke` (generated; under `shared/overrides.lock`) |
 | `setup/<project>.json` | A project's setup request: `goal`, `status` (`requested`, `review`, `approved`, `done`), `feedback` and timestamps (written by the panel and the loops, under `shared/setup.lock`) |
 | `state.json`, `state-claude.json` | State of each instance (generated; do not edit while the loop runs) |
-| `autopilot.log`, `autopilot-claude.log` | Log of each instance (generated) |
+| `autopilot.log`, `autopilot-claude.log`, `restart.log` | Log of each instance, and of the restarts the panel starts (generated) |
 | `runs/`, `runs-claude/` | JSONL and stderr of the latest runs (generated) |
-| `shared/` | Claims (`claims/`), locks (`*.lock`, including `overrides.lock`), `notes/`, `notify.json` and `instance-<engine>.json` (the running loop's pid and `"sigusr1": true`, for the panel where there is no `/proc`) (generated) |
-| `tests/` | Tests: `python3 -m unittest discover -s tests -v` |
-| `codex-agents/*.toml` | Codex role templates (`planner`, `implementer`, `reviewer`), without model or effort |
+| `shared/` | Claims (`claims/`), locks (`*.lock`, including `overrides.lock`), `notes/`, `notify.json`, `update-check.json` and `instance-<engine>.json` (the running loop's pid and `"sigusr1": true`, for the panel where there is no `/proc`) (generated) |
 | `$CODEX_HOME/agents/*.toml` | Generated by turno from the templates plus `engines.codex.roles` before each Codex unit; never edit by hand |
 | `<project>/docs/autopilot.md` | Each project's rules: backlog, paths, verification, git |
 | `<project>/.superpowers/autopilot/` | `last-unit.json`, `backlog.json` and `decisions/`, written by the orchestrator |
@@ -92,7 +108,7 @@ call it on every turn.
   the ntfy read position follows the clock, so turning ntfy on again does not replay old messages.
 - **Engine off.** A disabled engine starts no unit. Its loop, if running, sleeps with phase `disabled`,
   keeps the ntfy decisions flowing and passes its open units on as batons.
-- **Loops.** `autopilot.py --engine codex|claude run` runs one loop (`--config` is a deprecated alias
+- **Loops.** `turno --engine codex|claude run` runs one loop (`--config` is a deprecated alias
   of `--engine`). `start` and `stop` use the engines enabled in the config.
 
 ## How it works
@@ -143,7 +159,7 @@ Each instance runs one engine (`--engine`, `codex` by default; the contract is i
 Docker. Waking early does not cancel it: a click on the panel wakes the loop, but `pick` still skips
 the project, even to resume its interrupted unit, until that time. It goes back to 0 when the unit
 closes, when a later run ends another way (unfinished, cut, stopped) and on a reset: the panel's
-"Reativar" and "Tentar agora" (both write `reset`) and `autopilot.py reset` clear it. The panel
+"Reativar" and "Tentar agora" (both write `reset`) and `turno reset` clear it. The panel
 shows it on the project card ("tenta de novo ...").
 
 ### Preparing a project
@@ -252,23 +268,59 @@ Without ntfy the same files are answered in the panel, and the deadline still ap
 The `topic` in `secrets.toml` is a secret: never print it in logs, commits or messages, never put it
 in `config.json` and never return it from the panel's API.
 
+## Distribution
+
+- **Install and loops.** turno is installed with pipx or uv (`turno` on PATH) or run from a checkout
+  (`python3 autopilot.py`). `start` and the panel launch each loop as `<python> -m turno --engine
+  <engine> run` with the interpreter of the running turno; from a checkout that is not installed,
+  `python -m turno` would not find the package outside the checkout, so they use the root shim
+  instead (`turno_argv`). `stop`, `loop_pids` and the panel's pid check recognise all three forms:
+  `-m turno`, `autopilot.py` (with `--engine`, the deprecated `--config`, or neither) and the
+  `turno` console script.
+- **The service** runs `<python> -m turno serve --start-engines`, with the installer's `PATH` and,
+  when not the default, `TURNO_HOME`. Only the panel belongs to it (`KillMode=process`,
+  `AbandonProcessGroup`): the loops live in tmux and survive a stop or restart of the service. It
+  never runs `sudo`; `loginctl enable-linger` is only suggested.
+- **Restart and update.** `restart` stops the loops like `stop` (units resume), restarts the
+  service and starts the loops the panel will not (running before, `autostart` off); without a
+  service, or when it does not restart, it starts again every loop that was running. The panel's
+  "Restart turno" runs `turno restart` in a detached process (its own session, output in
+  `restart.log`). `update` upgrades with pipx or uv and runs the new code's `restart`; an editable
+  install or a checkout only gets told to `git pull`.
+- **Never installs by itself.** The update notice only reads PyPI (one GET a day at most).
+- **Package data.** Everything `turno/` reads at runtime (`prompts/`, `claude-agents.json`,
+  `codex-agents/`, `web/`) is found through the package location (`Path(__file__).parent`), never the
+  repository root, and is listed in `pyproject.toml`'s package data (a test checks that every
+  non-Python file in `turno/` is). A new data file goes into that list.
+- **Privacy.** The tree and the history never carry the owner's project names, home paths, e-mail,
+  ntfy topic or tokens. Tests and docs use `my-app`, `my-api`, `side-project`, `/home/me/...`.
+  `docs/superpowers/` (design notes of one setup) is ignored by git.
+
 ## When changing something
 
 - **Engine changes** (a new engine, or a change in what the loop calls): keep `docs/engines.md`,
   `engines.ENGINES`, `config.ENGINES`/`ENGINE_DEFAULTS` and `tests/helpers.FakeEngine` consistent.
-- **Protocol changes** (`prompts/`, including `prompts/setup.md`, roles, `last-unit.json`, `backlog.json`, decision files): keep
-  `prompts/unit.md`, the engine notes (`prompts/engine-*.md`), the role templates in `codex-agents/` and
-  `claude-agents.json`, and each project's `docs/autopilot.md` consistent.
-- **Tests:** `python3 -m unittest discover -s tests -v`. `tests/helpers.py` loads the autopilot with
+- **Protocol changes** (`prompts/`, including `prompts/setup.md`, roles, `last-unit.json`,
+  `backlog.json`, decision files): keep `prompts/unit.md`, the engine notes (`prompts/engine-*.md`),
+  the role templates in `codex-agents/` and `claude-agents.json`, and each project's
+  `docs/autopilot.md` consistent.
+- **A new module** goes into `turno/`, with relative imports (`from . import config`). One that the
+  tests must load fresh for each `helpers.load` (anything that imports `autopilot`) goes into
+  `tests/helpers.MODULES`.
+- **Tests:** `python3 -m unittest discover -s tests -v`. `tests/helpers.py` loads the package with
   state, log, `shared/` and ntfy in a temporary folder (`TURNO_HOME`), and provides a `FakeEngine`, a
   test git repository and a sample data folder (`make_home`). New tests follow that pattern. Never
-  test against the real `state.json`, call the real `codex` or `claude`, or stop the projects'
-  containers. Never run `autopilot.py` commands without `TURNO_HOME` pointing at a temporary folder,
-  except the safe ones above against the real data.
-- After editing: the tests,
-  `python3 -m py_compile autopilot.py config.py coord.py engines.py schedule.py paths.py history.py backlog.py feed.py panel.py server.py overrides.py control.py repo_setup.py messages.py`,
-  `python3 autopilot.py status` and `python3 autopilot.py --engine claude status`, both with
-  `TURNO_HOME` pointing at a temporary folder (or at the real data, if the owner's `config.json`
-  already exists).
-- If the loop is running, a change only applies after the owner restarts it. Tell them.
-- This folder is under git. Large changes go on a branch.
+  test against the real `state.json`, call the real `codex`, `claude`, `systemctl`, `launchctl`,
+  `pipx`, `uv`, `tmux` or the network, or stop the projects' containers. Never run turno commands
+  without `TURNO_HOME` pointing at a temporary folder, except the safe ones above against the real
+  data; and never `stop`, `restart` or `update` from a development copy while real loops run (they
+  find loops by command line, whatever `TURNO_HOME` says).
+- After editing: the tests, `python3 -m compileall -q turno autopilot.py scripts`,
+  `node --input-type=module --check < turno/web/app.js` when the panel changed, and
+  `python3 -m turno status` and `python3 -m turno --engine claude status`, both with `TURNO_HOME`
+  pointing at a temporary folder (or at the real data, if the owner's `config.json` already exists).
+- Packaging changes: `TURNO_TEST_WHEEL=1 python3 -m unittest discover -s tests -p test_package.py`
+  builds the wheel and installs it in a throwaway virtualenv.
+- If the loop is running, a change only applies after the owner restarts it (`turno restart`, or
+  "Restart turno" in the panel). Tell them.
+- This repository is under git. Large changes go on a branch.

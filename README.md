@@ -3,13 +3,38 @@
 turno runs the Codex CLI and Claude Code unattended on several of your repositories, inside the
 quota of your ChatGPT and Claude subscriptions. It works through each project's backlog one short
 session at a time, following a fixed method: spec, then plan, then execution, with planner,
-reviewer and implementer subagents. Product decisions that matter reach your phone (ntfy) as a
-question with buttons, or wait for you in the panel when you do not use ntfy. A local web panel
-shows what is running, what happened and how much of each backlog is left.
+reviewer and implementer subagents. Decisions that matter reach your phone (ntfy) as a question
+with buttons, or wait for you in the panel. A local web panel shows what is running, what happened
+and how much of each backlog is left, and lets you control everything.
 
-> **Status:** early. It was built for one person's setup and is being generalized. Everything turno
-> and its agents write for you (panel, phone notifications, decisions, summaries) is in Brazilian
-> Portuguese or English (Settings → General). It runs on Linux, macOS and Windows with WSL2.
+> **Status:** alpha. It runs one person's projects every day and is being generalized. The panel,
+> the phone texts and what the agents write for you are in English or Brazilian Portuguese.
+> Linux, macOS and Windows with WSL2.
+
+## Install
+
+```bash
+pipx install turno        # or: uv tool install turno
+turno onboard
+```
+
+`turno onboard` checks the machine (Python, git, tmux, Docker, the Codex and Claude CLIs), asks a
+few questions (language, which engines to use, ntfy, the background service), creates `~/.turno`,
+installs a service that starts the panel at boot, and opens the panel at http://localhost:8765.
+Then add your projects in the panel's settings (⚙). From there on everything happens in the
+browser: the service brings the panel up, the panel starts the enabled engines.
+
+Scripted install: `turno onboard --language en --engines codex,claude --no-ntfy --service --yes`.
+`turno onboard` is safe to run again: it never overwrites a file without asking.
+
+### Requirements
+
+- Python 3.11 or newer (turno uses only the standard library)
+- The Codex CLI and/or Claude Code, logged in with your subscription
+- tmux (the loops run in it, so they outlive the terminal and the panel)
+- git; Docker if your projects need it (turno brings each project's stack up before a unit; when
+  Docker is down it opens Docker Desktop on macOS and WSL, and waits for you on Linux)
+- Optional: the [ntfy](https://ntfy.sh) app on your phone. Without it, decisions wait in the panel
 
 ## How it works
 
@@ -18,222 +43,152 @@ shows what is running, what happened and how much of each backlog is left.
   unit is one short CLI session. The orchestrator ends it by writing
   `<project>/.superpowers/autopilot/last-unit.json` (`worked`, `waiting`, `idle` or `blocked`) and
   `backlog.json` (the progress the panel shows).
-- **Quota.** Before starting a unit, turno reads the 5-hour and weekly usage windows and only starts
-  if the usage plus 1.5 times the unit's learned average cost fits under the project's cap. Projects
-  are in priority order; a project that does not fit does not hold up a cheaper one.
+- **Quota.** Before a unit, turno reads the 5-hour and weekly usage windows and only starts if the
+  usage plus 1.5 times the unit's learned average cost fits under the project's cap. Projects are in
+  priority order; a project that does not fit does not hold up a cheaper one.
 - **Nothing left half-done.** An interrupted unit (usage limit, error, end of a time window) is
-  resumed before anything else, once its wait is over: after an error or a usage limit the project
-  rests for a while (longer after repeated errors, until the reset after a usage limit). Only an
-  explicit reset ends that wait early.
-- **Two engines.** One loop runs Codex, another runs Claude Code (by default only on weekends). Each engine is switched on or off in the config.
-  They never work on the same project, or on two projects that share Docker ports, at the same time.
-  A unit cut at the end of the Claude window is handed over (the "baton") to whichever engine runs
-  next.
-- **Your work is safe.** A project with uncommitted changes that are not turno's is skipped.
+  resumed before anything else once its wait is over.
+- **Two engines.** One loop runs Codex, another runs Claude Code (by default only on weekends). They
+  never work on the same project, or on two projects that share Docker ports, at the same time. A
+  unit cut at the end of the Claude window is handed over (the "baton") to the other engine.
 
 Each project describes its own rules in `docs/autopilot.md`: where the backlog, specs, plans and
-ledgers live, how to verify work and the git policy. The protocol the orchestrator follows is in
-`prompts/unit.md`.
+ledgers live, how to verify work and the git policy. The panel can draft that file for you (see
+"Preparing a new project"). The protocol the orchestrator follows is in
+[`turno/prompts/unit.md`](turno/prompts/unit.md).
 
-## Requirements
+## Safety model
 
-- Python 3.11 or newer (standard library only)
-- The Codex CLI and/or Claude Code, logged in with your subscription
-- tmux, to keep the loops running after you close the terminal
-- Docker, if your projects need it (turno brings each project's stack up before a unit; when
-  Docker is down it opens Docker Desktop on macOS and WSL, and on Linux it waits for you to start
-  the Docker service)
-- Optional: the ntfy app on your phone, subscribed to a private topic. Without it, decisions and
-  warnings wait for you in the panel
+- **Your work is not touched.** A project with uncommitted changes that are not turno's is skipped,
+  and its Docker stack is not stopped. The only thing turno itself changes in a project is one line
+  in the clone's `.git/info/exclude`; everything else is written by the agent, inside the project's
+  own rules.
+- **Fixed rules above any message.** The agents never weaken tests, read `.env` files, force-push
+  or drop data, whatever a message says (step 7 of the protocol).
+- **The panel is local.** It listens on 127.0.0.1 only, refuses other hosts and origins, and every
+  write needs a custom header a foreign page cannot send.
+- **The ntfy topic is a secret.** It lives in `~/.turno/secrets.toml` (mode 600), is shown once when
+  `onboard` creates it, and never appears in the config, the logs or the panel. Anyone who knows the
+  topic can answer decisions and send messages to the agents.
+- **No surprise installs.** The panel checks PyPI for a newer version at most once a day (a single
+  GET; `"update_check": false` turns it off) and only tells you; `turno update` upgrades when you run it.
 
-## Setup
+## Configuration
 
-Configuration, state and logs live in `~/.turno` (or in `$TURNO_HOME`). File names mentioned below
-without a folder live there.
-
-```bash
-mkdir -p ~/.turno
-cp config.example.json ~/.turno/config.json
-cp secrets.example.toml ~/.turno/secrets.toml
-```
-
-Edit `config.json` with your projects (in priority order) and their weekly caps, switch on the
-engines you use (`"enabled": true`) and replace the `topic` in `secrets.toml` with a random name
-only you know. Or start without a `config.json` and add the projects and engines in the panel's
-settings screen. Without a phone, skip `secrets.toml` and switch ntfy off in Settings → General,
-where you also pick the language. Then:
-
-```bash
-python3 autopilot.py status   # check the config and the current quota
-python3 autopilot.py start    # start both loops in the tmux session "autopilot"
-python3 autopilot.py serve    # the panel at http://localhost:8765
-```
-
-`start` opens one tmux window per enabled engine (`codex`, `claude`) and a `logs` window with both logs.
-`stop` ends both loops like a Ctrl+C: the running unit stops, the state is saved and the next
-`start` resumes it. `start` never duplicates a loop that is already running.
-
-### Migrating from `projects.toml` and `claude.toml`
-
-Older setups kept the projects in `projects.toml` (Codex) and `claude.toml` (Claude). The first time
-turno loads its config and finds no `config.json`, it builds one from those files, writes it and
-leaves them as a copy. An engine whose file exists comes out enabled; projects that exist only in
-`claude.toml` are appended to the list. `overrides.json` is not changed. To migrate:
-
-1. Stop the old loops (`stop`), so none of them runs with the old code.
-2. Run `python3 autopilot.py status`: it creates `config.json`.
-3. Check the result in the panel's settings screen, then `start`.
-
-From then on only `config.json` is read; editing the TOML files has no effect. `secrets.toml` stays
-as it was.
-
-## The config
-
-`config.json` holds everything the panel's settings screen shows. The loops re-read it on every turn,
-so a change takes effect within one turn, with no restart (a model change applies to the next unit).
-An invalid file never stops a loop: it keeps the last good configuration and logs the problem.
+Everything lives in `~/.turno` (or `$TURNO_HOME`): `config.json`, the state, logs, run files and
+history. The panel's settings screen edits `config.json`; the loops re-read it on every turn, so a
+change applies within one turn, without a restart. An invalid file never stops a loop: it keeps the
+last good configuration and logs the problem.
 
 | Part | What it holds |
 |---|---|
-| `projects` | Name, path, optional `docker_group` and `weekly_cap` per engine. The order is the priority for every engine |
-| `engines.<engine>` | `enabled`, orchestrator model and effort, `roles` (model and effort of `planner`, `implementer` and `reviewer`; the Settings screen edits them), `primary_cap`, `safety_factor`, initial costs, `blocked_cooldown_hours`, `schedule` (window) and, per engine, `max_subagents` (Codex) |
-| `language` | `pt-BR` (the default when the key is missing) or `en`: the panel, the phone texts and what the agents write for you. A change applies from the next turn (scheduler texts) and the next unit (agents); texts already written stay as they are |
-| `notify` | `enabled` (missing = on), the ntfy server and the decision timeout. The topic stays in `secrets.toml` |
+| `projects` | Name, path, optional `docker_group` (projects that bind the same ports) and `weekly_cap` per engine. The order is the priority |
+| `engines.<engine>` | `enabled`, `autostart` (the service starts it), orchestrator model and effort, `roles` (planner, implementer, reviewer), `primary_cap`, `safety_factor`, initial costs, `blocked_cooldown_hours`, `schedule` (a weekly window) |
+| `language` | `en` or `pt-BR`: the panel, the phone texts and what the agents write for you |
+| `notify` | `enabled`, the ntfy server and the decision timeout. The topic stays in `secrets.toml` |
+| `update_check` | `false` stops the daily PyPI check |
 
-A project's name is never changed after it is created: state, claims, notes and history use it.
-`config.example.json` is a complete example.
+[`config.example.json`](config.example.json) is a complete example. A project's name never changes
+after it is created: state, claims, notes and history use it.
 
-turno never switches a role's model by itself: when a role's model reaches its own usage limit
-(Fable, for example), the unit ends `blocked` and says which role and model; change the model in
-the settings screen or wait for the reset.
+## The panel
 
-A disabled engine starts nothing: its loop, if running, keeps the decisions flowing, passes its open
-units on to the other engine and sleeps. A loop does not end by itself: with every project `idle` it
-tells you once and sleeps until you reset a project or change the config. The engine contract, for
-adding another CLI, is in `docs/engines.md`.
+The panel shows the quota of each engine with its cap and reset time, what each loop is doing,
+every project with its state and backlog progress, the running unit live (commands, file changes,
+which subagent was called) and the unit history with outcome, duration and cost.
+
+| Control | What it does |
+|---|---|
+| Start / Stop (per engine) | Starts the loop in tmux, or stops it like a Ctrl+C: the unit is resumed on the next start |
+| "Needs you" | Pending decisions to answer (with an optional comment) and blocked projects to reactivate |
+| Pause, Next, Interrupt (project card) | Skip a project; give it the next new unit; stop its running unit and pause it |
+| Project panel | A message to the agents, the project's caps and, while it waits to retry, "Try now" |
+| ⚙ Settings | Projects (add, edit, reorder, remove), Engines (on/off, start with the panel, models, caps, window, a quota check) and General (language, ntfy) |
+| Footer | The running version, a notice when PyPI has a newer one, and "Restart turno" |
+
+"Restart turno" does what `turno restart` does: the loops stop (their units resume), the service
+restarts the panel, and the panel starts the engines again.
 
 ## Commands
 
-All commands are `python3 autopilot.py <command>`; `--help` lists them. Add `--engine claude` to
-run a command against the Claude instance (the default is `codex`; `--config` is a deprecated alias).
-
 | Command | What it does |
 |---|---|
-| `start` / `stop` | Start or stop the loops of the enabled engines in tmux (`stop` also stops a loop of an engine since switched off) |
-| `run` | Run a single loop in the foreground (`--engine codex` or `--engine claude`) |
-| `status` | Quota usage and each project's state (the first time, it also creates `config.json`) |
-| `check` | What the loop would do right now (reads the quota; runs nothing) |
-| `decisions` | Pending decisions, with deadline, default and options |
-| `answer <project> <id> <option>` | Answer a decision from the terminal |
-| `reset <project>` | Put an `idle`, `blocked` or `waiting` project back to `active` |
-| `test-notify` | Send a test notification to your phone |
-| `serve [--port 8765]` | The panel on 127.0.0.1: follow the loops and control them |
+| `turno onboard` | Check the machine, write `~/.turno`, install the service, open the panel |
+| `turno serve [--port 8765] [--start-engines]` | The panel; `--start-engines` also starts the enabled engines (the service uses it) |
+| `turno service install\|uninstall\|status` | The background service: a systemd user unit on Linux and WSL, a LaunchAgent on macOS |
+| `turno restart` | Stop the loops, restart the service; the panel starts them again |
+| `turno update` | `pipx upgrade turno` or `uv tool upgrade turno`, then `turno restart` |
+| `turno start` / `turno stop` | Start or stop the loops of the enabled engines in the tmux session `autopilot` |
+| `turno status` / `turno check` | Quota and project states / what the loop would do now (reads the quota) |
+| `turno decisions`, `turno answer <project> <id> <option>` | Pending decisions, from the terminal |
+| `turno reset <project>` | Put an `idle`, `blocked` or `waiting` project back to `active` |
+| `turno test-notify` | Send a test notification |
+| `turno --engine claude <command>` | Any command for the Claude instance (the default is `codex`) |
 
-Project states in `status`:
-
-| State | Meaning |
-|---|---|
-| `active` | In line; runs when it is its turn and there is quota |
-| `waiting` | Waiting for your answer to a decision (until the deadline) |
-| `blocked` | Stuck on something it cannot solve alone; retried after 6 h |
-| `idle` | Backlog finished; does not run again until a `reset` |
+The service runs `turno serve --start-engines`. Without systemd (WSL without it, containers) or
+launchd, keep the panel running yourself, for example in tmux. On Linux, run
+`loginctl enable-linger $USER` once so the service starts at boot without a login.
 
 ## Decisions and messages from the phone
 
 When a decision is significant (user-facing behaviour, money, a data model that is hard to reverse,
 legal matters, scope), the orchestrator writes it with two or three options and a default, and the
-project waits. You answer with the notification buttons or by typing the letter in the topic (`B`,
-or `myapp B` when several projects are waiting). Without an answer, the default applies at the
-deadline (`decision_timeout_hours`). Without ntfy (switched off, or on without a topic in
-`secrets.toml`) the question waits in the panel's "Needs you" strip ("Precisa de você" in pt-BR); the deadline and the
-default still apply.
-
-Any other text you type in the topic becomes a message to the agents. It goes to the projects named
-in it (or to all of them) and is read by the next unit. A lasting instruction is recorded in the
-project's decisions file. Anyone who knows the topic can send messages, so keep it secret; no
-message overrides the protocol's fixed rules (never weaken tests, read `.env`, force-push or drop
-data).
-
-## The panel
-
-`serve` shows, on one screen: the quota of each engine with its cap and reset time, what each loop
-is doing, every project with its state and backlog progress, the running unit live (commands, file
-changes, which subagent was called) and the unit history with outcome, duration and cost. It can
-stay open while the loops run, and closing it affects nothing. It listens on 127.0.0.1 only and
-refuses requests from other origins.
-
-It also controls the loops:
-
-| Control | What it does |
-|---|---|
-| Start / Stop (per engine) | Starts the loop in tmux, or stops it like a Ctrl+C: the unit stops and is resumed on the next start |
-| "Needs you" strip | Pending decisions to answer (with an optional comment) and blocked projects to reactivate |
-| Reactivate (blocked project, in the strip) | Puts the project back to `active`, like `reset <project>` |
-| Pause / resume (project card) | A paused project is skipped by the loop, even if it has an interrupted unit; the unit waits for the resume |
-| Next (project card) | The next *new* unit goes to that project, if it fits the quota; interrupted units and batons still go first |
-| Interrupt (project card) | Pauses the project and stops its running unit (`SIGUSR1`); resume it to continue |
-| Project panel | A message to the agents, the project's caps and, while the project waits to retry, "Tentar agora" |
-| Preparar com um agente (settings, a project without `docs/autopilot.md`) | You write what the project should become; an agent drafts `docs/autopilot.md`, an `AGENTS.md` if missing and the initial backlog. The project panel shows the draft with "Aprovar", "Pedir mudanças" and "Cancelar preparo" |
-| "⚙ Configurações" screen | Projects: add, edit, reorder and remove (a project with an open unit, a claim or a running unit cannot be removed). Engines: on or off, orchestrator model and effort, caps, window, and a check that shows the CLI found, its version and the quota. General: language, ntfy on or off, ntfy server and decision timeout, with a warning when ntfy is on but `secrets.toml` has no topic |
-
-The panel never edits state. It writes five kinds of file: the configuration, in `config.json`
-(projects, order, caps, engines; validated before it replaces the file); its requests to the loops,
-in `overrides.json` in `~/.turno` (`projects.<name>.paused`, `next`, `reset`, `poke`); decision
-answers, in the same decision files the phone uses (each answer is also noted in the log); and
-messages to the agents, in the same notes as the phone; and setup requests, in `setup/<project>.json` (the goal, the phase and your feedback). The loops re-read `config.json` and
-`overrides.json` on every turn and, while asleep, check both every 5 seconds. A unit interrupted from the panel, or by `stop`,
-appears in the history as `stopped`. Write requests need the `X-Turno: 1` header and a local origin.
-
-Two things an ordinary click does not do:
-
-- **It does not shorten a wait.** After an error, a usage limit or Docker ports held by another
-  project's uncommitted work, the project has a retry time (`retry_at` in the state file), shown
-  on its card. A click wakes the loop, which then works on the other projects; that one stays out
-  until its time comes. Only a reset clears it: "Reativar" in the strip, "Tentar agora" in the
-  project panel, or `autopilot.py reset <project>`.
-- **It does not interrupt a loop started by an older version.** Interrupt needs a loop that handles
-  `SIGUSR1`; the panel checks first (in `/proc` on Linux and WSL, in the loop's
-  `shared/instance-<engine>.json` on macOS), and if the loop does not, it refuses and asks you to
-  stop and start that loop again. Nothing is paused or signalled in that case.
+project waits. Answer with the notification buttons or by typing the letter in the topic (`B`, or
+`my-app B` when several projects are waiting). Without an answer, the default applies at the
+deadline. Without ntfy the question waits in the panel's "Needs you" strip, with the same deadline.
+Any other text you type in the topic becomes a message to the agents of the projects it names (or
+of all of them), read by the next unit.
 
 ## Preparing a new project
 
-A repository that never ran turno needs `docs/autopilot.md` (the rules the agents follow: backlog,
-paths, verification, git) and `.superpowers/` ignored by git. In "⚙ Configurações", a git project
-without that file shows "Preparar com um agente" (it also opens right after you add such a project).
-Write what the project should become and click "Pedir preparo":
+A repository that never ran turno needs `docs/autopilot.md` and `.superpowers/` ignored by git. In
+⚙ Settings, a project without that file shows "Prepare with an agent": write what the project should
+become, and a draft unit proposes `docs/autopilot.md`, an `AGENTS.md` if there is none, the initial
+backlog and a short note for you. Review it in the project panel, ask for changes or approve; the
+apply unit makes one commit, `docs: prepare for turno`, on the current branch (no push).
 
-1. A draft unit runs like any other unit (quota, claims, one engine per project). An agent reads the
-   repository and writes the proposed `docs/autopilot.md`, an `AGENTS.md` if there is none, the
-   initial backlog and a short `notes.md` for you, all in `.superpowers/autopilot/setup/`. Nothing
-   is committed. To keep that folder out of `git status`, turno adds `.superpowers/` to the clone's
-   `.git/info/exclude` (local, never committed); it is the only change turno itself makes in a project.
-2. Your phone gets "Rascunho do <projeto> pronto para revisar", and the project shows up in
-   "Precisa de você". Open it: the project panel shows the draft files. "Pedir mudanças" sends your
-   text back to a new draft unit; "Cancelar preparo" drops the request (the draft stays on disk).
-3. "Aprovar": the next unit copies the files to their places, adds `.superpowers/` to `.gitignore`,
-   makes one commit `docs: prepare for turno` on the current branch (no push) and deletes the draft.
-   From then on the project runs its backlog like the others.
-
-If an `approved` request cannot be applied (the unit keeps ending blocked), stop the loops and delete
-`~/.turno/setup/<project>.json` by hand; the project goes back to the normal queue.
-
-## What stops the loop
-
-- **Sleep or hibernation** pauses everything. Keep the machine awake while it should work.
-- **A reboot or `wsl --shutdown`** kills the loops. Run `start` again; it resumes where it stopped.
-- **Uncommitted changes in a project** keep that project out until the tree is clean.
-
-## Where to look when something goes wrong
-
-`autopilot.log` and `autopilot-claude.log` (the log says when `config.json` is invalid and the last good one is kept), plus the `.jsonl` and `.err` files of the latest runs in
-`runs/` and `runs-claude/`. The panel's history links each unit to its runs.
-
-## Development
+## Updating
 
 ```bash
-python3 -m unittest discover -s tests -v
+turno update
 ```
 
-Tests run everything in a temporary folder and never call the real CLIs. See `AGENTS.md` for the
-invariants a change must keep.
+It upgrades with the tool that installed turno and restarts. The panel tells you when a newer
+version exists; it never installs anything by itself.
+
+### Upgrading from a source checkout
+
+If you ran turno from a clone (`python3 autopilot.py ...`), keep the clone and install it in
+editable mode, so `git pull` keeps updating it:
+
+```bash
+cd ~/src/turno && git pull
+pipx install -e .
+turno service install
+turno restart
+```
+
+`~/.turno` (config, state, history) is used as it is. `python3 autopilot.py ...` keeps working, and
+`turno stop` recognises loops started either way. With an editable install `turno update` only
+reminds you to `git pull`.
+
+## Troubleshooting
+
+- **The loops stopped after a reboot.** Check the service with `turno service status`; on Linux,
+  `loginctl enable-linger $USER`. Without a service, run `turno start`; units resume where they stopped.
+- **Sleep or hibernation pauses everything.** Keep the machine awake while it should work.
+- **A project never runs.** Uncommitted changes that are not turno's keep it out until the tree is
+  clean; `turno check` says what the loop would do and why.
+- **Logs.** `~/.turno/autopilot.log` and `autopilot-claude.log` (the loops), `restart.log` (restarts
+  from the panel), and the `.jsonl` and `.err` files of the latest runs in `runs/` and
+  `runs-claude/`. The panel's history links each unit to its runs. With systemd,
+  `journalctl --user -u turno` has the panel's output.
+
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md). The invariants a change must keep are in
+[AGENTS.md](AGENTS.md).
+
+## License
+
+MIT. See [LICENSE](LICENSE).

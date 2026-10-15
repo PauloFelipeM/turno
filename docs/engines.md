@@ -1,5 +1,8 @@
 # Engine contract
 
+Code paths below (`engines.py`, `autopilot.py`, `prompts/`, `claude-agents.json`, `codex-agents/`)
+are inside the `turno/` package.
+
 An engine is the class that adapts one agent CLI to the loop. `CodexEngine` and `ClaudeEngine` in
 `engines.py` are the two that exist; `tests/helpers.FakeEngine` is the smallest valid one. The loop
 (`autopilot.py`) never looks inside an engine: it only calls the methods below.
