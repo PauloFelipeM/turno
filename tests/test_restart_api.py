@@ -2,6 +2,7 @@
 
 import http.client
 import json
+import os
 import tempfile
 import threading
 import unittest
@@ -20,7 +21,8 @@ class RestartApiTest(unittest.TestCase):
         helpers.write_config(self.home)
         self.ap.runs_as_module = lambda: True
         self.spawned = []
-        patch = mock.patch.object(control.subprocess, "Popen", lambda argv, **kw: self.spawned.append((argv, kw)))
+        self.child_pid = os.getpid()  # a live pid: the test process itself
+        patch = mock.patch.object(control.subprocess, "Popen", self.fake_popen)
         patch.start()
         self.addCleanup(patch.stop)
         self.installed = False
@@ -33,6 +35,10 @@ class RestartApiTest(unittest.TestCase):
         threading.Thread(target=self.srv.serve_forever, daemon=True).start()
         self.addCleanup(self.srv.server_close)
         self.addCleanup(self.srv.shutdown)
+
+    def fake_popen(self, argv, **kw):
+        self.spawned.append((argv, kw))
+        return mock.Mock(pid=self.child_pid, wait=lambda: None)
 
     def post(self, path, turno="1"):
         conn = http.client.HTTPConnection("127.0.0.1", self.port, timeout=10)
@@ -55,6 +61,25 @@ class RestartApiTest(unittest.TestCase):
     def test_says_whether_a_service_will_restart_the_panel(self):
         self.installed = True
         self.assertEqual(self.post("/api/restart")[1], {"ok": True, "service": True})
+
+    def test_a_second_request_while_one_runs_is_busy(self):
+        self.assertEqual(self.post("/api/restart")[0], 202)
+        status, body = self.post("/api/restart")
+        self.assertEqual(status, 409)
+        self.assertEqual(body["error"], "busy")
+        self.assertEqual(len(self.spawned), 1)
+        lock = self.home / "shared" / "restart.lock"
+        self.assertEqual(lock.read_text().strip(), str(self.child_pid))
+
+    def test_a_lock_of_a_dead_pid_does_not_count(self):
+        pid = os.fork()  # (control.subprocess.Popen is faked in this test)
+        if pid == 0:
+            os._exit(0)
+        os.waitpid(pid, 0)
+        (self.home / "shared").mkdir(exist_ok=True)
+        (self.home / "shared" / "restart.lock").write_text(f"{pid}\n")
+        self.assertEqual(self.post("/api/restart")[0], 202)
+        self.assertEqual(len(self.spawned), 1)
 
     def test_needs_the_write_header(self):
         self.assertEqual(self.post("/api/restart", turno=None)[0], 403)

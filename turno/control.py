@@ -111,6 +111,23 @@ def start_engines(home):
     return autopilot.start_loops(names)
 
 
+_RESTART_GUARD = threading.Lock()
+
+
+def _restart_running(lock):
+    """Whether the detached restart named by `lock` (its pid) is still alive; a dead pid does not count."""
+    try:
+        pid = int(lock.read_text().strip())
+        os.kill(pid, 0)
+    except (OSError, ValueError):
+        return False
+    try:  # a zombie answers kill(0) but is finished
+        state = Path(f"/proc/{pid}/stat").read_text().rsplit(")", 1)[1].split()[0]
+        return state != "Z"
+    except (OSError, IndexError):
+        return True
+
+
 def restart(home):
     """"Reiniciar turno": `turno restart` in a detached process (its own session, outside the panel's
     process group), so the service restarting the panel does not take it down. Its output goes to
@@ -120,9 +137,16 @@ def restart(home):
     home = Path(home)
     home.mkdir(parents=True, exist_ok=True)
     env = {**os.environ, "TURNO_HOME": str(home)}
-    with open(home / "restart.log", "a") as log:
-        subprocess.Popen([*autopilot.turno_argv(), "restart"], env=env, stdin=subprocess.DEVNULL, stdout=log,
-                         stderr=subprocess.STDOUT, start_new_session=True, close_fds=True)
+    lock = home / "shared" / "restart.lock"
+    with _RESTART_GUARD:
+        if _restart_running(lock):
+            raise ApiError(409, "busy", "a restart is already in progress")
+        lock.parent.mkdir(parents=True, exist_ok=True)
+        with open(home / "restart.log", "a") as log:
+            proc = subprocess.Popen([*autopilot.turno_argv(), "restart"], env=env, stdin=subprocess.DEVNULL, stdout=log,
+                                    stderr=subprocess.STDOUT, start_new_session=True, close_fds=True)
+        lock.write_text(f"{proc.pid}\n")
+        threading.Thread(target=proc.wait, daemon=True).start()  # reaps it, so a finished restart is not a zombie
     return 202, {"ok": True, "service": service.status()["installed"]}
 
 
