@@ -14,21 +14,22 @@ The project waits for the answer until the deadline; without an answer the defau
 Meanwhile the other projects keep going.
 
 Usage:
-  autopilot.py start                      start the loops of the enabled engines in the tmux session "autopilot"
-  autopilot.py stop                       stop the loops (like a Ctrl+C in each)
-  autopilot.py run                        a single loop, the Codex one (Ctrl+C stops; running again resumes)
-  autopilot.py status                     each project's state and the current window usage
-  autopilot.py check                      what the loop would do now (reads the quota; runs nothing)
-  autopilot.py reset NAME                 put an idle or blocked project back to active
-  autopilot.py decisions                  pending decisions
-  autopilot.py answer NAME ID OPTION      answer a decision from the terminal
-  autopilot.py test-notify                send a test notification
-  autopilot.py serve [--port 8765]        the panel at http://localhost:8765 (follows and controls the loops)
-  autopilot.py --engine claude run        the Claude loop; --engine works with every command (default: codex)
+  turno start                      start the loops of the enabled engines in the tmux session "autopilot"
+  turno stop                       stop the loops (like a Ctrl+C in each)
+  turno run                        a single loop, the Codex one (Ctrl+C stops; running again resumes)
+  turno status                     each project's state and the current window usage
+  turno check                      what the loop would do now (reads the quota; runs nothing)
+  turno reset NAME                 put an idle or blocked project back to active
+  turno decisions                  pending decisions
+  turno answer NAME ID OPTION      answer a decision from the terminal
+  turno test-notify                send a test notification
+  turno serve [--port 8765]        the panel at http://localhost:8765 (follows and controls the loops)
+  turno --engine claude run        the Claude loop; --engine works with every command (default: codex)
 """
 
 import argparse
 import datetime
+import functools
 import json
 import os
 import re
@@ -42,6 +43,7 @@ import urllib.parse
 import urllib.request
 from pathlib import Path
 
+from . import __version__
 from . import backlog
 from . import config
 from . import coord
@@ -1447,29 +1449,60 @@ def _flag(args, name):
     return None
 
 
-def is_loop(argv, engine):
-    """Whether the command line is the loop of `engine`.
+def _turno_flags(argv):
+    """The arguments after the program in a turno command line; None when it is not one.
 
-    Both today's form (`autopilot.py --engine <engine> run`) and the old ones count: no flag is the
-    Codex loop, and `--config <path>` is the Claude loop when the file is named `claude.toml` and
-    the Codex one otherwise.
+    Three forms count: `<python> -m turno ...` (the loops `start` and the panel launch),
+    `<python> <path>/autopilot.py ...` (the root shim, and every loop started before the package) and
+    the console script, `<path>/turno ...`, which /proc shows as `<python> <path>/bin/turno ...`.
     """
-    if len(argv) < 3 or not argv[1].endswith("autopilot.py") or argv[-1] != "run":
-        return False
-    flags = argv[2:-1]
+    if len(argv) >= 3 and argv[1:3] == ["-m", "turno"]:
+        return argv[3:]
+    if len(argv) >= 2 and (argv[1].endswith("autopilot.py") or Path(argv[1]).name == "turno"):
+        return argv[2:]
+    if argv and Path(argv[0]).name == "turno":
+        return argv[1:]
+    return None
+
+
+def is_turno_command(argv):
+    """Whether the command line runs turno at all (any subcommand): the panel's check that a pid
+    from a lock file still belongs to turno."""
+    return _turno_flags(argv) is not None
+
+
+def loop_engine(argv):
+    """The engine whose loop the command line runs; None when it is not a loop.
+
+    No flag is the Codex loop, and the deprecated `--config <path>` is the Claude loop when the file
+    is named `claude.toml` and the Codex one otherwise.
+    """
+    flags = _turno_flags(argv)
+    if not flags or flags[-1] != "run":
+        return None
+    flags = flags[:-1]
     given = _flag(flags, "--engine")
     if given is None:
         old = _flag(flags, "--config")
         given = "claude" if old is not None and Path(old).name == "claude.toml" else "codex"
-    return given == engine
+    return given
+
+
+def is_loop(argv, engine):
+    """Whether the command line is the loop of `engine` (see `loop_engine`)."""
+    return loop_engine(argv) == engine
 
 
 def _split_command(command):
-    """A `ps` command line as an argv: `<interpreter> <path>/autopilot.py <args...>`; the script's path
-    may have spaces (the whole path up to `autopilot.py` is one argument)."""
+    """A `ps` command line as an argv. `<interpreter> <path>/autopilot.py <args...>`: the script's
+    path may have spaces (the whole path up to `autopilot.py` is one argument). `<interpreter> -m
+    turno <args...>`: the interpreter's path may have spaces."""
     m = re.match(r"\s*(\S+)\s+(.*?autopilot\.py)(?=\s|$)(.*)$", command)
     if m:
         return [m.group(1), m.group(2), *m.group(3).split()]
+    m = re.match(r"\s*(.*?)\s+-m\s+turno(?=\s|$)(.*)$", command)
+    if m:
+        return [m.group(1), "-m", "turno", *m.group(2).split()]
     return command.split()
 
 
@@ -1505,9 +1538,35 @@ def tmux(*args):
     return r.returncode, r.stdout
 
 
+@functools.cache  # one probe per process: the answer only changes with a reinstall
+def runs_as_module():
+    """Whether `<this python> -m turno`, started from another folder, imports this very package.
+
+    True for an installed package (pipx, uv, pip, editable). False for a source checkout that is not
+    installed: there only the root shim finds the package. Asked of a fresh interpreter in `/`, so
+    neither this process's `sys.path` nor a `turno.egg-info` left in the checkout can fool it.
+    """
+    probe = "import turno, sys; sys.stdout.write(turno.__file__)"
+    try:
+        out = subprocess.run([sys.executable, "-c", probe], cwd="/", capture_output=True, text=True,
+                             timeout=30, stdin=subprocess.DEVNULL).stdout.strip()
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return bool(out) and Path(out).resolve() == (BASE / "__init__.py").resolve()
+
+
+def turno_argv():
+    """How to run turno again with this interpreter: `[python, -m, turno]`, or, from a source
+    checkout that is not installed, `[python, <checkout>/autopilot.py]` (the root shim)."""
+    shim = BASE.parent / "autopilot.py"
+    if not runs_as_module() and shim.is_file():
+        return [sys.executable, str(shim)]
+    return [sys.executable, "-m", "turno"]
+
+
 def loop_command(engine):
-    script = shlex.quote(str(BASE.parent / "autopilot.py"))  # the shim at the root of the checkout
-    return f"TURNO_HOME={shlex.quote(str(HOME))} python3 {script} --engine {engine} run"
+    program = " ".join(shlex.quote(a) for a in turno_argv())
+    return f"TURNO_HOME={shlex.quote(str(HOME))} {program} --engine {engine} run"
 
 
 def log_file(engine):
@@ -1715,7 +1774,9 @@ def cmd_serve(args):
 
 
 def main():
-    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser = argparse.ArgumentParser(prog="turno", description=__doc__,
+                                     formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument("--version", action="version", version=f"turno {__version__}")
     parser.add_argument("--engine", choices=config.ENGINES, help="the engine to work for (default: codex)")
     parser.add_argument("--config", help="deprecated: use --engine")
     sub = parser.add_subparsers(dest="cmd", required=True)

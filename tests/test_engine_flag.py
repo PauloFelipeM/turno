@@ -194,10 +194,18 @@ class LoopsTest(unittest.TestCase):
         self.assertEqual(self.ap.loops(), ["codex"])
 
     def test_loop_command_uses_the_engine_flag(self):
-        script = self.ap.shlex.quote(str(self.ap.BASE.parent / "autopilot.py"))
+        python = self.ap.shlex.quote(sys.executable)
         home = self.ap.shlex.quote(str(self.tmp))
-        self.assertEqual(self.ap.loop_command("codex"), f"TURNO_HOME={home} python3 {script} --engine codex run")
-        self.assertEqual(self.ap.loop_command("claude"), f"TURNO_HOME={home} python3 {script} --engine claude run")
+        self.ap.runs_as_module = lambda: True
+        self.assertEqual(self.ap.loop_command("codex"), f"TURNO_HOME={home} {python} -m turno --engine codex run")
+        self.assertEqual(self.ap.loop_command("claude"), f"TURNO_HOME={home} {python} -m turno --engine claude run")
+
+    def test_loop_command_from_a_checkout_that_is_not_installed_uses_the_shim(self):
+        self.ap.runs_as_module = lambda: False
+        python = self.ap.shlex.quote(sys.executable)
+        shim = self.ap.shlex.quote(str(self.ap.BASE.parent / "autopilot.py"))
+        home = self.ap.shlex.quote(str(self.tmp))
+        self.assertEqual(self.ap.loop_command("codex"), f"TURNO_HOME={home} {python} {shim} --engine codex run")
 
     def test_log_file_per_engine(self):
         self.assertEqual(self.ap.log_file("codex"), self.tmp / "autopilot.log")

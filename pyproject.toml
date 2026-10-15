@@ -1,0 +1,50 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "turno"
+dynamic = ["version"]
+description = "Runs the Codex CLI and Claude Code unattended on your repositories, inside your subscription quota, with a local web panel."
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+requires-python = ">=3.11"
+authors = [{ name = "Paulo Martins" }]
+keywords = ["codex", "claude-code", "agents", "scheduler", "automation"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console",
+    "Environment :: Web Environment",
+    "Intended Audience :: Developers",
+    "Operating System :: MacOS",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Topic :: Software Development",
+]
+dependencies = []
+
+[project.urls]
+Homepage = "https://github.com/PauloFelipeM/turno"
+Issues = "https://github.com/PauloFelipeM/turno/issues"
+
+[project.scripts]
+turno = "turno.cli:main"
+
+[tool.setuptools]
+packages = ["turno"]
+
+[tool.setuptools.dynamic]
+version = { attr = "turno.__version__" }
+
+[tool.setuptools.package-data]
+turno = [
+    "prompts/*.md",
+    "claude-agents.json",
+    "codex-agents/*.toml",
+    "web/*.html",
+    "web/*.js",
+    "web/*.css",
+    "web/i18n/*.js",
+]

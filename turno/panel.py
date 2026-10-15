@@ -8,7 +8,6 @@ the drafts, never through a symlink.
 import datetime
 import json
 import os
-import re
 import subprocess
 import time
 from pathlib import Path
@@ -71,9 +70,10 @@ def configured(home):
 PROC = Path("/proc")  # tests point it at a missing folder to play macOS
 
 
-def _is_autopilot_command(command):
-    """Whether a `ps` command line (one string) runs autopilot.py; a path with spaces still counts."""
-    return re.search(r"autopilot\.py(\s|$)", command) is not None
+def _is_turno_command(command):
+    """Whether a `ps` command line (one string) runs turno (`-m turno`, the root shim or the console
+    script); a path with spaces still counts."""
+    return autopilot.is_turno_command(autopilot._split_command(command.strip()))
 
 
 def loop_pid(home, kind):
@@ -100,11 +100,14 @@ def loop_pid(home, kind):
                                      text=True, timeout=5).stdout
         except (OSError, subprocess.SubprocessError):
             return None
-        return pid if _is_autopilot_command(command) else None
+        return pid if _is_turno_command(command) else None
     except OSError:
         return None
     # The pid may have been reused by another process after the loop died.
-    return pid if any(a.endswith(b"autopilot.py") for a in args) else None
+    argv = [a.decode(errors="replace") for a in args]
+    if argv and argv[-1] == "":
+        argv.pop()  # /proc ends the command line with a NUL
+    return pid if autopilot.is_turno_command(argv) else None
 
 
 def _engine(inst, homes):

@@ -1,5 +1,6 @@
 import multiprocessing as mp
 import os
+import sys
 import tempfile
 import time
 import unittest
@@ -38,6 +39,7 @@ class LauncherTest(unittest.TestCase):
 
         self.ap.tmux = tmux
         self.ap.loop_pids = lambda engine: []
+        self.ap.runs_as_module = lambda: True  # as from an installed package
         helpers.write_config(self.tmp)  # both engines enabled
 
     def commands(self, verb):
@@ -52,10 +54,10 @@ class LauncherTest(unittest.TestCase):
         self.ap.start_loops()
         new_session = self.commands("new-session")[0]
         self.assertIn("codex", new_session)
-        self.assertTrue(new_session[-1].endswith("autopilot.py --engine codex run"))
+        self.assertTrue(new_session[-1].endswith("-m turno --engine codex run"))
         claude = self.commands("new-window")[0]
         self.assertIn("claude", claude)
-        self.assertTrue(claude[-1].endswith("autopilot.py --engine claude run"))
+        self.assertTrue(claude[-1].endswith("-m turno --engine claude run"))
         self.assertNotIn("--config", claude[-1])
         self.assertTrue(any(c[:2] == ("set-option", "-t") and "remain-on-exit" in c for c in self.calls))
 
@@ -128,7 +130,7 @@ class LauncherTest(unittest.TestCase):
     def test_loop_command_carries_turno_home(self):
         for engine in ("codex", "claude"):
             cmd = self.ap.loop_command(engine)
-            self.assertTrue(cmd.startswith(f"TURNO_HOME={self.ap.shlex.quote(str(self.ap.HOME))} python3 "))
+            self.assertTrue(cmd.startswith(f"TURNO_HOME={self.ap.shlex.quote(str(self.ap.HOME))} {self.ap.shlex.quote(sys.executable)} -m turno "))
             self.assertTrue(cmd.endswith(" run"))
 
     def test_start_only_claude_creates_only_its_window_and_logs(self):
