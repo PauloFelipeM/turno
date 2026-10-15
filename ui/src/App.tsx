@@ -5,6 +5,7 @@ import { History } from "@/components/History";
 import { NeedsYou } from "@/components/NeedsYou";
 import { Now } from "@/components/Now";
 import { Projects } from "@/components/Projects";
+import { ProjectSheet } from "@/components/ProjectSheet";
 import { TopBar } from "@/components/TopBar";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -67,6 +68,7 @@ export function App() {
             <Projects overview={overview} onOpen={setProject} onAdd={() => setSettings({ open: true, tab: "projects" })} />
             <Now overview={overview} feeds={feeds} />
             <History tick={tick} />
+            <ProjectSheet name={project} overview={overview} tick={tick} onClose={() => setProject(null)} />
           </>
         )}
       </main>
