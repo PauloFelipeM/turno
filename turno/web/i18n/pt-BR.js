@@ -131,6 +131,7 @@ export default {
     addMissing: "Informe o nome e a pasta do projeto.",
     added: "{project} adicionado. Vale a partir da próxima volta do loop",
     enabled: "Ligado",
+    autostart: "Iniciar junto com o painel (o serviço em segundo plano o inicia no boot)",
     model: "Modelo",
     effort: "Esforço",
     role: "Papel",
@@ -165,6 +166,14 @@ export default {
     warnings: {
       notify_no_topic: "O ntfy está ligado, mas o secrets.toml não tem tópico: as decisões ficam só no painel.",
     },
+  },
+  footer: {
+    version: "turno {version}",
+    update: "turno {latest} está disponível: rode turno update num terminal.",
+    restart: "Reiniciar turno",
+    restartConfirm: "Reiniciar o turno? Os loops param (as unidades retomam depois) e voltam a rodar; o painel se reconecta sozinho.",
+    restarting: "Reiniciando: os loops param e o painel volta em alguns segundos.",
+    restartNoService: "Reiniciando os loops. Sem o serviço em segundo plano este painel não reinicia: pare o turno serve e rode-o de novo.",
   },
   disabled: "desligado",
   window5h: "5 h",

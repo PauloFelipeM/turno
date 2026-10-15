@@ -131,6 +131,7 @@ export default {
     addMissing: "Enter the project's name and folder.",
     added: "{project} added. Applies from the loop's next turn",
     enabled: "On",
+    autostart: "Start with the panel (the background service starts it at boot)",
     model: "Model",
     effort: "Effort",
     role: "Role",
@@ -165,6 +166,14 @@ export default {
     warnings: {
       notify_no_topic: "ntfy is on, but secrets.toml has no topic: decisions stay in the panel only.",
     },
+  },
+  footer: {
+    version: "turno {version}",
+    update: "turno {latest} is available: run turno update in a terminal.",
+    restart: "Restart turno",
+    restartConfirm: "Restart turno? The loops stop (their units resume) and start again; the panel reconnects by itself.",
+    restarting: "Restarting: the loops stop and the panel comes back in a few seconds.",
+    restartNoService: "Restarting the loops. Without the background service this panel does not restart: stop turno serve and run it again.",
   },
   disabled: "off",
   window5h: "5 h",

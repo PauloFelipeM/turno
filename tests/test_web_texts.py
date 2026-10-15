@@ -168,6 +168,23 @@ class LanguagesTest(unittest.TestCase):
                 if not line.lstrip().startswith("//")]
         self.assertFalse([line for line in code if re.search(r"\btopic\b", line)])  # settings.topicHint is only a text
 
+    def test_footer_restart_update_and_autostart(self):
+        app = (WEB / "app.js").read_text(encoding="utf-8")
+        html = (WEB / "index.html").read_text(encoding="utf-8")
+        self.assertIn('<footer id="footer" class="footer"></footer>', html)
+        self.assertIn('post("/api/restart")', app)
+        for key in ("footer.version", "footer.update", "footer.restart", "footer.restartConfirm",
+                    "footer.restarting", "footer.restartNoService", "settings.autostart"):
+            self.assertIn(f'"{key}"', app, key)
+        for code in ("pt-BR", "en"):
+            text = (WEB / "i18n" / f"{code}.js").read_text(encoding="utf-8")
+            footer = re.search(r"\n  footer: \{\n(.*?)\n  \},", text, re.S).group(1)
+            for key in ("version", "update", "restart", "restartConfirm", "restarting", "restartNoService"):
+                self.assertRegex(footer, rf"\n?    {key}: \"", (code, key))
+            self.assertIn("    autostart: ", text)
+        pt = (WEB / "i18n" / "pt-BR.js").read_text(encoding="utf-8")
+        self.assertIn('restart: "Reiniciar turno"', pt)
+
 
 if __name__ == "__main__":
     unittest.main()

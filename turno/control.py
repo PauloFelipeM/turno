@@ -11,6 +11,7 @@ import copy
 import os
 import re
 import signal
+import subprocess
 import threading
 import time
 import traceback
@@ -108,6 +109,21 @@ def start_engines(home):
     if not names:
         return {}
     return autopilot.start_loops(names)
+
+
+def restart(home):
+    """"Reiniciar turno": `turno restart` in a detached process (its own session, outside the panel's
+    process group), so the service restarting the panel does not take it down. Its output goes to
+    `restart.log`. Never installs anything."""
+    from . import service
+
+    home = Path(home)
+    home.mkdir(parents=True, exist_ok=True)
+    env = {**os.environ, "TURNO_HOME": str(home)}
+    with open(home / "restart.log", "a") as log:
+        subprocess.Popen([*autopilot.turno_argv(), "restart"], env=env, stdin=subprocess.DEVNULL, stdout=log,
+                         stderr=subprocess.STDOUT, start_new_session=True, close_fds=True)
+    return 202, {"ok": True, "service": service.status()["installed"]}
 
 
 def _project_entry(d, name):
@@ -598,6 +614,8 @@ def write_route(home, method, parts, body):
         return project_action(home, parts[2], parts[3])
     if method == "POST" and n == 4 and parts[:2] == ["api", "decisions"]:
         return answer_decision(home, parts[2], parts[3], body)
+    if method == "POST" and parts == ["api", "restart"]:
+        return restart(home)
     if method == "POST" and parts == ["api", "messages"]:
         return send_message(home, body)
     if parts == ["api", "settings"] and method == "PUT":

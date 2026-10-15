@@ -53,6 +53,8 @@ button { font: inherit; color: inherit; }
 .btn { background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 4px 12px; cursor: pointer; }
 .btn.danger { border-color: var(--bad); color: var(--bad); }
 .btn-row { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 6px; }
+.footer { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; padding: 8px 16px 24px; font-size: .85rem; }
+.footer .update { color: var(--warn); }
 .controls { margin-top: 8px; }
 .confirm { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 .paused-chip { color: var(--warn); margin-right: 4px; }

@@ -15,6 +15,7 @@ const view = {
   draft: null, // the settings dialog's working copy (see buildDraft)
   detailSetup: null, // setup phase of the project panel on screen, to reload it when the loop moves it
   lang: null, // the language whose texts are loaded
+  restartConfirm: false, // the footer's "Restart turno" confirmation is open
 };
 
 function t(path, vars = {}) {
@@ -178,6 +179,41 @@ function drawEngines() {
       e.window ? h("p", { class: "muted small" }, e.window.label) : null,
       h("div", { class: "controls" }, engineControls(e)))),
     ...o.errors.map((err) => h("p", { class: "error" }, t("configError", { config: err.config }))));
+}
+
+// --- footer: version, update notice, restart ------------------------------------------------
+
+function restartControls() {
+  if (!view.restartConfirm) {
+    return h("button", { type: "button", class: "btn", "data-action": "restart", onclick: () => { view.restartConfirm = true; renderFooter(); } },
+      t("footer.restart"));
+  }
+  return h("div", { class: "confirm", role: "group" },
+    h("span", {}, t("footer.restartConfirm")),
+    h("button", { type: "button", class: "btn danger", "data-action": "restart", onclick: async (ev) => {
+      let res = null;
+      if (await act(ev.currentTarget, async () => { res = await post("/api/restart"); })) {
+        view.restartConfirm = false;
+        toast(t(res && res.service ? "footer.restarting" : "footer.restartNoService"));
+      }
+      renderFooter();
+    } }, t("footer.restart")),
+    h("button", { type: "button", class: "btn", "data-action": "restart-cancel", onclick: () => { view.restartConfirm = false; renderFooter(); } },
+      t("cancel")));
+}
+
+function renderFooter() {
+  keepFocus("action", drawFooter);
+}
+
+function drawFooter() {
+  const o = view.overview;
+  if (!o) return;
+  const u = o.update || {};
+  fill($("#footer"),
+    h("span", { class: "muted" }, t("footer.version", { version: o.version || "?" })),
+    u.newer ? h("span", { class: "update", "data-update": u.latest }, t("footer.update", { latest: u.latest })) : null,
+    restartControls());
 }
 
 // --- attention strip -----------------------------------------------------------------------
@@ -455,6 +491,7 @@ function engineDraft(e) {
   const s = e.schedule;
   return {
     enabled: !!e.enabled,
+    autostart: e.autostart !== false,
     orchestrator_model: e.orchestrator_model ?? "",
     orchestrator_effort: e.orchestrator_effort ?? "medium",
     roles: Object.fromEntries(ROLES.map((r) => [r, { model: e.roles?.[r]?.model ?? "", effort: e.roles?.[r]?.effort ?? "medium" }])),
@@ -594,6 +631,7 @@ function saveSteps() {
     const was = d.origEng[k];
     const body = {};
     if (cur.enabled !== was.enabled) body.enabled = cur.enabled;
+    if (cur.autostart !== was.autostart) body.autostart = cur.autostart;
     if (cur.orchestrator_model !== was.orchestrator_model) body.orchestrator_model = cur.orchestrator_model.trim();
     if (cur.orchestrator_effort !== was.orchestrator_effort) body.orchestrator_effort = cur.orchestrator_effort;
     const roles = {};
@@ -814,6 +852,9 @@ function engineBlock(k) {
     h("label", { class: "check" },
       h("input", { type: "checkbox", checked: cur.enabled, "data-sf": `enabled:${k}`, onchange: (ev) => { cur.enabled = ev.target.checked; } }),
       t("settings.enabled")),
+    h("label", { class: "check" },
+      h("input", { type: "checkbox", checked: cur.autostart, "data-sf": `autostart:${k}`, onchange: (ev) => { cur.autostart = ev.target.checked; } }),
+      t("settings.autostart")),
     roleTable,
     h("div", { class: "cap-row" },
       capInput(t("settings.primaryCap"), cur.primary_cap, (v) => { cur.primary_cap = v; })),
@@ -1053,6 +1094,7 @@ function connect() {
     renderAttention();
     renderProjects();
     renderLive();
+    renderFooter();
     const sel = view.filter && view.overview.projects.find((p) => p.name === view.filter);
     if (sel && (sel.setup || null) !== view.detailSetup) loadDetail(view.filter); // the loop moved the request
     document.body.classList.remove("loading");
@@ -1110,6 +1152,7 @@ function setLanguage(lang) {
     renderProjects();
     renderLive();
     renderHistory();
+    renderFooter();
     if (view.filter) loadDetail(view.filter);
     if (view.draft && $("#settings").open) renderSettings();
     return true;
