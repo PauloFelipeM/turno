@@ -124,6 +124,7 @@ class PackageDataTest(unittest.TestCase):
         globs = meta["tool"]["setuptools"]["package-data"]["turno"]
         self.assertIn("web/*.html", globs)
         self.assertIn("web/assets/*", globs)
+        self.assertIn("web/THIRD_PARTY_LICENSES.txt", globs)
         manifest = (helpers.ROOT / "MANIFEST.in").read_text(encoding="utf-8").splitlines()
         self.assertIn("graft turno/web", manifest)
         self.assertIn("prune tests", manifest)
@@ -167,11 +168,13 @@ class WheelTest(unittest.TestCase):
         sdist = next((work / "dist").glob("turno-*.tar.gz"))
         names = zipfile.ZipFile(wheel).namelist()
         self.assertIn("turno/web/index.html", names)
+        self.assertIn("turno/web/THIRD_PARTY_LICENSES.txt", names)  # the notices of the bundled packages and the Inter font
         self.assertTrue(any(fnmatch.fnmatch(n, "turno/web/assets/*.js") for n in names), names)
         self.assertTrue(any(fnmatch.fnmatch(n, "turno/web/assets/*.css") for n in names), names)
         with tarfile.open(sdist) as tar:
             members = tar.getnames()
         self.assertTrue(any(n.endswith("/turno/web/index.html") for n in members), members)
+        self.assertTrue(any(n.endswith("/turno/web/THIRD_PARTY_LICENSES.txt") for n in members), members)
         self.assertFalse([n for n in members if "/tests/" in n or "node_modules" in n])
         subprocess.run([str(py), "-m", "pip", "install", "-q", str(wheel)], check=True)
         env = {**os.environ, "TURNO_HOME": str(work / "home")}

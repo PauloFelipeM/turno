@@ -48,4 +48,5 @@ turno = [
     "codex-agents/*.toml",
     "web/*.html",
     "web/assets/*",
+    "web/THIRD_PARTY_LICENSES.txt",
 ]

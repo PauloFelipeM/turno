@@ -3,7 +3,7 @@
 // when the answer arrives, so a response for a key the page has left is dropped by `run` (through `isCurrent`),
 // and what was asked for while a request ran is repeated with the latest key afterwards.
 
-export interface SerialLoader<K, M extends string> {
+export interface SerialLoader<M extends string> {
   load(mode: M): Promise<void>;
 }
 
@@ -18,7 +18,7 @@ export interface SerialLoaderOptions<K, M extends string> {
   combine?: (queued: M, mode: M) => M;
 }
 
-export function createSerialLoader<K, M extends string>(o: SerialLoaderOptions<K, M>): SerialLoader<K, M> {
+export function createSerialLoader<K, M extends string>(o: SerialLoaderOptions<K, M>): SerialLoader<M> {
   let busy = false;
   let queued: M | null = null;
   const load = async (mode: M): Promise<void> => {
