@@ -246,8 +246,9 @@ def serve(home, port, start_engines=False):
         srv = Server(hub, port)
     except OSError as e:
         if e.errno == errno.EADDRINUSE:
-            sys.exit(f"port {port} is in use; pick another with --port")
-        raise
+            sys.exit(f"port {port} is in use (another `turno serve`, or the installed service?): "
+                     f"stop it or pick another port with --port")
+        sys.exit(f"cannot listen on port {port}: {e.strerror or e}")
     threading.Thread(target=hub.run, daemon=True).start()
     threading.Thread(target=pypi.watch, args=(home, hub.stopped), daemon=True).start()
     if start_engines:

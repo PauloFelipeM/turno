@@ -95,12 +95,20 @@ class Asker:
     def __init__(self, yes, ask, out):
         self.yes, self.ask, self.out = yes, ask, out
 
+    def _input(self, prompt, default):
+        """The answer, or `default` (with a message) when there is no terminal to ask on."""
+        try:
+            return self.ask(prompt).strip()
+        except EOFError:
+            self.out(f"no terminal to answer on: taking the default for \"{prompt.strip()}\" ({default})")
+            return ""
+
     def yes_no(self, question, default):
         if self.yes:
             return default
         hint = "[Y/n]" if default else "[y/N]"
         while True:
-            answer = self.ask(f"{question} {hint} ").strip().lower()
+            answer = self._input(f"{question} {hint} ", "yes" if default else "no").lower()
             if not answer:
                 return default
             if answer in YES:
@@ -113,7 +121,7 @@ class Asker:
         if self.yes:
             return default
         while True:
-            answer = self.ask(f"{question} [{'/'.join(options)}] ({default}) ").strip()
+            answer = self._input(f"{question} [{'/'.join(options)}] ({default}) ", default)
             if not answer:
                 return default
             match = next((o for o in options if o.lower() == answer.lower()), None)
@@ -246,12 +254,22 @@ def run(args, home=None, ask=input, out=print):
     if kind is None:
         out(service.manual_hint())
     elif args.service if args.service is not None else q.yes_no("Install the background service (panel and loops start at boot)?", True):
-        installed = service.install(home, autopilot.turno_argv(), ask=ask, out=out) == 0
+        # --yes never replaces an existing, different unit: it answers "no" itself instead of asking.
+        service_ask = (lambda question: "n") if args.yes else ask
+        installed = service.install(home, autopilot.turno_argv(), ask=service_ask, out=out) == 0
     url = f"http://localhost:{PORT}"
-    if installed and wait_for_port(PORT):
+    answers = installed and wait_for_port(PORT)
+    if installed and answers and service.status()["active"]:
         out(f"panel: {url}")
         if not args.no_open:
             open_url(url)
+    elif installed:
+        if answers:
+            out(f"port {PORT} is in use by another process (a `turno serve` started by hand?); the service is not "
+                f"running. Stop that process, then run `turno service status`")
+        else:
+            out("the service was installed but is not running: see `turno service status` "
+                "and, with systemd, `journalctl --user -u turno`")
     else:
         out(f"start the panel with `turno serve --start-engines`, then open {url}")
     out("next: add your projects in the panel's settings (⚙)")

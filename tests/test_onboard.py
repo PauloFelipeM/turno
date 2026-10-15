@@ -27,6 +27,8 @@ class OnboardTest(unittest.TestCase):
         self.found = {"codex": True, "claude": True}
         self.installs, self.opened, self.out = [], [], []
         self.service_kind = "systemd"
+        self.service_active = True
+        self.port_open = True
         patches = [
             mock.patch.object(onboard.engines, "cli_status",
                               lambda kind, max_age=60: {"found": self.found[kind], "path": f"/bin/{kind}", "version": "1.0"}),
@@ -34,7 +36,9 @@ class OnboardTest(unittest.TestCase):
             mock.patch.object(onboard, "_run", lambda argv: subprocess.CompletedProcess(argv, 0, "v 1\n", "")),
             mock.patch.object(onboard.service, "kind", lambda: self.service_kind),
             mock.patch.object(onboard.service, "install", self.fake_install),
-            mock.patch.object(onboard, "wait_for_port", lambda port, seconds=15: True),
+            mock.patch.object(onboard.service, "status",
+                              lambda: {"kind": self.service_kind, "installed": True, "active": self.service_active}),
+            mock.patch.object(onboard, "wait_for_port", lambda port, seconds=15: self.port_open),
             mock.patch.object(onboard, "open_url", self.opened.append),
         ]
         for p in patches:
@@ -153,6 +157,37 @@ class OnboardTest(unittest.TestCase):
         self.assertEqual(self.installs, [])
         self.assertEqual(self.opened, [])
         self.assertTrue(any("turno serve --start-engines" in line for line in self.out))
+
+    def test_an_open_port_is_not_enough_without_an_active_service(self):
+        self.service_active = False  # the port answers, but something else holds it
+        self.assertEqual(self.run_wizard("--yes", "--service"), 0)
+        self.assertEqual(self.opened, [])
+        self.assertFalse(any(line.startswith("panel: ") for line in self.out))
+        self.assertTrue(any("port 8765 is in use by another process" in line for line in self.out))
+
+    def test_a_service_that_is_not_running_and_a_silent_port(self):
+        self.service_active = False
+        self.port_open = False
+        self.run_wizard("--yes", "--service")
+        self.assertEqual(self.opened, [])
+        self.assertTrue(any("turno service status" in line for line in self.out))
+        self.assertFalse(any("in use by another" in line for line in self.out))
+
+    def test_yes_keeps_a_different_service_unit_without_asking(self):
+        asked = []
+        self.onboard.service.install = lambda home, argv, ask=input, out=print: (
+            asked.append(ask("replace?")), 1)[1]  # what the real install does with a different unit
+        self.assertEqual(self.run_wizard("--yes", "--service"), 0)
+        self.assertEqual(asked, ["n"])  # --yes answered "no" itself; input() never ran
+
+    def test_no_terminal_takes_the_defaults_with_a_message(self):
+        def eof(question):
+            raise EOFError
+
+        code = self.onboard.run(self.args("--no-open"), self.home, ask=eof, out=self.out.append)
+        self.assertEqual(code, 0)
+        self.assertTrue(any("no terminal" in line for line in self.out))
+        self.assertTrue((self.home / "config.json").exists())
 
     def test_the_command_line_reaches_the_wizard(self):
         seen = []
