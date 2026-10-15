@@ -49,6 +49,34 @@ class ServiceTest(unittest.TestCase):
         for line in ("Restart=on-failure", "KillMode=process", "WantedBy=default.target"):
             self.assertIn(line, text.splitlines())
 
+    def test_dollar_is_escaped_in_exec_start_only(self):
+        text = self.service.systemd_unit(["/opt/my$app/python", "-m", "turno"], {"PATH": "/a/$b:/usr/bin"})
+        self.assertIn('"/opt/my$$app/python"', text)
+        self.assertIn('Environment="PATH=/a/$b:/usr/bin"', text)
+
+    def test_a_line_break_in_a_value_is_refused(self):
+        with self.assertRaises(ValueError):
+            self.service.systemd_unit(ARGV, {"PATH": "/a\nExecStartPre=/bin/evil"})
+        with self.assertRaises(ValueError):
+            self.service.systemd_unit(["/x\r/python"], {"PATH": "/a"})
+        out = []
+        with mock.patch.dict(os.environ, {"PATH": "/a\nb"}):
+            self.assertEqual(self.service.install(self.tmp / "data", ARGV, ask=self.no_question, out=out.append), 1)
+        self.assertTrue(any("line break" in line for line in out))
+        self.assertEqual(self.calls, [])
+
+    def test_no_terminal_keeps_the_existing_file(self):
+        path = self.fake_home / ".config" / "systemd" / "user" / "turno.service"
+        path.parent.mkdir(parents=True)
+        path.write_text("mine\n")
+
+        def eof(question):
+            raise EOFError
+
+        self.assertEqual(self.service.install(self.tmp / "data", ARGV, ask=eof, out=self.out.append), 1)
+        self.assertEqual(path.read_text(), "mine\n")
+        self.assertTrue(any("kept" in line for line in self.out))
+
     def test_turno_home_only_when_not_the_default(self):
         self.assertEqual(self.service.environment(self.fake_home / ".turno"), {"PATH": "/home/me/.local/bin:/usr/bin:/bin"})
         self.assertEqual(self.service.environment(self.tmp / "data")["TURNO_HOME"], str((self.tmp / "data").resolve()))

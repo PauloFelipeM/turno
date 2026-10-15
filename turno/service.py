@@ -56,9 +56,14 @@ def environment(data_home):
     return env
 
 
-def _sd_quote(value):
-    """One systemd unit value, quoted: `%` is a specifier and `$` a variable there."""
-    escaped = value.replace("\\", "\\\\").replace('"', '\\"').replace("%", "%%").replace("$", "$$")
+def _sd_quote(value, command=False):
+    """One systemd unit value, quoted: `%` is a specifier there, and `$` a variable only in a command
+    line (`ExecStart=`), where it is doubled. A line break would start a new directive: refused."""
+    if "\n" in value or "\r" in value:
+        raise ValueError("a line break in a service value")
+    escaped = value.replace("\\", "\\\\").replace('"', '\\"').replace("%", "%%")
+    if command:
+        escaped = escaped.replace("$", "$$")
     return f'"{escaped}"'
 
 
@@ -68,7 +73,7 @@ def systemd_unit(argv, env):
         "Description=turno panel (starts the enabled engines)",
         "",
         "[Service]",
-        "ExecStart=" + " ".join(_sd_quote(a) for a in [*argv, "serve", "--start-engines"]),
+        "ExecStart=" + " ".join(_sd_quote(a, command=True) for a in [*argv, "serve", "--start-engines"]),
         *(f"Environment={_sd_quote(f'{k}={v}')}" for k, v in env.items()),
         "Restart=on-failure",
         "RestartSec=10",
@@ -116,9 +121,17 @@ def install(data_home, argv, ask=input, out=print):
     if k is None:
         out(manual_hint())
         return 1
-    path, text = path_for(k), content(k, argv, data_home)
+    path = path_for(k)
+    try:
+        text = content(k, argv, data_home)
+    except ValueError as e:
+        out(f"not installed: {e} (a line break in the PATH or the command)")
+        return 1
     if path.exists() and path.read_text() != text:
-        answer = ask(f"{path} exists and is different. Replace it? [y/N] ").strip().lower()
+        try:
+            answer = ask(f"{path} exists and is different. Replace it? [y/N] ").strip().lower()
+        except EOFError:  # no terminal to ask on: keep what is there
+            answer = ""
         if answer not in ("y", "yes", "s", "sim"):
             out(f"kept {path}; the service was not changed")
             return 1
