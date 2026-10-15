@@ -32,9 +32,11 @@ Issues = "https://github.com/PauloFelipeM/turno/issues"
 [project.scripts]
 turno = "turno.cli:main"
 
-[tool.setuptools]
-# The data folders have no __init__.py; they are listed so setuptools does not warn that they are absent.
-packages = ["turno", "turno.prompts", "turno.web", "turno.web.i18n"]
+[tool.setuptools.packages.find]
+# The data folders have no __init__.py: found as namespace packages, so setuptools does not warn that
+# they are absent. `turno/web` (the built panel) exists only after `npm --prefix ui run build`.
+include = ["turno", "turno.*"]
+namespaces = true
 
 [tool.setuptools.dynamic]
 version = { attr = "turno.__version__" }
@@ -45,7 +47,5 @@ turno = [
     "claude-agents.json",
     "codex-agents/*.toml",
     "web/*.html",
-    "web/*.js",
-    "web/*.css",
-    "web/i18n/*.js",
+    "web/assets/*",
 ]

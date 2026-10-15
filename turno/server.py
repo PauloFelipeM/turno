@@ -7,6 +7,7 @@ can reach the server through DNS rebinding.
 """
 
 import errno
+import html
 import json
 import queue
 import sys
@@ -22,9 +23,22 @@ from . import feed
 from . import panel
 from . import pypi
 
-WEB = Path(__file__).resolve().parent / "web"
+WEB = Path(__file__).resolve().parent / "web"  # the built panel (`npm --prefix ui run build`); not in git
 TYPES = {".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8",
-         ".css": "text/css; charset=utf-8", ".svg": "image/svg+xml"}
+         ".css": "text/css; charset=utf-8", ".svg": "image/svg+xml", ".woff2": "font/woff2",
+         ".png": "image/png", ".ico": "image/x-icon", ".json": "application/json; charset=utf-8",
+         ".map": "application/json; charset=utf-8"}
+IMMUTABLE = "public, max-age=31536000, immutable"  # hashed file names under assets/: a new build, a new name
+BUILD_CMD = "npm --prefix ui ci && npm --prefix ui run build"
+BUILD_HINT = f"The panel is not built: run `{BUILD_CMD}`"
+NOT_BUILT = ("<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><title>turno</title></head>"
+             "<body style=\"font-family:sans-serif;margin:2rem;line-height:1.5\">"
+             f"<p>The panel is not built: run <code>{html.escape(BUILD_CMD)}</code> in the turno checkout.</p>"
+             "<p>The API works: <a href=\"/api/overview\">/api/overview</a>.</p></body></html>").encode()
+
+
+def panel_built():
+    return (WEB / "index.html").is_file()
 
 
 class Hub:
@@ -104,12 +118,12 @@ class Handler(BaseHTTPRequestHandler):
     def log_message(self, fmt, *args):
         pass  # no line per request
 
-    def _send(self, code, body, ctype="application/json; charset=utf-8"):
+    def _send(self, code, body, ctype="application/json; charset=utf-8", cache="no-store"):
         data = body if isinstance(body, bytes) else json.dumps(body, ensure_ascii=False).encode()
         self.send_response(code)
         self.send_header("Content-Type", ctype)
         self.send_header("Content-Length", str(len(data)))
-        self.send_header("Cache-Control", "no-store")
+        self.send_header("Cache-Control", cache)
         self.end_headers()
         self.wfile.write(data)
 
@@ -160,6 +174,8 @@ class Handler(BaseHTTPRequestHandler):
         parts = [unquote(p) for p in url.path.split("/") if p]
         try:
             if not parts:
+                if not panel_built():
+                    return self._send(503, NOT_BUILT, TYPES[".html"])
                 return self._static("index.html")
             if parts[0] == "static":
                 return self._static("/".join(parts[1:]))
@@ -202,7 +218,9 @@ class Handler(BaseHTTPRequestHandler):
         path = (root / rel).resolve()
         if root not in path.parents or not path.is_file():
             return self._send(404, {"error": "not_found"})
-        return self._send(200, path.read_bytes(), TYPES.get(path.suffix, "application/octet-stream"))
+        hashed = path.parent == root / "assets"
+        return self._send(200, path.read_bytes(), TYPES.get(path.suffix, "application/octet-stream"),
+                          IMMUTABLE if hashed else "no-cache")
 
     def _emit(self, event, data):
         self.wfile.write(f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n".encode())
@@ -254,6 +272,8 @@ def serve(home, port, start_engines=False):
     if start_engines:
         threading.Thread(target=control.start_engines, args=(home,), daemon=True).start()
     print(f"panel at http://localhost:{srv.server_address[1]}", flush=True)
+    if not panel_built():
+        print(BUILD_HINT, flush=True)  # the API still runs; / answers with the same hint
     try:
         srv.serve_forever()
     except KeyboardInterrupt:

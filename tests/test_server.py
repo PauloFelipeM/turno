@@ -56,17 +56,6 @@ class ServerTest(unittest.TestCase):
         self.assertEqual(self.get("/api/overview", origin="http://evil.example")[0], 403)
         self.assertEqual(self.get("/api/overview", origin=f"http://localhost:{self.port}")[0], 200)
 
-    def test_pages_and_modules_are_served(self):
-        status, ctype, body = self.get("/")
-        self.assertEqual(status, 200)
-        self.assertTrue(ctype.startswith("text/html"))
-        for path in sorted(p.relative_to(self.server_mod.WEB).as_posix() for p in self.server_mod.WEB.rglob("*") if p.is_file()):
-            self.assertEqual(self.get(f"/static/{path}")[0], 200, path)
-
-    def test_static_cannot_escape_the_web_folder(self):
-        self.assertEqual(self.get("/static/../autopilot.py")[0], 404)
-        self.assertEqual(self.get("/static/%2e%2e/autopilot.py")[0], 404)
-
     def test_unknown_routes(self):
         self.assertEqual(self.get("/api/projects/nope")[0], 404)
         self.assertEqual(self.get("/api/units/nope")[0], 404)

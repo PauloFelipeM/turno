@@ -5,9 +5,11 @@ import os
 import shutil
 import subprocess
 import sys
+import tarfile
 import tempfile
 import tomllib
 import unittest
+import zipfile
 from pathlib import Path
 from unittest import mock
 
@@ -39,7 +41,7 @@ class EntryPointsTest(unittest.TestCase):
         self.assertIn("engine Claude", r.stdout)
 
     def test_code_files_live_in_the_package(self):
-        for name in ("prompts/unit.md", "claude-agents.json", "codex-agents/planner.toml", "web/index.html"):
+        for name in ("prompts/unit.md", "claude-agents.json", "codex-agents/planner.toml"):
             self.assertTrue((helpers.PKG / name).is_file(), name)
         self.assertEqual(sorted(p.name for p in helpers.ROOT.glob("*.py")), ["autopilot.py"])
 
@@ -113,13 +115,23 @@ class PackageDataTest(unittest.TestCase):
         for rel in files:
             self.assertTrue(any(fnmatch.fnmatchcase(rel, g) and rel.count("/") == g.count("/") for g in globs), rel)
 
-    def test_the_data_folders_are_declared_packages_and_the_sdist_leaves_tests_out(self):
+    def test_the_data_folders_are_found_as_packages_and_the_sdist_carries_the_panel(self):
         meta = tomllib.loads((helpers.ROOT / "pyproject.toml").read_text(encoding="utf-8"))
-        packages = meta["tool"]["setuptools"]["packages"]
-        for folder in ("prompts", "web", "web/i18n"):  # else setuptools warns they are absent from `packages`
-            self.assertIn("turno." + folder.replace("/", "."), packages)
+        find = meta["tool"]["setuptools"]["packages"]["find"]
+        # Namespace discovery finds prompts/, codex-agents/ and the built web/ (when it exists) without a
+        # warning that they are absent from `packages`, and a checkout without the build still installs.
+        self.assertEqual((find["include"], find["namespaces"]), (["turno", "turno.*"], True))
+        globs = meta["tool"]["setuptools"]["package-data"]["turno"]
+        self.assertIn("web/*.html", globs)
+        self.assertIn("web/assets/*", globs)
         manifest = (helpers.ROOT / "MANIFEST.in").read_text(encoding="utf-8").splitlines()
+        self.assertIn("graft turno/web", manifest)
         self.assertIn("prune tests", manifest)
+
+    def test_the_built_panel_stays_out_of_git(self):
+        ignored = (helpers.ROOT / ".gitignore").read_text(encoding="utf-8").splitlines()
+        self.assertIn("turno/web/", ignored)
+        self.assertIn("ui/node_modules/", ignored)
 
     def test_console_script_and_version(self):
         from turno import __version__
@@ -133,27 +145,41 @@ class PackageDataTest(unittest.TestCase):
 
 @unittest.skipUnless(os.environ.get("TURNO_TEST_WHEEL") == "1", "builds a wheel; set TURNO_TEST_WHEEL=1 (needs pip and the network)")
 class WheelTest(unittest.TestCase):
-    """Builds the wheel and installs it in a throwaway virtualenv: the package data must come along."""
+    """The release check: builds the sdist and the wheel and installs the wheel in a throwaway virtualenv.
+    The package data, the built panel included, must come along. Run the UI build first."""
 
     def test_installed_wheel_finds_its_data_and_runs(self):
+        self.assertTrue((helpers.PKG / "web" / "index.html").is_file(),
+                        "the panel is not built: run `npm --prefix ui ci && npm --prefix ui run build` first")
         work = Path(tempfile.mkdtemp())
         self.addCleanup(shutil.rmtree, work, True)
         src = work / "src"
-        shutil.copytree(helpers.ROOT, src, ignore=shutil.ignore_patterns(".git", ".superpowers", "build", "*.egg-info", "__pycache__"))
+        shutil.copytree(helpers.ROOT, src, ignore=shutil.ignore_patterns(
+            ".git", ".superpowers", "build", "dist", "*.egg-info", "__pycache__", "node_modules"))
         venv = work / "venv"
         subprocess.run([sys.executable, "-m", "venv", str(venv)], check=True)
         py = venv / "bin" / "python"
-        built = subprocess.run([str(py), "-m", "pip", "wheel", str(src), "--no-deps", "-v", "-w", str(work / "dist")],
+        subprocess.run([str(py), "-m", "pip", "install", "-q", "build"], check=True)
+        built = subprocess.run([str(py), "-m", "build", "-o", str(work / "dist"), str(src)],
                                check=True, capture_output=True, text=True)
         self.assertNotIn("absent from the `packages`", built.stdout + built.stderr)
         wheel = next((work / "dist").glob("turno-*.whl"))
+        sdist = next((work / "dist").glob("turno-*.tar.gz"))
+        names = zipfile.ZipFile(wheel).namelist()
+        self.assertIn("turno/web/index.html", names)
+        self.assertTrue(any(fnmatch.fnmatch(n, "turno/web/assets/*.js") for n in names), names)
+        self.assertTrue(any(fnmatch.fnmatch(n, "turno/web/assets/*.css") for n in names), names)
+        with tarfile.open(sdist) as tar:
+            members = tar.getnames()
+        self.assertTrue(any(n.endswith("/turno/web/index.html") for n in members), members)
+        self.assertFalse([n for n in members if "/tests/" in n or "node_modules" in n])
         subprocess.run([str(py), "-m", "pip", "install", "-q", str(wheel)], check=True)
         env = {**os.environ, "TURNO_HOME": str(work / "home")}
         env.pop("PYTHONPATH", None)
         probe = ("import turno.autopilot as a, turno.engines as e, turno.server as s; "
                  "assert (a.PROMPTS / 'unit.md').is_file() and (a.PROMPTS / 'setup.md').is_file(); "
                  "assert e.ROLES.is_file() and len(list(e.CODEX_AGENTS.glob('*.toml'))) == 3; "
-                 "assert (s.WEB / 'index.html').is_file() and (s.WEB / 'i18n' / 'en.js').is_file(); "
+                 "assert s.panel_built() and list((s.WEB / 'assets').glob('*.js')); "
                  "assert a.runs_as_module() and a.turno_argv()[1:] == ['-m', 'turno']")
         subprocess.run([str(py), "-c", probe], cwd=work, env=env, check=True)
         out = subprocess.run([str(venv / "bin" / "turno"), "--version"], env=env, capture_output=True, text=True, check=True)

@@ -16,6 +16,10 @@ claude.toml
 # The ntfy topic is a secret.
 secrets.toml
 
+# The built panel (npm --prefix ui run build) and the build's dependencies
+turno/web/
+ui/node_modules/
+
 # Packaging
 *.egg-info/
 build/
