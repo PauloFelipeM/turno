@@ -10,6 +10,7 @@ import json
 import os
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 from . import autopilot
@@ -19,6 +20,13 @@ from . import service
 
 def _run(argv, **kw):
     return subprocess.run(argv, **kw)
+
+
+STUCK_WAIT = 60  # seconds to wait, after `stop_loops` gave up, for a loop to end its unit
+
+
+def _sleep(seconds):
+    time.sleep(seconds)
 
 
 def running_engines():
@@ -42,7 +50,17 @@ def restart(home, out=print):
     Without a service, or when it does not restart, every loop that was running is started here
     again and the panel is left to the owner. Returns 0 on success."""
     before = running_engines()
-    autopilot.stop_loops()
+    stopped = autopilot.stop_loops() or {}
+    for kind in [k for k, v in stopped.items() if v == "still stopping"]:
+        deadline = time.monotonic() + STUCK_WAIT
+        while time.monotonic() < deadline and (autopilot.running_pid(kind) is not None or autopilot.loop_pids(kind)):
+            _sleep(1)
+        if autopilot.running_pid(kind) is not None or autopilot.loop_pids(kind):
+            msg = (f"{kind}: the loop is still finishing its unit; it was not started again. "
+                   f"Use \"Iniciar\" in the panel once it ends")
+            out(msg)
+            autopilot.log(msg)
+            before = [k for k in before if k != kind]
     st = service.status()
     if st["installed"] and service.restart():
         out("the panel's service restarted; it starts the engines with autostart on")

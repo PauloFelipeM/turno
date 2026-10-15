@@ -68,6 +68,34 @@ class RestartTest(unittest.TestCase):
         self.assertEqual(self.upgrade.restart(self.home, out=self.out.append), 1)
         self.assertEqual(self.events, [("stop", None), ("service",), ("start", ["codex", "claude"])])
 
+    def stuck_setup(self, finishes):
+        """stop_loops reports codex "still stopping"; `finishes` says whether the loop ends in the extra wait."""
+        self.ap.stop_loops = lambda names=None: self.events.append(("stop", names)) or {"codex": "still stopping", "claude": "stopped"}
+        self.running = {"codex"}
+        self.upgrade.STUCK_WAIT = 60
+        self.clock = [0.0]
+        self.upgrade._sleep = lambda s: (self.clock.__setitem__(0, self.clock[0] + s),
+                                         finishes and self.clock[0] >= 10 and self.running.clear())
+        patch = mock.patch.object(self.upgrade.time, "monotonic", lambda: self.clock[0])
+        patch.start()
+        self.addCleanup(patch.stop)
+        helpers.write_config(self.home, enabled=("codex", "claude"))
+
+    def test_a_loop_that_is_still_stopping_gets_60_more_seconds(self):
+        self.stuck_setup(finishes=True)
+        self.upgrade.restart(self.home, out=self.out.append)
+        self.assertEqual(self.events, [("stop", None), ("service",)])
+        self.assertFalse(any("Iniciar" in line for line in self.out))
+
+    def test_a_loop_that_never_finishes_is_reported_and_not_started(self):
+        self.stuck_setup(finishes=False)
+        self.status = {"kind": None, "installed": False, "active": False}
+        self.upgrade.restart(self.home, out=self.out.append)
+        self.assertEqual(self.events, [("stop", None)])  # nothing is started over the old loop
+        self.assertTrue(any("codex" in line and "Iniciar" in line for line in self.out))
+        self.assertGreaterEqual(self.clock[0], 60)
+        self.assertIn("Iniciar", self.ap.LOG.read_text())
+
     def test_nothing_running_starts_nothing_without_a_service(self):
         self.status = {"kind": None, "installed": False, "active": False}
         self.running = set()
