@@ -1773,6 +1773,38 @@ def cmd_serve(args):
     server.serve(HOME, args.port, start_engines=args.start_engines)
 
 
+def cmd_service(args):
+    from . import service
+
+    if args.action == "install":
+        sys.exit(service.install(HOME, turno_argv()))
+    if args.action == "uninstall":
+        sys.exit(service.uninstall())
+    st = service.status()
+    if st["kind"] is None:
+        print(service.manual_hint())
+    elif not st["installed"]:
+        print(f"{st['kind']}: not installed (turno service install)")
+    else:
+        print(f"{st['kind']}: installed, {'running' if st['active'] else 'not running'} ({service.path_for(st['kind'])})")
+
+
+def cmd_restart(args):
+    from . import upgrade
+
+    sys.exit(upgrade.restart(HOME))
+
+
+def cmd_update(args):
+    from . import upgrade
+
+    sys.exit(upgrade.update(HOME))
+
+
+# Commands that act on turno as a whole: no engine instance, no loop log.
+NO_INSTANCE = {"serve", "service", "restart", "update"}
+
+
 def main():
     parser = argparse.ArgumentParser(prog="turno", description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -1800,13 +1832,18 @@ def main():
     serve.add_argument("--start-engines", action="store_true",
                        help="also start the enabled engines whose autostart is on (what the service runs)")
     serve.set_defaults(func=cmd_serve)
+    service_cmd = sub.add_parser("service", help="the background service that keeps the panel up")
+    service_cmd.add_argument("action", choices=("install", "uninstall", "status"))
+    service_cmd.set_defaults(func=cmd_service)
+    sub.add_parser("restart", help="stop the loops, restart the service; the panel starts them again").set_defaults(func=cmd_restart)
+    sub.add_parser("update", help="upgrade with pipx or uv, then restart").set_defaults(func=cmd_update)
     args = parser.parse_args()
-    if args.cmd != "serve":  # the panel reads every instance; it does not pick one
+    if args.cmd not in NO_INSTANCE:  # the panel and the whole-turno commands do not pick an engine
         configure(args.engine, args.config)
     try:
         args.func(args)
     except Exception:
-        if args.cmd == "serve":  # the panel has no log of its own; do not pollute the Codex loop's log
+        if args.cmd in NO_INSTANCE:  # no log of their own; do not pollute the Codex loop's log
             raise
         # Without this the traceback disappears with the tmux window.
         import traceback
