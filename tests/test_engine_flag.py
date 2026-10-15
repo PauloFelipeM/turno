@@ -194,7 +194,7 @@ class LoopsTest(unittest.TestCase):
         self.assertEqual(self.ap.loops(), ["codex"])
 
     def test_loop_command_uses_the_engine_flag(self):
-        script = self.ap.shlex.quote(str(self.ap.BASE / "autopilot.py"))
+        script = self.ap.shlex.quote(str(self.ap.BASE.parent / "autopilot.py"))
         home = self.ap.shlex.quote(str(self.tmp))
         self.assertEqual(self.ap.loop_command("codex"), f"TURNO_HOME={home} python3 {script} --engine codex run")
         self.assertEqual(self.ap.loop_command("claude"), f"TURNO_HOME={home} python3 {script} --engine claude run")

@@ -11,7 +11,7 @@ import unittest
 from pathlib import Path
 
 import helpers
-import overrides
+from turno import overrides
 import test_loop
 
 TRUE = test_loop.TRUE
@@ -326,7 +326,7 @@ class ControlLoopTest(unittest.TestCase):
         self.assertEqual((saved["status"], saved["retry_at"]), ("active", 0))
 
     def test_logs_of_the_loop_are_in_english(self):
-        source = (helpers.ROOT / "autopilot.py").read_text(encoding="utf-8")
+        source = (helpers.PKG / "autopilot.py").read_text(encoding="utf-8")
         for old in ("falhou", "Docker no ar", "portas ocupadas", "erro (exit=", "tentativa", "respostas", "configure [notify]"):
             self.assertNotIn(old, source)
         self.state["my-app"]["status"] = self.state["side-project"]["status"] = "idle"

@@ -7,7 +7,7 @@ from unittest import mock
 
 import helpers  # noqa: F401  (puts the repo root on sys.path)
 
-import engines
+from turno import engines
 
 
 def fake_bin(folder, name, body):

@@ -21,11 +21,11 @@ class ConfigApiTest(unittest.TestCase):
     def setUp(self):
         self.home = Path(tempfile.mkdtemp())
         self.ap = helpers.load(self.home)
-        import config
-        import control
-        import engines
-        import panel
-        import server
+        from turno import config
+        from turno import control
+        from turno import engines
+        from turno import panel
+        from turno import server
         self.config, self.control, self.engines, self.panel = config, control, engines, panel
         self.projects = helpers.make_home(self.home)
         (self.home / "shared" / "claims").mkdir(parents=True, exist_ok=True)
@@ -340,7 +340,7 @@ class ConfigApiTest(unittest.TestCase):
         self.assertEqual(self.raw(), before)
 
     def test_writes_poke_the_loops(self):
-        import overrides
+        from turno import overrides
         self.call("POST", "/api/projects", {"name": "novo", "path": str(self.extra)})
         first = overrides.read(self.home).get("poke")
         self.assertTrue(first)

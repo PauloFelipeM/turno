@@ -2,7 +2,7 @@ import datetime as dt
 import unittest
 
 import helpers  # noqa: F401  (puts the root on sys.path)
-import schedule
+from turno import schedule
 
 FRI = dt.datetime(2026, 10, 2)
 

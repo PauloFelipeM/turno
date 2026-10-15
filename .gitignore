@@ -15,3 +15,8 @@ claude.toml
 
 # The ntfy topic is a secret.
 secrets.toml
+
+# Packaging
+*.egg-info/
+build/
+dist/

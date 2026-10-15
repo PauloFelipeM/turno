@@ -16,10 +16,10 @@ class SetupApiTest(unittest.TestCase):
         self.home = Path(tempfile.mkdtemp())
         helpers.isolate_git(self, self.home)
         self.ap = helpers.load(self.home)
-        import engines
-        import panel
-        import server
-        import repo_setup as setup
+        from turno import engines
+        from turno import panel
+        from turno import server
+        from turno import repo_setup as setup
         self.panel, self.setup = panel, setup
         self.projects = helpers.make_home(self.home)
         helpers.git_repo(self.projects["side-project"])
@@ -68,7 +68,7 @@ class SetupApiTest(unittest.TestCase):
         self.assertEqual((status, body), (200, {"ok": True, "setup": "requested"}))
         r = self.setup.read(self.home, "side-project")
         self.assertEqual((r["status"], r["goal"], r["feedback"]), ("requested", "Um SaaS de agenda", None))
-        import overrides
+        from turno import overrides
         self.assertIn("poke", overrides.read(self.home))
 
     def test_create_refusals_write_nothing(self):

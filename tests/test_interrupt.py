@@ -45,7 +45,7 @@ class InterruptTest(unittest.TestCase):
         self.addCleanup(signal.signal, signal.SIGALRM, old_alarm)
 
     def lines(self):
-        import history
+        from turno import history
         return history.read(self.ap.HISTORY)
 
     def run_in_thread(self):

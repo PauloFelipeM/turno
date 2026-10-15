@@ -7,7 +7,7 @@ from pathlib import Path
 
 import helpers
 
-import repo_setup as setup  # noqa: E402  (helpers puts the repository root on sys.path)
+from turno import repo_setup as setup  # noqa: E402  (helpers puts the repository root on sys.path)
 
 
 class RequestFileTest(unittest.TestCase):

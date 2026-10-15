@@ -10,7 +10,7 @@ from unittest import mock
 
 import helpers
 
-import config  # noqa: E402  (helpers puts the repo root on sys.path)
+from turno import config  # noqa: E402  (helpers puts the repo root on sys.path)
 
 
 class NotifyOffLoopTest(unittest.TestCase):

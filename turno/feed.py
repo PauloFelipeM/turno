@@ -3,7 +3,7 @@
 import json
 from pathlib import Path
 
-import engines
+from . import engines
 
 
 class Tail:

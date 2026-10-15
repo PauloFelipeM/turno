@@ -9,7 +9,7 @@ import helpers
 
 OLD_ROLE = "plan" + "-reviewer"  # the removed role, spelled so a grep for it stays clean
 
-ROOT = helpers.ROOT
+ROOT = helpers.PKG
 
 
 class PromptsTest(unittest.TestCase):

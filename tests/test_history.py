@@ -24,7 +24,7 @@ class LimitEngine(helpers.FakeEngine):
 class PartialLineTest(unittest.TestCase):
     def test_append_after_a_partial_last_line_keeps_the_new_entry(self):
         helpers.load(Path(tempfile.mkdtemp()))
-        import history
+        from turno import history
         path = Path(tempfile.mkdtemp()) / "h.jsonl"
         path.write_text('{"unit_id": "a"')
         history.append(path, {"unit_id": "b"})
@@ -45,7 +45,7 @@ class HistoryTest(unittest.TestCase):
         self.ap.prepare_docker = lambda cfg, project: "ok"
 
     def lines(self):
-        import history
+        from turno import history
         return history.read(self.ap.HISTORY)
 
     def do_run(self, engine, close=None, deadline=None):
@@ -105,7 +105,7 @@ class HistoryTest(unittest.TestCase):
 
 class GroupTest(unittest.TestCase):
     def test_runs_of_one_unit_become_one_entry_newest_first(self):
-        import history
+        from turno import history
         entries = [
             {"unit_id": "u1", "run": "r1", "project": "p", "engine": "claude", "outcome": "cut", "closed": False,
              "started_at": "2026-10-10T19:00:00-03:00", "ended_at": "2026-10-10T19:30:00-03:00"},
@@ -124,7 +124,7 @@ class GroupTest(unittest.TestCase):
         self.assertEqual([r["run"] for r in u1["runs"]], ["r1", "r2"])
 
     def test_read_skips_broken_lines(self):
-        import history
+        from turno import history
         path = Path(tempfile.mkdtemp()) / "h.jsonl"
         path.write_text('{"unit_id": "a"}\nnot json\n{"no_id": 1}\n')
         self.assertEqual([e["unit_id"] for e in history.read(path)], ["a"])

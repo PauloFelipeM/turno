@@ -21,9 +21,9 @@ class ControlApiTest(unittest.TestCase):
     def setUp(self):
         self.home = Path(tempfile.mkdtemp())
         self.ap = helpers.load(self.home)
-        import control
-        import overrides
-        import server
+        from turno import control
+        from turno import overrides
+        from turno import server
         self.overrides, self.control = overrides, control
         self.projects = helpers.make_home(self.home)
         (self.home / "shared").mkdir(exist_ok=True)
@@ -213,7 +213,7 @@ class ControlApiTest(unittest.TestCase):
     def test_decision_answer_busy_lock_is_409(self):
         self.control.LOCK_WAIT = 0.5
         self.addCleanup(setattr, self.control, "LOCK_WAIT", 5.0)
-        import coord
+        from turno import coord
         handle = coord.try_lock("decisions")
         self.assertIsNotNone(handle)
         t = time.monotonic()  # not the wall clock: it can step back under WSL
@@ -238,7 +238,7 @@ class ControlApiTest(unittest.TestCase):
     # settings
 
     def cfg(self):
-        import config
+        from turno import config
         return config.load(self.home)
 
     def test_settings_get_and_put_write_the_config(self):

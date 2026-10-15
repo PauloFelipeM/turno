@@ -13,7 +13,7 @@ import json
 import time
 from pathlib import Path
 
-import paths
+from . import paths
 
 SHARED = paths.home() / "shared"
 ANY = "any"

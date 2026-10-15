@@ -27,7 +27,7 @@ class SetupLoopTest(unittest.TestCase):
         self.tmp = Path(tempfile.mkdtemp())
         helpers.isolate_git(self, self.tmp)
         self.ap = helpers.load(self.tmp)
-        import repo_setup as setup
+        from turno import repo_setup as setup
         self.setup = setup
         self.projects = [{"name": n, "path": str(helpers.git_repo(self.tmp / n)), "weekly_cap": 90}
                          for n in ("alpha", "beta")]

@@ -10,8 +10,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import helpers  # noqa: E402  (sets sys.path to the repo root)
 
-import config  # noqa: E402
-import overrides  # noqa: E402
+from turno import config  # noqa: E402
+from turno import overrides  # noqa: E402
 
 OLD_ROLE = "plan" + "-reviewer"  # the removed role, spelled so a grep for it stays clean
 FIX = Path(__file__).resolve().parent / "fixtures"

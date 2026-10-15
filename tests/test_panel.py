@@ -22,7 +22,7 @@ class PanelTest(unittest.TestCase):
     def setUp(self):
         self.home = Path(tempfile.mkdtemp())
         helpers.load(self.home)
-        import panel
+        from turno import panel
         self.panel = panel
         self.projects = helpers.make_home(self.home)
         self.homes = {"codex": self.home / "codex-cli", "claude": self.home / "claude-cli"}
@@ -128,7 +128,7 @@ class PanelTest(unittest.TestCase):
         self.assertEqual(my-api["backlog"], {"error": "missing"})
 
     def test_overview_control_fields(self):
-        import overrides
+        from turno import overrides
         my-app, my-api, side-project = self.overview()["projects"]
         self.assertEqual((my-app["paused"], my-app["next"], side-project["paused"]), (False, False, False))
         self.assertEqual([d["id"] for d in my-app["decisions_open"]], ["pay"])
@@ -176,7 +176,7 @@ class PanelTest(unittest.TestCase):
             d["projects"].reverse()
             d["projects"][0]["weekly_cap"] = {"codex": 55}
             d["engines"]["claude"]["primary_cap"] = 70
-        import config
+        from turno import config
         config.save(self.home, edit)
         s = self.panel.settings(self.home)
         self.assertEqual(s["order"], ["side-project", "my-api", "my-app"])
@@ -263,7 +263,7 @@ class PanelTest(unittest.TestCase):
         self.assertEqual(o["projects"][0]["decisions"], 1)
 
     def test_panel_never_queries_the_claude_quota(self):
-        import engines
+        from turno import engines
         def boom(*a, **k):
             raise AssertionError("probe")
         orig = engines.ClaudeEngine.probe
@@ -291,7 +291,7 @@ class PanelTest(unittest.TestCase):
         self.assertEqual(calls, [])
 
     def test_unused_aliases_are_gone(self):
-        import overrides
+        from turno import overrides
         self.assertFalse(hasattr(self.panel, "_ok") or hasattr(self.panel, "_project_path"))
         self.assertFalse(hasattr(overrides, "_cap"))
 

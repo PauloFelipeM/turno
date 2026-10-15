@@ -9,7 +9,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import helpers  # noqa: E402  (sets sys.path to the repo root)
 
-import overrides  # noqa: E402
+from turno import overrides  # noqa: E402
 
 
 class FileTests(unittest.TestCase):

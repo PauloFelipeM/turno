@@ -3,7 +3,7 @@
 import datetime as dt
 import re
 
-import messages
+from . import messages
 
 DAYS = {"mon": 0, "tue": 1, "wed": 2, "thu": 3, "fri": 4, "sat": 5, "sun": 6}
 

@@ -13,16 +13,16 @@ import subprocess
 import time
 from pathlib import Path
 
-import autopilot
-import backlog
-import config
-import engines
-import feed
-import history
-import overrides
-import paths
-import schedule
-import repo_setup as setup
+from . import autopilot
+from . import backlog
+from . import config
+from . import engines
+from . import feed
+from . import history
+from . import overrides
+from . import paths
+from . import schedule
+from . import repo_setup as setup
 
 
 def read_json(path):

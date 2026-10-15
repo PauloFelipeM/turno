@@ -7,6 +7,7 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+PKG = ROOT / "turno"  # the package: code, prompts, roles and the panel
 sys.path.insert(0, str(ROOT))
 
 MODULES = ("autopilot", "coord", "engines", "schedule", "paths", "history", "backlog", "feed", "panel", "control", "server",
@@ -17,14 +18,17 @@ def load(tmp):
     os.environ["TURNO_HOME"] = str(tmp)
     # A test never reaches the real ~/.codex (the Codex engine writes its role files there).
     os.environ["CODEX_HOME"] = str(Path(tmp) / "codex-home")
+    pkg = sys.modules.get("turno")
     for name in MODULES:
-        sys.modules.pop(name, None)
-    import autopilot as ap
+        sys.modules.pop(f"turno.{name}", None)
+        if pkg is not None and name in vars(pkg):
+            delattr(pkg, name)  # or `from turno import x` would hand back the old module
+    from turno import autopilot as ap
     ap.STATE, ap.LOG, ap.RUNS = tmp / "state.json", tmp / "log", tmp / "runs"
     ap.HISTORY = tmp / "history-codex.jsonl"
     ap.SECRETS = tmp / "secrets.toml"
-    if "coord" in sys.modules:
-        sys.modules["coord"].SHARED = tmp / "shared"
+    if "turno.coord" in sys.modules:
+        sys.modules["turno.coord"].SHARED = tmp / "shared"
     ap.sent = []
     ap.real_ntfy = ap.ntfy  # for the tests of the sender itself, with the network mocked
     ap.ntfy = lambda cfg, title, message, **kw: ap.sent.append((title, message))
@@ -102,7 +106,7 @@ def write_config(home, projects=(), enabled=("codex", "claude"), edit=None):
     `edit(data)` may change anything else before the file is written. The file's mtime always moves
     forward, even for two writes within the same clock tick.
     """
-    import config
+    from turno import config
     data = config.empty()
     data["projects"] = [dict(p) for p in projects]
     for name in enabled:
@@ -115,7 +119,7 @@ def write_config(home, projects=(), enabled=("codex", "claude"), edit=None):
 
 def write_config_text(home, text):
     """Puts `text` in `config.json` as it is (valid or not), moving the mtime forward."""
-    import config
+    from turno import config
     path = Path(home) / config.FILE
     before = path.stat().st_mtime_ns if path.exists() else 0
     path.write_text(text)

@@ -17,7 +17,7 @@ GOOD = {"items": [
 class ValidTest(unittest.TestCase):
     def setUp(self):
         helpers.load(Path(tempfile.mkdtemp()))
-        import backlog
+        from turno import backlog
         self.b = backlog
 
     def test_good(self):
@@ -45,7 +45,7 @@ class ReadTest(unittest.TestCase):
     def setUp(self):
         self.tmp = Path(tempfile.mkdtemp())
         helpers.load(self.tmp)
-        import backlog
+        from turno import backlog
         self.b = backlog
         self.file = self.tmp / backlog.FILE
         self.file.parent.mkdir(parents=True)
@@ -78,7 +78,7 @@ class AfterUnitTest(unittest.TestCase):
         self.state = self.ap.load_state(self.cfg)
 
     def close(self, backlog_text):
-        import backlog
+        from turno import backlog
         engine = helpers.FakeEngine(TRUE)
         out, err, code, unit_file = self.ap.run_unit(self.cfg, engine, self.state, self.project)
         unit_file.parent.mkdir(parents=True, exist_ok=True)

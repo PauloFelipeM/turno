@@ -11,7 +11,7 @@ import time
 import uuid
 from pathlib import Path
 
-import schedule
+from . import schedule
 
 
 def log(msg):

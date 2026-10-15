@@ -14,9 +14,9 @@ import re
 import tomllib
 from pathlib import Path
 
-import overrides
-import paths
-import schedule
+from . import overrides
+from . import paths
+from . import schedule
 
 FILE = "config.json"
 ENGINES = ("codex", "claude")

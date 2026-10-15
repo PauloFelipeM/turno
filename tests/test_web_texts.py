@@ -7,7 +7,7 @@ from pathlib import Path
 
 OLD_ROLE = "plan" + "-reviewer"  # the removed role, spelled so a grep for it stays clean
 
-WEB = Path(__file__).resolve().parents[1] / "web"
+WEB = Path(__file__).resolve().parents[1] / "turno" / "web"
 
 
 class WebTextsTest(unittest.TestCase):
@@ -145,7 +145,7 @@ class LanguagesTest(unittest.TestCase):
             self.assertEqual(set(re.findall(r"\{(\w+)\}", en[key])), set(re.findall(r"\{(\w+)\}", text)), key)
 
     def test_every_language_of_the_config_has_a_bundle_and_a_name(self):
-        import config
+        from turno import config
         app = (WEB / "app.js").read_text(encoding="utf-8")
         self.assertIn(f"const LANGS = {json.dumps(list(config.LANGUAGES))};", app)
         for code in config.LANGUAGES:

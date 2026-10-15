@@ -16,13 +16,13 @@ import time
 import traceback
 from pathlib import Path
 
-import autopilot
-import config
-import coord
-import engines
-import overrides
-import panel
-import repo_setup as setup
+from . import autopilot
+from . import config
+from . import coord
+from . import engines
+from . import overrides
+from . import panel
+from . import repo_setup as setup
 
 MAX_BODY = 64 * 1024
 PROC = Path("/proc")  # the tests point it at a missing folder to play macOS

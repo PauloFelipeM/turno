@@ -42,16 +42,16 @@ import urllib.parse
 import urllib.request
 from pathlib import Path
 
-import backlog
-import config
-import coord
-import engines
-import history
-import messages
-import overrides
-import paths
-import schedule
-import repo_setup as setup
+from . import backlog
+from . import config
+from . import coord
+from . import engines
+from . import history
+from . import messages
+from . import overrides
+from . import paths
+from . import schedule
+from . import repo_setup as setup
 
 BASE = Path(__file__).resolve().parent  # code: prompts, roles, interface
 HOME = paths.home()  # data: config, state, logs, runs
@@ -78,7 +78,7 @@ def log(msg):
 
 
 engines.log = log
-from engines import window  # noqa: E402  (used to pick the project and in status)
+from .engines import window  # noqa: E402  (used to pick the project and in status)
 
 
 def engine_of(config_path):
@@ -1506,7 +1506,7 @@ def tmux(*args):
 
 
 def loop_command(engine):
-    script = shlex.quote(str(Path(__file__).resolve()))
+    script = shlex.quote(str(BASE.parent / "autopilot.py"))  # the shim at the root of the checkout
     return f"TURNO_HOME={shlex.quote(str(HOME))} python3 {script} --engine {engine} run"
 
 
@@ -1709,7 +1709,7 @@ def cmd_reset(args):
 
 
 def cmd_serve(args):
-    import server  # only the panel needs it
+    from . import server  # only the panel needs it
 
     server.serve(HOME, args.port)
 

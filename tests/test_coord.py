@@ -5,7 +5,7 @@ import unittest
 from pathlib import Path
 
 import helpers  # noqa: F401
-import coord
+from turno import coord
 
 CTX = mp.get_context("fork")
 

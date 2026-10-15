@@ -9,8 +9,8 @@ from pathlib import Path
 
 import helpers
 
-import config  # noqa: E402  (helpers puts the repo root on sys.path)
-import messages  # noqa: E402
+from turno import config  # noqa: E402  (helpers puts the repo root on sys.path)
+from turno import messages  # noqa: E402
 
 
 def fields(template):
@@ -43,7 +43,7 @@ class MessagesTest(unittest.TestCase):
         self.assertEqual(messages.day(None, 5), "sáb")
 
     def test_every_key_the_scheduler_asks_for_exists(self):
-        source = (helpers.ROOT / "autopilot.py").read_text()
+        source = (helpers.PKG / "autopilot.py").read_text()
         used = set(re.findall(r'say\(cfg, "(\w+)"', source))
         used |= set(re.findall(r'"(setup_missing_\w+)"', source))
         self.assertGreaterEqual(len(used), 40)
@@ -51,13 +51,13 @@ class MessagesTest(unittest.TestCase):
 
     def test_no_portuguese_left_in_the_scheduler(self):
         for name in ("autopilot.py", "schedule.py", "panel.py", "control.py"):
-            code = [line for line in (helpers.ROOT / name).read_text().splitlines() if not line.lstrip().startswith("#")]
+            code = [line for line in (helpers.PKG / name).read_text().splitlines() if not line.lstrip().startswith("#")]
             self.assertFalse([line for line in code if re.search(r'"[^"]*[ãõçáéíóúâêô][^"]*"', line)], name)
 
 
 class WindowTextsTest(unittest.TestCase):
     def test_window_and_moments_follow_the_language(self):
-        import schedule
+        from turno import schedule
         win = schedule.Window("fri 19:00", "sun 03:00")
         self.assertEqual(win.describe(), "sex 19:00 → dom 03:00")
         self.assertEqual(win.describe("pt-BR"), "sex 19:00 → dom 03:00")
@@ -107,7 +107,7 @@ class LoopTextsTest(unittest.TestCase):
         self.assertEqual(self.turn("en"), ("my-app: noted", "Q?\n→ No"))
 
     def test_failed_setup_summary_follows_the_language(self):
-        import repo_setup as setup
+        from turno import repo_setup as setup
         root = self.tmp / "alpha"
         root.mkdir()
         setup.update(self.tmp, "alpha", lambda cur: {**setup.new_request("g"), "status": "approved"})

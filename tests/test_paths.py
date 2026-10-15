@@ -27,7 +27,7 @@ class PathsTest(unittest.TestCase):
         self.assertEqual(self.ap.coord.SHARED, self.tmp / "shared")
 
     def test_default_home_is_dot_turno(self):
-        import paths
+        from turno import paths
         old = os.environ.pop("TURNO_HOME")
         try:
             self.assertEqual(paths.home(), Path.home() / ".turno")
@@ -55,7 +55,7 @@ class PathsTest(unittest.TestCase):
 class NtfyTopicTest(unittest.TestCase):
     def setUp(self):
         self.tmp = Path(tempfile.mkdtemp())
-        import paths
+        from turno import paths
         self.paths = paths
 
     def has(self, text=None):

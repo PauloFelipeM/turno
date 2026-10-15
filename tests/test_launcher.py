@@ -12,9 +12,9 @@ CTX = mp.get_context("fork")
 
 
 def _hold_instance(shared, name, ready):
-    import coord
+    from turno import coord
     coord.SHARED = Path(shared)
-    import autopilot
+    from turno import autopilot
     handle = autopilot.instance_lock(name)
     assert handle is not None
     ready.set()

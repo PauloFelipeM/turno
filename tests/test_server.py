@@ -16,7 +16,7 @@ class ServerTest(unittest.TestCase):
     def setUp(self):
         self.home = Path(tempfile.mkdtemp())
         helpers.load(self.home)
-        import server
+        from turno import server
         self.server_mod = server
         helpers.make_home(self.home)
         (self.home / "state.json").write_text(json.dumps({"_loop": {"phase": "sleeping"}}))
@@ -78,7 +78,7 @@ class ServerTest(unittest.TestCase):
         self.assertEqual(json.loads(self.get("/api/live")[2]), [])
 
     def test_error_returns_json_500(self):
-        import panel
+        from turno import panel
         original = panel.overview
         panel.overview = lambda *a, **k: 1 / 0
         try:
@@ -118,7 +118,7 @@ class PortTest(unittest.TestCase):
     def test_busy_port_exits_with_a_message(self):
         home = Path(tempfile.mkdtemp())
         helpers.load(home)
-        import server
+        from turno import server
         busy = socket.socket()
         busy.bind(("127.0.0.1", 0))
         busy.listen()

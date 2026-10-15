@@ -11,7 +11,7 @@ from pathlib import Path
 from unittest import mock
 
 import helpers
-import overrides
+from turno import overrides
 
 TRUE = [sys.executable, "-c", "pass"]
 INVALID = "config.json is invalid; keeping the last good configuration"

@@ -16,10 +16,10 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, unquote, urlsplit
 
-import config
-import control
-import feed
-import panel
+from . import config
+from . import control
+from . import feed
+from . import panel
 
 WEB = Path(__file__).resolve().parent / "web"
 TYPES = {".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8",
