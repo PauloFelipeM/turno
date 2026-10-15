@@ -32,24 +32,33 @@ export function useOverview(): OverviewState {
   useEffect(() => {
     let closed = false;
     let loading = false;
-    const fetched = new Set<string>(); // runs whose feed so far was asked from /api/live
+    let again = false; // an overview asked for a feed while a request was running
+    const fetched = new Set<string>(); // runs whose feed so far came from /api/live
     const es = new EventSource("/api/events");
 
     const loadLive = async () => {
-      if (loading) return;
+      if (loading) {
+        again = true;
+        return;
+      }
       loading = true;
       try {
         const runs = await getJSON<(LiveRun & { items: FeedItem[] })[]>("/api/live");
         if (closed) return;
+        for (const r of runs) fetched.add(r.run);
         setState((s) => {
           const feeds = { ...s.feeds };
           for (const r of runs) feeds[r.run] = mergeItems(feeds[r.run] ?? [], r.items);
           return { ...s, feeds };
         });
       } catch {
-        /* the steps arrive with the next events */
+        /* a run without a feed is asked for again with the next overview, as the old panel did */
       } finally {
         loading = false;
+        if (again && !closed) {
+          again = false;
+          void loadLive();
+        }
       }
     };
 
@@ -64,10 +73,7 @@ export function useOverview(): OverviewState {
         return { overview, feeds, connected: true, tick: s.tick + 1 };
       });
       const fresh = [...runs].filter((r) => !fetched.has(r));
-      if (fresh.length) {
-        fresh.forEach((r) => fetched.add(r));
-        void loadLive();
-      }
+      if (fresh.length) void loadLive(); // marked as fetched only when /api/live answered
     });
     es.addEventListener("feed", (e) => {
       const d = JSON.parse((e as MessageEvent<string>).data) as { run: string; items: FeedItem[] };
