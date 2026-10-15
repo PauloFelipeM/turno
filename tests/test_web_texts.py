@@ -232,6 +232,13 @@ class ScreensTest(unittest.TestCase):
         self.assertIn('matchMedia("(prefers-color-scheme: dark)")', theme)
         self.assertIn('classList.toggle("dark"', theme)
 
+    def test_a_retry_wait_stays_on_the_card_out_of_the_needs_you_strip(self):
+        strip = self.src["components/NeedsYou.tsx"]
+        items = strip[strip.index("export function attentionItems"):strip.index("function DecisionItem")]
+        self.assertIn('p.setup === "review"', items)
+        self.assertNotIn("retry_at", items)
+        self.assertIn('t("retry", {', self.src["components/Projects.tsx"])
+
 
 if __name__ == "__main__":
     unittest.main()

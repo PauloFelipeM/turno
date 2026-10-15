@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
 import { WifiOffIcon } from "lucide-react";
 import { Engines } from "@/components/Engines";
+import { NeedsYou } from "@/components/NeedsYou";
+import { Projects } from "@/components/Projects";
 import { TopBar } from "@/components/TopBar";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -28,6 +30,7 @@ function Loading() {
 export function App() {
   const { t, setLang } = useI18n();
   const { overview, connected } = useOverview();
+  const [project, setProject] = useState<string | null>(null);
   const [settings, setSettings] = useState<{ open: boolean; tab: "projects" | "engines" | "general" }>({ open: false, tab: "projects" });
 
   // The language comes from the config; changed in another tab or by hand, the page follows.
@@ -35,6 +38,11 @@ export function App() {
   useEffect(() => {
     if (language) setLang(language);
   }, [language, setLang]);
+
+  // A project removed while its panel is open closes the panel.
+  useEffect(() => {
+    if (project && overview && !overview.projects.some((p) => p.name === project)) setProject(null);
+  }, [overview, project]);
 
   return (
     <div className="min-h-dvh bg-background">
@@ -53,6 +61,8 @@ export function App() {
         ) : (
           <>
             <Engines overview={overview} />
+            <NeedsYou overview={overview} onReview={setProject} />
+            <Projects overview={overview} onOpen={setProject} onAdd={() => setSettings({ open: true, tab: "projects" })} />
           </>
         )}
       </main>
