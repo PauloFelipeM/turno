@@ -9,6 +9,7 @@ import threading
 import time
 import unittest
 from pathlib import Path
+from unittest import mock
 
 import helpers
 from turno import overrides
@@ -219,6 +220,31 @@ class ControlLoopTest(unittest.TestCase):
         self.assertIn("my-app: new unit", text)
         self.assertNotIn("my-api: new unit", text)
 
+    def test_compose_failed_lets_the_queue_move_on_and_warns_once(self):
+        self.ap.prepare_docker = lambda cfg, project: "compose-failed" if project["name"] == "my-api" else "ok"
+        engine = self.failing_engine()
+        wait = self.ap.run_once(self.cfg, engine, self.state)
+        self.assertLessEqual(wait, 5)
+        self.assertAlmostEqual(self.state["my-api"]["retry_at"], time.time() + 600, delta=5)
+        self.assertIsNone(self.coord.read_claim("my-api"))
+        self.ap.run_once(self.cfg, engine, self.state)  # my-app runs: Docker answers for it
+        self.assertIn("my-app: new unit", self.ap.LOG.read_text())
+        self.state["my-api"]["retry_at"] = 0
+        self.ap.run_once(self.cfg, engine, self.state)  # my-api fails again after a project that worked
+        self.assertEqual(len([t for t, _ in self.ap.sent if "Docker" in t]), 1)
+
+    def test_compose_warns_again_once_the_project_came_up(self):
+        engine = self.failing_engine()
+        self.ap.prepare_docker = lambda cfg, project: "compose-failed"
+        self.ap.run_once(self.cfg, engine, self.state)
+        self.ap.prepare_docker = lambda cfg, project: "ok"
+        self.state["my-api"]["retry_at"] = 0
+        self.ap.run_once(self.cfg, engine, self.state)
+        self.ap.prepare_docker = lambda cfg, project: "compose-failed"
+        self.state["my-api"]["retry_at"] = 0
+        self.ap.run_once(self.cfg, engine, self.state)
+        self.assertEqual(len([t for t, _ in self.ap.sent if "Docker" in t]), 2)
+
     def test_docker_down_still_makes_the_loop_wait_and_warns_once(self):
         self.ap.prepare_docker = lambda cfg, project: "docker-down"
         engine = self.failing_engine()
@@ -236,6 +262,42 @@ class ControlLoopTest(unittest.TestCase):
                     self.ap.say(self.cfg, "docker_wsl_body"))
         self.assertEqual([m for m in self.ap.sent if m == expected], [expected])
         self.assertEqual([t for t, _ in self.ap.sent if "Docker" in t], [expected[0]])  # not the generic one
+
+    # a project without docs/autopilot.md
+
+    def test_a_project_without_rules_is_skipped_and_logged_once(self):
+        self.ap.has_rules = self.ap.real_has_rules
+        rules = Path(self.projects[1]["path"]) / "docs" / "autopilot.md"
+        rules.parent.mkdir()
+        rules.write_text("rules\n")
+        self.assertEqual(self.pick_wait(self.failing_engine())[0], "my-app")
+        self.pick_wait(self.failing_engine())
+        text = self.ap.LOG.read_text()
+        self.assertEqual(text.count("my-api: no docs/autopilot.md"), 1)  # a skipped project, logged once
+
+    def test_without_rules_nothing_runs_and_the_loop_still_waits(self):
+        self.ap.has_rules = self.ap.real_has_rules
+        project, wait = self.pick_wait(self.failing_engine())
+        self.assertIsNone(project)
+        self.assertGreater(wait, 0)
+
+    def test_a_setup_request_runs_without_rules(self):
+        self.ap.has_rules = self.ap.real_has_rules
+        phase = lambda home, name: "requested" if name == "my-app" else None
+        with mock.patch.object(self.ap.setup, "phase", phase):
+            self.assertEqual(self.pick_wait(self.failing_engine())[0], "my-app")
+
+    def test_an_interrupted_unit_resumes_even_without_rules(self):
+        self.ap.has_rules = self.ap.real_has_rules
+        self.state["side-project"]["interrupted"] = True
+        self.assertEqual(self.pick_wait(self.failing_engine())[0], "side-project")
+
+    def test_has_rules_reads_docs_autopilot_md(self):
+        root = Path(self.projects[0]["path"])
+        self.assertFalse(self.ap.real_has_rules(str(root)))
+        (root / "docs").mkdir()
+        (root / "docs" / "autopilot.md").mkdir()  # a folder by that name is not the file
+        self.assertFalse(self.ap.real_has_rules(str(root)))
 
     def test_next_is_only_consumed_when_docker_is_ready(self):
         self.set_ov(lambda d: d.update(next="side-project"))

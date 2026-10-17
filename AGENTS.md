@@ -135,7 +135,8 @@ Each instance runs one engine (`--engine`, `codex` by default; the contract is i
    `weekly_cap` (week) and `primary_cap` (5 h). A project that does not fit does not hold up the line:
    the next, cheaper one may run. In both passes a project whose `retry_at` is still in the future
    is skipped, interrupted unit or not.
-   A project whose setup request is `review` is skipped; one whose request is `requested` or
+   A project without `docs/autopilot.md` and no setup request due is skipped (logged once): a normal
+   unit starts by reading that file. A project whose setup request is `review` is skipped; one whose request is `requested` or
    `approved` gets a setup unit (`prompts/setup.md`) instead of a normal one, even if it is `idle` or
    `waiting`; an `approved` one runs its apply unit even with a dirty tree (the prompt decides). The
    `.superpowers/` line goes into its `.git/info/exclude` (unless git already ignores it) in `run_unit`
@@ -143,8 +144,10 @@ Each instance runs one engine (`--engine`, `codex` by default; the contract is i
    It takes the group lock (`shared/<docker_group or name>.lock`);
 5. `run_project`: writes the claim, `prepare_docker` (stops the stack of the other project in the
    group unless it has uncommitted work, and brings this project's up). If the ports are busy with
-   someone's uncommitted work, only this project waits (`retry_at`, 10 min) and the queue moves on
-   to the next one; if Docker is down or compose fails, the whole loop waits 10 min and warns once.
+   someone's uncommitted work, or compose fails for this project, only this project waits
+   (`retry_at`, 10 min) and the queue moves on to the next one; a compose failure warns once per
+   project (`compose_alerted`, cleared when its stack comes up). If Docker is down or has no WSL
+   integration, the whole loop waits 10 min and warns once.
    Docker down: on WSL turno opens Windows Docker Desktop, on macOS `open -a Docker`, and both wait
    up to 3 min; on Linux it starts nothing and waits. Only one loop opens Docker Desktop at a time
    (`shared/docker-start.lock`); the other waits for it. On WSL, when Docker Desktop answers on the
@@ -168,7 +171,8 @@ shows it on the project card ("tenta de novo ...").
 
 ### Preparing a project
 
-A project without `docs/autopilot.md` can be prepared from the panel: the owner writes a goal and
+A project without `docs/autopilot.md` gets no normal unit (`pick` skips it; the panel warns
+`no_autopilot_doc`). It can be prepared from the panel: the owner writes a goal and
 the panel creates `setup/<project>.json` (`requested`). The next unit on that project is a draft unit
 (`prompts/setup.md`, with a "Setup unit" section appended: mode, goal, feedback, draft files); it
 writes the draft in `.superpowers/autopilot/setup/` and closes `waiting`. If `setup/autopilot.md`

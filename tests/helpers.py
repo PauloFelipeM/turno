@@ -35,6 +35,8 @@ def load(tmp):
     ap.sent = []
     ap.real_ntfy = ap.ntfy  # for the tests of the sender itself, with the network mocked
     ap.ntfy = lambda cfg, title, message, **kw: ap.sent.append((title, message))
+    ap.real_has_rules = ap.has_rules  # for the tests of a project without docs/autopilot.md
+    ap.has_rules = lambda path: True  # the fixtures are bare folders; they stand for prepared projects
     return ap
 
 

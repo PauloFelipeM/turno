@@ -189,6 +189,7 @@ def ensure_state(cfg, state):
         s.setdefault("retry_at", 0)  # no run on this project before this time (error, usage limit, busy Docker)
         s.setdefault("cost", {"primary": d["initial_cost_primary"], "secondary": d["initial_cost_secondary"]})
         s.setdefault("dirty_logged", False)
+        s.setdefault("compose_alerted", False)  # this project's compose failure was already sent to the phone
         s.setdefault("unit_start_limits", None)
         s.setdefault("notes_sent", [])
         s.setdefault("unit_id", None)
@@ -711,6 +712,12 @@ SETUP_MODES = {"requested": "draft", "approved": "apply"}
 
 
 EXCLUDE_LOGGED = set()
+NO_RULES_LOGGED = set()
+
+
+def has_rules(path):
+    """Whether the project has `docs/autopilot.md`, which every normal unit starts by reading."""
+    return (Path(path) / "docs" / "autopilot.md").is_file()
 
 
 def exclude_setup(name, path):
@@ -1127,6 +1134,13 @@ def pick(cfg, engine, state, limits, next_project=None):
             waits.append(600)  # the draft waits for the owner; the panel's answer wakes the nap
             continue
         setup_unit = phase in ("requested", "approved")  # a setup unit is not held by idle or waiting
+        if not setup_unit and not has_rules(p["path"]):
+            # A normal unit starts by reading docs/autopilot.md: without it, it would only burn quota.
+            if name not in NO_RULES_LOGGED:
+                NO_RULES_LOGGED.add(name)
+                log(f"{name}: no docs/autopilot.md; skipping until it is prepared (\"Prepare with an agent\" in the panel)")
+            continue
+        NO_RULES_LOGGED.discard(name)
         if s["status"] == "idle" and not setup_unit:
             continue
         if s["status"] == "waiting" and not setup_unit:
@@ -1282,6 +1296,15 @@ def run_project(cfg, engine, state, project, limits, win):
     if docker != "ok":
         if not s["interrupted"]:
             coord.release(name, engine.name)  # nothing started: the project is free for the other engine
+        if docker == "compose-failed":
+            # This project's stack is broken, not Docker: only this project waits, and the phone hears
+            # about it once until the stack comes up again.
+            if not s["compose_alerted"]:
+                ntfy(cfg, say(cfg, "docker_title", engine=engine.label),
+                     say(cfg, "docker_body", project=name, reason=docker), priority=4, tags=["warning"])
+                s["compose_alerted"] = True
+            s["retry_at"] = time.time() + 600
+            return 5
         if docker != "busy" and not state["_notify"].get("docker_alerted"):
             # Without the containers the unit would only burn quota; warn once and retry in 10 min.
             if docker == "wsl-integration":
@@ -1297,6 +1320,7 @@ def run_project(cfg, engine, state, project, limits, win):
             return 5
         return 600
     state["_notify"]["docker_alerted"] = False
+    s["compose_alerted"] = False
     if fresh and s["status"] in ("idle", "waiting") and setup_mode(name) is None:
         # Picked only for its setup request, which was cancelled meanwhile: a normal unit must not run.
         coord.release(name, engine.name)
