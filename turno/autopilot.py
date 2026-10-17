@@ -228,8 +228,42 @@ def notify_on(cfg):
     return config.notify_enabled(notify) and isinstance(topic, str) and bool(topic.strip())
 
 
+SERVER_TOPIC_LOGGED = []
+
+
 def ntfy_server(cfg):
-    return (cfg.get("notify") or {}).get("server", "https://ntfy.sh").rstrip("/")
+    """The ntfy server, without a trailing slash.
+
+    A server that ends with the topic (the address the ntfy app shows, pasted as the server) is cut back
+    to the server: with it, ntfy would show every notification as raw JSON and answers would not be read.
+    """
+    notify = cfg.get("notify") or {}
+    server = notify.get("server", "https://ntfy.sh").rstrip("/")
+    topic = notify.get("topic")
+    if topic:
+        for name in (topic + "-reply", topic):
+            if server.endswith("/" + name):
+                server = server[:-len(name) - 1]
+                if not SERVER_TOPIC_LOGGED:
+                    SERVER_TOPIC_LOGGED.append(True)
+                    log("notify.server ends with the topic; using only the server part (fix it in Settings > General)")
+                break
+    return server
+
+
+def own_publication(cfg, text):
+    """Whether a message read from the topic is a body this scheduler published, echoed back as plain text.
+
+    That happens when the server is wrong: ntfy takes the JSON body as the message of a message without
+    a title, which would otherwise read as something the owner typed.
+    """
+    if not text.startswith("{"):
+        return False
+    try:
+        body = json.loads(text)
+    except ValueError:
+        return False
+    return isinstance(body, dict) and body.get("topic") == cfg["notify"]["topic"]
 
 
 def say(cfg, key, **fields):
@@ -431,9 +465,10 @@ def poll_replies(cfg, notify):
     for msg in fetch_messages(cfg, cfg["notify"]["topic"], notify["since_typed"], "typed replies") or []:
         notify["since_typed"] = msg["id"]
         # Everything the scheduler publishes has a title; a message without one is someone typing in the app.
-        if msg.get("title"):
+        text = (msg.get("message") or "").strip()
+        if msg.get("title") or own_publication(cfg, text):
             continue
-        typed_reply(cfg, projects, (msg.get("message") or "").strip())
+        typed_reply(cfg, projects, text)
 
 
 def dispatch_decisions(cfg, notify):

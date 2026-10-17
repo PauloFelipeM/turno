@@ -177,7 +177,7 @@ export default {
     checkErrorOther: "Could not read the quota",
     addBadName: "The name may only have letters, digits, _ and -.",
     addBadPath: "The folder must be an absolute path, starting with /.",
-    invalid: "Check the fields: caps from 0 to 100, a window with start and end, a whole-number margin, a timeout above zero, a server starting with http:// or https://.",
+    invalid: "Check the fields: caps from 0 to 100, a window with start and end, a whole-number margin, a timeout above zero, a server starting with http:// or https://, without a path (the topic is not part of it).",
     save: "Save",
     saved: "Applies from the loop's next turn",
     close: "Close",

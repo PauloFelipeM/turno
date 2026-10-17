@@ -397,6 +397,18 @@ class GeneralSettingsTest(unittest.TestCase):
             self.assertEqual((status, out["error"]), (400, "bad_request"), body)
         self.assertEqual(self.raw(), before)
 
+    def test_the_server_is_only_an_address_without_a_path(self):
+        before = self.raw()
+        for server in ("https://ntfy.example.org/my-secret-topic", "https://ntfy.example.org/a/b",
+                       "https://ntfy.example.org?x=1", "https://ntfy.example.org#t"):
+            status, out = self.put({"notify": {"server": server}})
+            self.assertEqual((status, out["error"]), (400, "bad_request"), server)
+            self.assertIn("without a path", out["message"])
+            self.assertNotIn("my-secret-topic", json.dumps(out))  # the refusal never echoes what looks like a topic
+        self.assertEqual(self.raw(), before)
+        self.assertEqual(self.put({"notify": {"server": "https://ntfy.example.org:8443/"}})[0], 200)
+        self.assertEqual(self.cfg()["notify"]["server"], "https://ntfy.example.org:8443")
+
     def test_the_topic_is_never_taken_or_returned(self):
         status, out = self.put({"notify": {"topic": "segredo-xyz"}})
         self.assertEqual(status, 400)

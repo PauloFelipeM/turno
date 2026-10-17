@@ -598,7 +598,13 @@ def put_general(home, body):
         server = notify["server"]
         if not (isinstance(server, str) and re.fullmatch(r"https?://\S+", server.strip())):
             raise bad("notify.server must start with http:// or https://")
-        notify = {**notify, "server": server.strip()}
+        server = server.strip().rstrip("/")
+        if not re.fullmatch(r"https?://[^/?#]+", server):
+            # The address the ntfy app shows is the topic's (server/topic): taken as the server, every
+            # notification would arrive as raw JSON and no answer would be read. The message never echoes it.
+            raise bad("notify.server is only the server address (like https://ntfy.sh), without a path: "
+                      "the topic lives in secrets.toml")
+        notify = {**notify, "server": server}
 
     def fn(d):
         if "language" in body:

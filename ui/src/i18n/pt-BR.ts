@@ -177,7 +177,7 @@ export default {
     checkErrorOther: "Não foi possível ler a cota",
     addBadName: "O nome só pode ter letras, números, _ e -.",
     addBadPath: "A pasta precisa ser um caminho absoluto, começando com /.",
-    invalid: "Confira os campos: tetos de 0 a 100, janela com início e fim, margem inteira, prazo maior que zero, servidor começando com http:// ou https://.",
+    invalid: "Confira os campos: tetos de 0 a 100, janela com início e fim, margem inteira, prazo maior que zero, servidor começando com http:// ou https://, sem caminho (o tópico não faz parte dele).",
     save: "Salvar",
     saved: "Vale a partir da próxima volta do loop",
     close: "Fechar",

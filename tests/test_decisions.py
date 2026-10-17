@@ -60,6 +60,29 @@ class DecisionsTest(unittest.TestCase):
         self.assertEqual(self.titles(), ["my-api: anotado"])
         self.assertEqual(json.loads(path.read_text())["answer"], "b")
 
+    def test_the_schedulers_own_body_echoed_back_is_not_an_owner_message(self):
+        # With the topic in notify.server, ntfy published the JSON body as plain text, without a title.
+        echo = json.dumps({"topic": "T", "title": "Codex: Docker problem", "message": "my-api", "priority": 4})
+        self.messages["T"].append({"id": "m1", "message": echo, "title": None})
+        self.ap.process_decisions(self.cfg, self.state())
+        self.assertEqual(self.coord.pending_notes("my-api"), [])
+        self.assertEqual(self.ap.sent, [])
+
+    def test_json_typed_by_the_owner_is_still_a_message(self):
+        typed = json.dumps({"topic": "other", "note": "my-api"})
+        self.messages["T"].append({"id": "m1", "message": typed, "title": None})
+        self.ap.process_decisions(self.cfg, self.state())
+        self.assertEqual([n["text"] for n in self.coord.pending_notes("my-api")], [typed])
+
+    def test_a_server_that_carries_the_topic_is_cut_back_to_the_server(self):
+        for server in ("https://ntfy.example.org/T", "https://ntfy.example.org/T/", "https://ntfy.example.org/T-reply"):
+            cfg = {**self.cfg, "notify": {"topic": "T", "server": server}}
+            self.assertEqual(self.ap.ntfy_server(cfg), "https://ntfy.example.org", server)
+        self.assertEqual(self.ap.LOG.read_text().count("notify.server ends with the topic"), 1)
+        self.assertNotIn("/T", self.ap.LOG.read_text())
+        cfg = {**self.cfg, "notify": {"topic": "T", "server": "https://ntfy.sh/"}}
+        self.assertEqual(self.ap.ntfy_server(cfg), "https://ntfy.sh")
+
     def test_waiting_project_is_released_even_without_the_lock(self):
         path = decision(self.project, "x1", notified=True)
         state = self.state()

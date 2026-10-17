@@ -103,7 +103,9 @@ call it on every turn.
   before they replace the file.
 - **Language and ntfy.** `language` (`pt-BR` or `en`; missing = `en`, and the file is not
   rewritten; a config imported from the TOML files gets `pt-BR`) and `notify.enabled` (missing = on) are set in Settings → General
-  (`PUT /api/settings/general`). With ntfy off, or on without a topic, nothing is sent or read and
+  (`PUT /api/settings/general`; `notify.server` is only the server address, refused with a path, since
+  the address the ntfy app shows is the topic's; a saved server that ends with the topic is cut back to
+  the server by `ntfy_server`, logged once). With ntfy off, or on without a topic, nothing is sent or read and
   `secrets.toml` is not even opened when it is off: a new decision still gets `notified_at` and
   `deadline` (the default applies at the deadline) and waits in the panel; warnings go to the log;
   the ntfy read position follows the clock, so turning ntfy on again does not replay old messages.
@@ -219,7 +221,8 @@ Invariants a change must not break:
 - **ntfy answers only for a decision already sent, unanswered, with a listed option.** Both the
   buttons (`project/decision/option` on the `-reply` topic) and the letter typed in the app on the
   main topic count (`B`, `B, text…`, `myapp B`; the project is required when more than one is
-  pending). A message with a title comes from the scheduler itself and is ignored.
+  pending). A message with a title comes from the scheduler itself and is ignored, and so is a JSON
+  body with this topic (`own_publication`: the scheduler's own body, echoed as plain text by a wrong server).
 - **Free text in the topic is a message from the owner to the agents**, unprotected (the owner's
   choice: whoever knows the topic can send too). It is stored in `shared/notes/<project>.json`, goes
   to the projects named in it (none named = all), is appended to the next unit's prompt ("Owner
