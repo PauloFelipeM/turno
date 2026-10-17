@@ -44,62 +44,125 @@ class DetectionTest(PlatformBase):
 
 
 class DockerTest(PlatformBase):
-    def ensure(self, kind, up_after=None, seconds=2):
-        """ensure_docker on `kind`; Docker answers from the call after `up_after` (never when None)."""
+    def ensure(self, kind, up_after=None, seconds=2, windows=False):
+        """ensure_docker on `kind`; Docker answers from the call after `up_after` (never when None).
+
+        `windows` is what the Windows side of Docker Desktop answers (a bool, or a list read call by call).
+        """
         calls = []
 
         def up():
             calls.append(1)
             return up_after is not None and len(calls) > up_after
+        answers = list(windows) if isinstance(windows, list) else None
         self.ap.docker_up = up
+        self.ap.windows_docker_up = lambda: answers.pop(0) if answers is not None else windows
         self.ap.platform_kind = lambda: kind
         self.ap.DOCKER_START_SECONDS, self.ap.DOCKER_POLL_SECONDS = seconds, 0
         with mock.patch.object(self.ap.subprocess, "Popen") as popen:
-            ok = self.ap.ensure_docker({})
-        return ok, popen
+            result = self.ap.ensure_docker({})
+        return result, popen
+
+    def desktop(self):
+        exe = self.tmp / "Docker Desktop.exe"
+        exe.write_text("")
+        self.ap.DOCKER_DESKTOP = exe
+        return exe
 
     def test_already_up_on_any_platform(self):
         self.ap.platform_kind = lambda: self.fail("no platform check when Docker answers")
         self.ap.docker_up = lambda: True
-        self.assertTrue(self.ap.ensure_docker({}))
+        self.assertEqual(self.ap.ensure_docker({}), "ok")
 
     def test_linux_starts_nothing_and_says_so(self):
-        ok, popen = self.ensure("linux")
-        self.assertFalse(ok)
+        result, popen = self.ensure("linux")
+        self.assertEqual(result, "docker-down")
         popen.assert_not_called()
         self.assertIn("Docker is down; turno does not start it on Linux", self.ap.LOG.read_text())
 
     def test_macos_opens_docker_desktop_and_waits(self):
-        ok, popen = self.ensure("macos", up_after=2)
-        self.assertTrue(ok)
+        result, popen = self.ensure("macos", up_after=2)
+        self.assertEqual(result, "ok")
         self.assertEqual(popen.call_args.args[0], ["open", "-a", "Docker"])
         self.assertIn("Docker is up", self.ap.LOG.read_text())
 
     def test_macos_gives_up_after_the_wait(self):
         started = time.monotonic()
-        ok, popen = self.ensure("macos", seconds=0.2)
-        self.assertFalse(ok)
+        result, popen = self.ensure("macos", seconds=0.2)
+        self.assertEqual(result, "docker-down")
         self.assertLess(time.monotonic() - started, 5)
         popen.assert_called_once()
 
     def test_wsl_opens_windows_docker_desktop(self):
-        exe = self.tmp / "Docker Desktop.exe"
-        exe.write_text("")
-        self.ap.DOCKER_DESKTOP = exe
-        ok, popen = self.ensure("wsl", up_after=1)
-        self.assertTrue(ok)
+        exe = self.desktop()
+        result, popen = self.ensure("wsl", up_after=1)
+        self.assertEqual(result, "ok")
         self.assertEqual(popen.call_args.args[0], [str(exe)])
 
     def test_wsl_without_docker_desktop_waits(self):
         self.ap.DOCKER_DESKTOP = self.tmp / "missing.exe"
-        ok, popen = self.ensure("wsl")
-        self.assertFalse(ok)
+        result, popen = self.ensure("wsl")
+        self.assertEqual(result, "docker-down")
         popen.assert_not_called()
+
+    def test_wsl_with_docker_desktop_running_but_no_integration_does_not_reopen_it(self):
+        self.desktop()
+        result, popen = self.ensure("wsl", windows=True)
+        self.assertEqual(result, "wsl-integration")
+        popen.assert_not_called()
+        self.assertIn("WSL integration", self.ap.LOG.read_text())
+        self.assertNotIn("opening Docker Desktop", self.ap.LOG.read_text())
+
+    def test_wsl_opened_docker_desktop_that_comes_up_without_the_integration(self):
+        self.desktop()
+        result, popen = self.ensure("wsl", seconds=0.2, windows=[False, True])
+        self.assertEqual(result, "wsl-integration")
+        popen.assert_called_once()
+        self.assertIn("WSL integration", self.ap.LOG.read_text())
+
+    def test_only_one_engine_opens_docker_desktop(self):
+        self.desktop()
+        held = self.ap.coord.try_lock("docker-start")  # the other engine is opening it right now
+        self.addCleanup(self.ap.coord.unlock, held)
+        result, popen = self.ensure("wsl", up_after=2)
+        self.assertEqual(result, "ok")
+        popen.assert_not_called()
+        self.assertIn("another loop is opening Docker Desktop", self.ap.LOG.read_text())
+
+    def test_the_start_lock_is_released_after_the_wait(self):
+        self.desktop()
+        self.ensure("wsl", seconds=0.1)
+        handle = self.ap.coord.try_lock("docker-start")
+        self.assertIsNotNone(handle)
+        self.ap.coord.unlock(handle)
+
+    def test_windows_docker_up_without_the_windows_cli_is_false(self):
+        self.ap.DOCKER_DESKTOP = self.tmp / "nowhere" / "Docker Desktop.exe"
+        with mock.patch.object(self.ap.subprocess, "run") as run:
+            self.assertFalse(self.ap.windows_docker_up())
+        run.assert_not_called()
+
+    def test_windows_docker_up_asks_the_windows_cli(self):
+        cli = self.tmp / "resources" / "bin" / "docker.exe"
+        cli.parent.mkdir(parents=True)
+        cli.write_text("")
+        self.ap.DOCKER_DESKTOP = self.tmp / "Docker Desktop.exe"
+        done = subprocess.CompletedProcess(["docker.exe"], 0)
+        with mock.patch.object(self.ap.subprocess, "run", return_value=done) as run:
+            self.assertTrue(self.ap.windows_docker_up())
+        self.assertEqual(run.call_args.args[0], [str(cli), "info"])
+        with mock.patch.object(self.ap.subprocess, "run", side_effect=subprocess.TimeoutExpired("docker.exe", 30)):
+            self.assertFalse(self.ap.windows_docker_up())
 
     def test_docker_down_on_linux_makes_the_project_wait(self):
         self.ap.docker_up = lambda: False
         self.ap.platform_kind = lambda: "linux"
         self.assertEqual(self.ap.prepare_docker({"project": []}, {"name": "x", "path": str(self.tmp)}), "docker-down")
+
+    def test_missing_wsl_integration_makes_the_project_wait(self):
+        self.ap.ensure_docker = lambda cfg: "wsl-integration"
+        self.assertEqual(self.ap.prepare_docker({"project": []}, {"name": "x", "path": str(self.tmp)}),
+                         "wsl-integration")
 
 
 class LoopDetectionTest(PlatformBase):

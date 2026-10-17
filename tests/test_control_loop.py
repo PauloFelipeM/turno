@@ -227,6 +227,16 @@ class ControlLoopTest(unittest.TestCase):
         self.assertEqual(len([t for t, _ in self.ap.sent if "Docker" in t]), 1)
         self.assertEqual(self.state["my-api"]["retry_at"], 0)
 
+    def test_missing_wsl_integration_warns_once_with_what_to_do(self):
+        self.ap.prepare_docker = lambda cfg, project: "wsl-integration"
+        engine = self.failing_engine()
+        self.assertEqual(self.ap.run_once(self.cfg, engine, self.state), 600)
+        self.assertEqual(self.ap.run_once(self.cfg, engine, self.state), 600)
+        expected = (self.ap.say(self.cfg, "docker_wsl_title", engine=engine.label),
+                    self.ap.say(self.cfg, "docker_wsl_body"))
+        self.assertEqual([m for m in self.ap.sent if m == expected], [expected])
+        self.assertEqual([t for t, _ in self.ap.sent if "Docker" in t], [expected[0]])  # not the generic one
+
     def test_next_is_only_consumed_when_docker_is_ready(self):
         self.set_ov(lambda d: d.update(next="side-project"))
         self.ap.prepare_docker = lambda cfg, project: "busy"

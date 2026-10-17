@@ -601,27 +601,28 @@ def docker_up():
     return subprocess.run(["docker", "info"], capture_output=True).returncode == 0
 
 
-def ensure_docker(cfg):
-    """Makes sure the Docker daemon is up.
+def windows_docker_up():
+    """Whether Docker Desktop answers on the Windows side (its own `docker.exe`), seen from WSL.
 
-    WSL opens Windows Docker Desktop and macOS opens Docker Desktop (`open -a Docker`), then both wait
-    for it. On Linux turno starts nothing (the daemon is a system service): it logs and the caller waits.
+    When it does and `docker_up` does not, Docker is fine: what is missing is its WSL integration
+    with this distro, and opening Docker Desktop again does not bring it back.
     """
-    if docker_up():
-        return True
-    kind = platform_kind()
-    if kind == "linux":
-        log("Docker is down; turno does not start it on Linux (start the Docker service)")
+    cli = DOCKER_DESKTOP.parent / "resources" / "bin" / "docker.exe"
+    if not cli.exists():
         return False
-    if kind == "wsl" and not DOCKER_DESKTOP.exists():
-        return False
-    cmd = [str(DOCKER_DESKTOP)] if kind == "wsl" else ["open", "-a", "Docker"]
-    log("Docker is down; opening Docker Desktop")
     try:
-        subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    except OSError as e:
-        log(f"could not open Docker Desktop: {e}")
+        return subprocess.run([str(cli), "info"], capture_output=True, timeout=30).returncode == 0
+    except (OSError, subprocess.TimeoutExpired):
         return False
+
+
+def no_wsl_integration():
+    log("Docker Desktop is running, but this WSL distro cannot reach it: turn on its WSL integration "
+        "(Settings > Resources > WSL integration) or restart Docker Desktop")
+    return "wsl-integration"
+
+
+def wait_for_docker():
     deadline = time.monotonic() + DOCKER_START_SECONDS
     while time.monotonic() < deadline:
         time.sleep(DOCKER_POLL_SECONDS)
@@ -631,11 +632,53 @@ def ensure_docker(cfg):
     return False
 
 
-def prepare_docker(cfg, project):
-    """Brings the project's stack up. Returns "ok", "docker-down", "busy" or "compose-failed"."""
-    if not ensure_docker(cfg):
-        log("Docker did not respond; no unit runs until it is back")
+def ensure_docker(cfg):
+    """Makes sure the Docker daemon is up. Returns "ok", "docker-down" or "wsl-integration".
+
+    WSL opens Windows Docker Desktop and macOS opens Docker Desktop (`open -a Docker`), then both wait
+    for it. On Linux turno starts nothing (the daemon is a system service): it logs and the caller waits.
+    On WSL, a Docker Desktop that already answers on Windows is not opened again: the integration with
+    this distro is what is missing. Only one loop opens Docker Desktop at a time (`docker-start.lock`);
+    the other only waits for it.
+    """
+    if docker_up():
+        return "ok"
+    kind = platform_kind()
+    if kind == "linux":
+        log("Docker is down; turno does not start it on Linux (start the Docker service)")
         return "docker-down"
+    if kind == "wsl" and not DOCKER_DESKTOP.exists():
+        return "docker-down"
+    if kind == "wsl" and windows_docker_up():
+        return no_wsl_integration()
+    lock = coord.try_lock("docker-start")
+    try:
+        if lock is None:
+            log("Docker is down; another loop is opening Docker Desktop, waiting for it")
+        else:
+            cmd = [str(DOCKER_DESKTOP)] if kind == "wsl" else ["open", "-a", "Docker"]
+            log("Docker is down; opening Docker Desktop")
+            try:
+                subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            except OSError as e:
+                log(f"could not open Docker Desktop: {e}")
+                return "docker-down"
+        if wait_for_docker():
+            return "ok"
+    finally:
+        coord.unlock(lock)
+    if kind == "wsl" and windows_docker_up():
+        return no_wsl_integration()
+    return "docker-down"
+
+
+def prepare_docker(cfg, project):
+    """Brings the project's stack up. Returns "ok", "docker-down", "wsl-integration", "busy" or
+    "compose-failed"."""
+    docker = ensure_docker(cfg)
+    if docker != "ok":
+        log("Docker did not respond; no unit runs until it is back")
+        return docker
     group = project.get("docker_group")
     if group:
         for other in cfg["project"]:
@@ -1241,8 +1284,12 @@ def run_project(cfg, engine, state, project, limits, win):
             coord.release(name, engine.name)  # nothing started: the project is free for the other engine
         if docker != "busy" and not state["_notify"].get("docker_alerted"):
             # Without the containers the unit would only burn quota; warn once and retry in 10 min.
-            ntfy(cfg, say(cfg, "docker_title", engine=engine.label),
-                 say(cfg, "docker_body", project=name, reason=docker), priority=4, tags=["warning"])
+            if docker == "wsl-integration":
+                title, body = say(cfg, "docker_wsl_title", engine=engine.label), say(cfg, "docker_wsl_body")
+            else:
+                title = say(cfg, "docker_title", engine=engine.label)
+                body = say(cfg, "docker_body", project=name, reason=docker)
+            ntfy(cfg, title, body, priority=4, tags=["warning"])
             state["_notify"]["docker_alerted"] = True
         if docker == "busy":
             # Only this project waits: the queue moves on to the next one on the following turn.

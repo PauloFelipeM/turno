@@ -53,6 +53,9 @@ TEXTS = {
         "all_idle_body": "Todos os projetos terminaram o backlog.",
         "docker_title": "{engine}: Docker com problema",
         "docker_body": "Não consegui subir os containers de {project} ({reason}). Veja o log.",
+        "docker_wsl_title": "{engine}: Docker sem integração com o WSL",
+        "docker_wsl_body": "O Docker Desktop está rodando, mas o WSL não o alcança. Ligue Settings > Resources > "
+                           "WSL integration para a sua distro, ou reinicie o Docker Desktop. Tento de novo a cada 10 min.",
         "conflict_title": "{engine}: projeto em conflito",
         "conflict_body": "{project} tem unidade aberta nos dois autopilots. Veja os logs.",
         "test_title": "autopilot: teste",
@@ -102,6 +105,9 @@ TEXTS = {
         "all_idle_body": "Every project finished its backlog.",
         "docker_title": "{engine}: Docker problem",
         "docker_body": "Could not bring up the containers of {project} ({reason}). See the log.",
+        "docker_wsl_title": "{engine}: Docker without WSL integration",
+        "docker_wsl_body": "Docker Desktop is running, but WSL cannot reach it. Turn on Settings > Resources > "
+                           "WSL integration for your distro, or restart Docker Desktop. Retrying every 10 min.",
         "conflict_title": "{engine}: project in conflict",
         "conflict_body": "{project} has an open unit in both loops. See the logs.",
         "test_title": "autopilot: test",

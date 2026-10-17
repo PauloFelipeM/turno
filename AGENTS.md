@@ -146,7 +146,10 @@ Each instance runs one engine (`--engine`, `codex` by default; the contract is i
    someone's uncommitted work, only this project waits (`retry_at`, 10 min) and the queue moves on
    to the next one; if Docker is down or compose fails, the whole loop waits 10 min and warns once.
    Docker down: on WSL turno opens Windows Docker Desktop, on macOS `open -a Docker`, and both wait
-   up to 3 min; on Linux it starts nothing and waits;
+   up to 3 min; on Linux it starts nothing and waits. Only one loop opens Docker Desktop at a time
+   (`shared/docker-start.lock`); the other waits for it. On WSL, when Docker Desktop answers on the
+   Windows side (`resources/bin/docker.exe info`) but not inside the distro, the problem is its WSL
+   integration: turno does not open it again, and the log and the alert (`docker_wsl_*`) say what to do;
 6. `run_unit` (saves the state, including `unit_id`, `run` and the `_loop` phase, before starting
    the CLI; with a window, cuts at its end) and `after_unit`: classifies the output (`usage_limit`,
    `error`, `ok` or cut), writes one history line, learns the unit cost (exponential moving average),

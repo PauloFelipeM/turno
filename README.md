@@ -35,7 +35,8 @@ Scripted install: `turno onboard --language en --engines codex,claude --no-ntfy 
 - The Codex CLI and/or Claude Code, logged in with your subscription
 - tmux (the loops run in it, so they outlive the terminal and the panel)
 - git; Docker if your projects need it (turno brings each project's stack up before a unit; when
-  Docker is down it opens Docker Desktop on macOS and WSL, and waits for you on Linux)
+  Docker is down it opens Docker Desktop on macOS and WSL, and waits for you on Linux; on WSL, if
+  Docker Desktop is running but the distro cannot reach it, it tells you to turn on its WSL integration)
 - Optional: the [ntfy](https://ntfy.sh) app on your phone. Without it, decisions wait in the panel
 
 ## How it works
